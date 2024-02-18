@@ -24,7 +24,7 @@ jobs:
       
     - name: Configure Git
       run: |
-        git config --local user.email "abuikis@Inbox.lv"
+        git config --local user.email "abuikis@inbox.lv"
         git config --local user.name "Artufe"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
