@@ -20,19 +20,34 @@ const dataabout = {
     aboutme: "Born in Latvia, I did not get my first computer untill the age of 14. Sharing family computer became a thing of the past, and so did the outside world. Starting with static websites, light hacking and minecraft server hosting, I expanded my knowledge of the inner workings of many systems. Faced with the harsh reality of life after finishing school, I began self learning programming. Starting with python, I slowly built up the skill to start creating projects for others on UpWork. After a company hiring me from a UpWork job, I began expanding my skillset in the real world, by working on and developing solutions. Currently between jobs, I am on a self-improvement journey, and quest to build my own product platform.",
 };
 const worktimeline = [{
-        jobtitle: "Designer of week",
-        where: "YAdfi",
-        date: "2020",
+        jobtitle: "Software dev freelancing",
+        where: "UpWork",
+        date: "2017-2018",
     },
     {
-        jobtitle: "Designer of week",
-        where: "Jamalya",
-        date: "2019",
+        jobtitle: "Jr. Programmer",
+        where: "Bridge Media",
+        date: "2018-2019",
     },
     {
-        jobtitle: "Designer of week",
-        where: "ALquds",
-        date: "2019",
+        jobtitle: "Software developer",
+        where: "Strange Logic",
+        date: "2019-2022",
+    },
+    {
+        jobtitle: "Software developer",
+        where: "Lethub",
+        date: "2022",
+    },
+    {
+        jobtitle: "Lead Software developer",
+        where: "Strange Logic",
+        date: "2023-2024",
+    },
+    {
+        jobtitle: "Full stack freelance developer",
+        where: "UpWork",
+        date: "2024-present",
     },
 ];
 
@@ -122,7 +137,6 @@ const socialprofils = {
     github: "https://github.com/Artufe",
     facebook: "https://www.facebook.com/arturs.buikis/",
     linkedin: "https://www.linkedin.com/in/arthur-buikis-002145151/",
-    twitter: "https://twitter.com",
 };
 export {
     meta,
