@@ -21,7 +21,14 @@ jobs:
 
     - name: Install Dependencies
       run: npm install # or use yarn install if you prefer yarn
-
+      
+    - name: Configure Git
+      run: |
+        git config --local user.email "abuikis@Inbox.lv"
+        git config --local user.name "Artufe"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
     - name: Build and Deploy
       run: npm run deploy # This runs your predeploy and deploy scripts
       env:
