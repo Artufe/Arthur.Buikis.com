@@ -24,8 +24,9 @@ jobs:
       
     - name: Configure Git
       run: |
-        git config --local user.email "abuikis@inbox.lv"
-        git config --local user.name "Artufe"
+        git config --global user.email "abuikis@inbox.lv"
+        git config --global user.name "Artufe"
+        git remote set-url origin https://Artufe:${{ secrets.MY_PASSWORD }}@github.com/Artufe/Artufe.github.io.git
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
