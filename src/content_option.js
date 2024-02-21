@@ -12,7 +12,7 @@ const introdata = {
         third: "I code cool websites",
     },
     description: "Problem solving is my passion and RedBull is my spirit animal.",
-    your_img_url: "https://d2jqrm6oza8nb6.cloudfront.net/previews/c2acbb51-0e05-485d-b0b4-40a708f5a42c.jpg?_jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlIYXNoIjoiZDQ1ZmU4ODY1OTJlZGUxZSIsImJ1Y2tldCI6InJ1bndheS1kYXRhc2V0cyIsInN0YWdlIjoicHJvZCIsImV4cCI6MTcwODM4NzIwMH0.rwbV7Pm5Ns8PDXYjDUC-tK5yGGiOUljX1b5psGRlzhA",
+    your_img_url: "/cover.jpeg",
 };
 
 const dataabout = {
