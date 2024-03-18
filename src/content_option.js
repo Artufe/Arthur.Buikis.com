@@ -101,7 +101,7 @@ const dataportfolio = [{
         link: "https://bytebaltics.com/",
     },
     {
-        img: "https://d2jqrm6oza8nb6.cloudfront.net/previews/c2acbb51-0e05-485d-b0b4-40a708f5a42c.jpg?_jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlIYXNoIjoiZDQ1ZmU4ODY1OTJlZGUxZSIsImJ1Y2tldCI6InJ1bndheS1kYXRhc2V0cyIsInN0YWdlIjoicHJvZCIsImV4cCI6MTcwODM4NzIwMH0.rwbV7Pm5Ns8PDXYjDUC-tK5yGGiOUljX1b5psGRlzhA",
+        img: "https://artufe.github.io/static/media/cover.b7064d1fb60165ffda68.jpeg",
         description: "My personal website, built with React.",
         link: "https://artufe.github.io/",
     },
