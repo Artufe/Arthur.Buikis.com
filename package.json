@@ -2,6 +2,7 @@
     "name": "react-portfolio",
     "version": "0.1.0",
     "private": true,
+    "homepage": "https://arthur.buikis.com",
     "dependencies": {
         "@fortawesome/react-fontawesome": "^0.2.0",
         "bootstrap": "^5.2.3",
