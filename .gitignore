@@ -11,6 +11,9 @@
 # production
 /build
 
+# brainstorming / visual companion
+.superpowers/
+
 # misc
 .DS_Store
 .env.local
