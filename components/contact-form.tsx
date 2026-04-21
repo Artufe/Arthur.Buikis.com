@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import emailjs from 'emailjs-com';
+import emailjs from '@emailjs/browser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,12 +29,18 @@ export function ContactForm() {
           to_name: site.email,
           message: data.get('message'),
         },
-        emailjsConfig.userId
+        { publicKey: emailjsConfig.userId }
       );
       setStatus('success');
       form.reset();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong.');
+      const message =
+        err && typeof err === 'object' && 'text' in err && typeof err.text === 'string'
+          ? err.text
+          : err instanceof Error
+            ? err.message
+            : 'Something went wrong.';
+      setErrorMsg(message);
       setStatus('error');
     }
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ContactForm } from '@/components/contact-form';
 
-vi.mock('emailjs-com', () => ({ default: { send: vi.fn().mockResolvedValue({ status: 200, text: 'OK' }) } }));
+vi.mock('@emailjs/browser', () => ({ default: { send: vi.fn().mockResolvedValue({ status: 200, text: 'OK' }) } }));
 
 describe('ContactForm', () => {
   it('renders name, email, message fields and submit button', () => {
