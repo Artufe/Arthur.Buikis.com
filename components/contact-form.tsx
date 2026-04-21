@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -11,9 +11,11 @@ type Status = 'idle' | 'sending' | 'success' | 'error';
 export function ContactForm() {
   const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const formRef = useRef<HTMLFormElement>(null);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    e.stopPropagation();
     const form = e.currentTarget;
     setStatus('sending');
     try {
@@ -36,13 +38,13 @@ export function ContactForm() {
       setErrorMsg(err instanceof Error ? err.message : 'Something went wrong.');
       setStatus('error');
     }
+    return false;
   }
 
   return (
     <form
+      ref={formRef}
       onSubmit={onSubmit}
-      action={site.formspreeEndpoint}
-      method="POST"
       className="space-y-8"
     >
       {status === 'success' && (
