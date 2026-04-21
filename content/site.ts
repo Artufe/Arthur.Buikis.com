@@ -4,6 +4,7 @@ export const site = {
   url: 'https://arthur.buikis.com',
   brand: 'ab.',
   description: 'Senior full-stack engineer. Ships systems that hold up.',
+  formspreeEndpoint: 'https://formspree.io/f/xaqadvlz',
   nav: [
     { label: 'Work', href: '/#work' },
     { label: 'Building', href: '/building' },
