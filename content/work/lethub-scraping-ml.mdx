@@ -1,0 +1,67 @@
+export const meta = {
+  title: 'Scraping, ML, and the cost of running quietly.',
+  subtitle: 'Lessons from two years on data infrastructure that had to work, not impress.',
+  date: '2024',
+  role: 'Lead developer',
+  stack: 'python · playwright · postgres · ml',
+  duration: '2 years',
+  outcome: '10x throughput, <1% error',
+};
+
+<p>
+Every data platform looks the same in a pitch deck: inputs here, ML there, insights come out.
+The real work is everything those arrows represent — reliability, cost, edge cases, and the
+slow accumulation of technical debt around the one or two things that actually matter.
+</p>
+
+## Context
+
+Between 2022 and 2024 I worked on a real-estate data platform that needed to pull listings
+from hundreds of sources, deduplicate them across fuzzy identifiers, enrich them with
+predicted fields (price band, likely sale date), and surface all of it fast. Most of the
+interesting work wasn't in the model — it was in getting data to the model at the rate it
+needed, and keeping it flowing when a dozen sources silently changed their HTML.
+
+## What I built
+
+A scraping pipeline that scaled from tens of sources to hundreds without a proportional
+increase in on-call noise. Core ideas:
+
+- **Source adapters as contracts, not scripts.** Each source implemented a stable
+  interface — `list_pages()`, `parse_listing()`, `validate()`. Breakage reports landed
+  in one place; source-specific logic stayed isolated.
+- **Playwright over Selenium** for the JS-heavy sources, with aggressive caching of
+  rendered HTML to avoid re-running the most expensive step.
+- **Deduplication as a pipeline stage**, not a query-time lookup. Precomputed canonical
+  IDs using fuzzy-match + blocking keys.
+
+<Callout>
+  The hardest part wasn't the ML — it was the ten systems around it. The model was
+  happy; the ingestion pipeline needed a babysitter.
+</Callout>
+
+## Challenges
+
+Three things kept me up:
+
+1. **Silent schema drift.** A source would change a CSS class name overnight and start
+   returning partial data. Solved with schema snapshots + automatic alerts on missing
+   fields.
+2. **Cost creep.** Running a large Playwright fleet 24/7 is expensive. We dropped costs
+   ~40% by moving to on-demand workers, tight request batching, and killing any scrape
+   that couldn't meaningfully improve freshness.
+3. **Backpressure.** When a source temporarily returned 10x more records, downstream
+   enrichment queues piled up. We added adaptive rate-limiting keyed to queue depth,
+   not source-side signals.
+
+## What I'd do differently
+
+I'd split the deduplication service from ingestion sooner — by the time we did, the
+coupling had made local dev painful. I'd also write the schema-drift detector first,
+not after the second 3 AM page.
+
+## Outcome
+
+Throughput went from ~10k records/day to ~100k/day. Error rate stayed under 1%. The
+most important metric — unscheduled engineer-intervention events per week — dropped to
+under one, which is roughly what "production grade" means for a team of our size.
