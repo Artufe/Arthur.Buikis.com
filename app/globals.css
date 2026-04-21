@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #F9F8F6;
+  --color-bg-muted: #EBE5DE;
+  --color-fg: #1A1A1A;
+  --color-fg-muted: #6C6863;
+  --color-accent: #D4AF37;
+
+  --font-serif: var(--font-fraunces);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+
+  --radius: 0;
+}
+
+:root {
+  --bg: #F9F8F6;
+  --bg-muted: #EBE5DE;
+  --fg: #1A1A1A;
+  --fg-muted: #6C6863;
+  --accent: #D4AF37;
+
+  --dur-fast: 300ms;
+  --dur-base: 500ms;
+  --dur-slow: 700ms;
+  --dur-cinematic: 1500ms;
+  --ease-luxury: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.dark {
+  --bg: #1A1A1A;
+  --bg-muted: #242220;
+  --fg: #F9F8F6;
+  --fg-muted: rgba(249, 248, 246, 0.55);
+  --accent: #D4AF37;
+}
+
+* { border-radius: 0 !important; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+h1, h2, h3, h4, h5, h6 { font-family: var(--font-serif); letter-spacing: -0.02em; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: var(--dur-fast) !important;
+    transform: none !important;
+  }
+}
