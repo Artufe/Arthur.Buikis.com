@@ -10,7 +10,7 @@ export function MetaRow({ items, className }: { items: MetaItem[]; className?: s
   return (
     <dl
       className={cn(
-        'flex flex-wrap gap-x-10 gap-y-6 pt-4 border-t border-[var(--fg)]/12 font-mono text-xs',
+        'flex flex-wrap gap-x-10 gap-y-6 pt-4 border-t border-[var(--rule-strong)] font-mono text-xs',
         className
       )}
     >

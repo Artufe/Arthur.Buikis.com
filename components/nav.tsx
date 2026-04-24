@@ -7,6 +7,7 @@ import { Menu, X } from 'lucide-react';
 import { site } from '@/content/site';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
+import { openPalette } from '@/lib/palette-bus';
 
 export function Nav() {
   const pathname = usePathname();
@@ -27,14 +28,20 @@ export function Nav() {
       className={cn(
         'fixed top-0 left-0 right-0 z-50 transition-colors duration-[var(--dur-base)] border-b',
         scrolled || open
-          ? 'bg-[var(--bg)]/90 backdrop-blur-md border-[var(--fg)]/10'
+          ? 'bg-[var(--bg)]/90 backdrop-blur-md border-[var(--rule)]'
           : 'bg-transparent border-transparent'
       )}
     >
       <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-4 lg:px-16">
-        <Link href="/" className="font-mono text-sm font-medium tracking-tight">{site.brand}</Link>
-        <div className="flex items-center gap-4 md:gap-8">
-          <ul className="hidden md:flex items-center gap-6 text-xs">
+        <Link
+          href="/"
+          className="font-mono text-sm tracking-tight inline-flex items-center gap-2"
+        >
+          <span className="text-[var(--accent)]">§</span>
+          <span>{site.brand}</span>
+        </Link>
+        <div className="flex items-center gap-4 md:gap-6">
+          <ul className="hidden md:flex items-center gap-6 font-mono text-[11px] tracking-wide">
             {site.nav.map((item) => {
               const active = pathname === item.href || (item.href !== '/' && pathname !== null && pathname.startsWith(item.href));
               return (
@@ -43,15 +50,24 @@ export function Nav() {
                     href={item.href}
                     className={cn(
                       'transition-colors duration-[var(--dur-fast)] hover:text-[var(--accent)]',
-                      active ? 'text-[var(--fg)] font-medium' : 'text-[var(--fg-muted)]'
+                      active ? 'text-[var(--fg)]' : 'text-[var(--fg-muted)]'
                     )}
                   >
-                    {item.label}
+                    {item.label.toLowerCase()}
                   </Link>
                 </li>
               );
             })}
           </ul>
+          <button
+            type="button"
+            onClick={() => openPalette()}
+            aria-label="Open command palette"
+            className="hidden md:inline-flex items-center gap-2 font-mono text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
+          >
+            <span className="kbd">/</span>
+            <span>commands</span>
+          </button>
           <ThemeToggle />
           <button
             type="button"
@@ -64,7 +80,7 @@ export function Nav() {
         </div>
       </div>
       {open && (
-        <div className="md:hidden border-t border-[var(--fg)]/10 bg-[var(--bg)]">
+        <div className="md:hidden border-t border-[var(--rule)] bg-[var(--bg)]">
           <ul className="flex flex-col px-6 py-6 gap-4">
             {site.nav.map((item) => (
               <li key={item.href}>

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Button } from '@/components/ui/button';
 import { cvHeadline, cvExperience } from '@/content/cv';
-import { skills } from '@/content/about';
+import { stackGroups } from '@/content/about';
 import { site } from '@/content/site';
 
 export const metadata: Metadata = {
@@ -49,13 +49,13 @@ export default function CVPage() {
         </ul>
       </section>
 
-      <section className="mt-16 pt-8 border-t border-[var(--fg)]/10">
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--fg-muted)]">Stack</p>
+      <section className="mt-16 pt-8 border-t border-[var(--rule)]">
+        <p className="lbl">Stack</p>
         <div className="mt-6 grid gap-6 md:grid-cols-4">
-          {Object.entries(skills).map(([group, items]) => (
-            <div key={group}>
-              <p className="font-serif text-lg mb-2">{group}</p>
-              <p className="font-mono text-xs text-[var(--fg-muted)] leading-[1.7]">{items.join(' · ')}</p>
+          {stackGroups.map((g) => (
+            <div key={g.title}>
+              <p className="font-serif text-lg mb-2">{g.title}</p>
+              <p className="font-mono text-xs text-[var(--fg-muted)] leading-[1.7]">{g.items.join(' · ')}</p>
             </div>
           ))}
         </div>

@@ -6,6 +6,7 @@ import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
 import { Gridlines } from '@/components/gridlines';
 import { Grain } from '@/components/grain';
+import { CommandPalette } from '@/components/command-palette';
 import { site } from '@/content/site';
 import './globals.css';
 
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Nav />
           <main className="relative z-10 pt-20">{children}</main>
           <Footer />
+          <CommandPalette />
         </ThemeProvider>
       </body>
     </html>

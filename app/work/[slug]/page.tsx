@@ -40,10 +40,10 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
 
   return (
     <article className="mx-auto max-w-[720px] px-6 py-16 lg:py-24">
-      <Link href="/#work" className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors">
+      <Link href="/#work" className="lbl hover:text-[var(--accent)] transition-colors">
         ← All work
       </Link>
-      <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--fg-muted)]">Case study · {meta.date}</p>
+      <p className="mt-8 lbl">Case study · {meta.date}</p>
       <h1 className="mt-4 font-serif text-[clamp(36px,5vw,56px)] leading-[1.02] tracking-tight">{meta.title}</h1>
       <p className="mt-4 font-serif italic text-xl text-[var(--fg-muted)] leading-snug">{meta.subtitle}</p>
       <MetaRow
