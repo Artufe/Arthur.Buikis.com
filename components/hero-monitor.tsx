@@ -76,10 +76,10 @@ function formatAge(ms: number): string {
 function buildChips(g: GitStats, now: number): Chip[] {
   const repoChip: Chip = {
     label: 'Repo',
-    value: 'artufe.github.io',
+    value: "Art's Site",
     meta: 'source · public',
     tone: 'amber',
-    href: 'https://github.com/Artufe/Artufe.github.io',
+    href: 'https://github.com/Artufe/Arts-site',
   };
   const uptimeChip: Chip = {
     label: 'Uptime',

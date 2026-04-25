@@ -33,7 +33,7 @@ export const commands: Command[] = [
   // Meta
   { id: 'download-cv', label: 'download cv', group: 'Meta', arrow: '↓', hint: 'cv.pdf', action: { type: 'download', href: '/cv.pdf', filename: 'arthur-buikis-cv.pdf' } },
   { id: 'copy-email', label: 'copy email', group: 'Meta', arrow: '≡', hint: site.email, action: { type: 'copy', value: site.email } },
-  { id: 'source', label: 'source', group: 'Meta', arrow: '↗', hint: 'github repo', action: { type: 'external', href: 'https://github.com/Artufe/Artufe.github.io' }, keywords: ['github', 'repo'] },
+  { id: 'source', label: 'source', group: 'Meta', arrow: '↗', hint: 'github repo', action: { type: 'external', href: 'https://github.com/Artufe/Arts-site' }, keywords: ['github', 'repo'] },
   { id: 'linkedin', label: 'linkedin', group: 'Meta', arrow: '↗', hint: 'profile', action: { type: 'external', href: 'https://www.linkedin.com/in/arthur-buikis-002145151/' } },
   { id: 'whoami', label: 'whoami', group: 'Meta', arrow: '?', hint: 'inline', action: { type: 'whoami' } },
   { id: 'help', label: 'help', group: 'Meta', arrow: '?', hint: 'shortcut keys', action: { type: 'help' } },
