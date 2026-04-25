@@ -10,6 +10,7 @@ type Chip = {
   value: string;
   meta: string;
   tone: Tone;
+  href?: string;
 };
 
 function toneDotClass(tone: Tone) {
@@ -45,7 +46,13 @@ function buildChips(g: GitStats): Chip[] {
   return [
     deploy,
     activity,
-    { label: 'Repo', value: 'artufe.github.io', meta: 'source · public', tone: 'amber' },
+    {
+      label: 'Repo',
+      value: 'artufe.github.io',
+      meta: 'source · public',
+      tone: 'amber',
+      href: 'https://github.com/Artufe/Artufe.github.io',
+    },
     { label: 'Uptime', value: '99.9% · 30d', meta: 'cdn · no trackers', tone: 'neutral' },
   ];
 }
@@ -67,16 +74,39 @@ export function HeroMonitor({ gitStats }: { gitStats: GitStats }) {
       </div>
 
       <div className="grid grid-cols-2 gap-px bg-[var(--rule-strong)]">
-        {chips.map((chip) => (
-          <div key={chip.label} className="bg-[var(--bg)] p-3.5 flex flex-col gap-1.5">
-            <span className="flex items-center gap-2 lbl">
-              <span className={toneDotClass(chip.tone)} />
-              {chip.label}
-            </span>
-            <span className="font-mono text-[12px] text-[var(--fg)] leading-snug">{chip.value}</span>
-            <span className="font-mono text-[10px] text-[var(--fg-faint)]">{chip.meta}</span>
-          </div>
-        ))}
+        {chips.map((chip) => {
+          const inner = (
+            <>
+              <span className="flex items-center gap-2 lbl">
+                <span className={toneDotClass(chip.tone)} />
+                {chip.label}
+              </span>
+              <span className="font-mono text-[12px] text-[var(--fg)] leading-snug group-hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]">
+                {chip.value}
+                {chip.href && <span className="ml-1 text-[var(--fg-faint)] group-hover:text-[var(--accent)]">↗</span>}
+              </span>
+              <span className="font-mono text-[10px] text-[var(--fg-faint)]">{chip.meta}</span>
+            </>
+          );
+          if (chip.href) {
+            return (
+              <a
+                key={chip.label}
+                href={chip.href}
+                target="_blank"
+                rel="noreferrer"
+                className="group bg-[var(--bg)] p-3.5 flex flex-col gap-1.5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+              >
+                {inner}
+              </a>
+            );
+          }
+          return (
+            <div key={chip.label} className="bg-[var(--bg)] p-3.5 flex flex-col gap-1.5">
+              {inner}
+            </div>
+          );
+        })}
       </div>
 
       <div className="border-t border-[var(--rule-strong)] pt-3.5">
