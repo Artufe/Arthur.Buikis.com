@@ -6,6 +6,7 @@ import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
 import { Gridlines } from '@/components/gridlines';
 import { Grain } from '@/components/grain';
+import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
 import { site } from '@/content/site';
 import './globals.css';
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${inter.variable} ${jetBrainsMono.variable}`}>
       <body className="min-h-screen">
         <ThemeProvider>
+          <HeroShader />
           <Gridlines />
           <Grain />
           <Nav />
