@@ -13,7 +13,10 @@ export function BuildingTeaser() {
             </p>
           </div>
           <div>
-            <div className="border border-[var(--rule-strong)] px-4 py-3.5 max-w-[440px] flex flex-col gap-1">
+            <div
+              className="border border-[var(--rule-strong)] bg-[var(--card)] px-4 py-3.5 max-w-[440px] flex flex-col gap-1"
+              style={{ boxShadow: 'var(--panel-shadow)' }}
+            >
               <span className="flex items-center gap-2 lbl">
                 <span className="amber-dot" />
                 Status

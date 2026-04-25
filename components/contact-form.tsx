@@ -44,7 +44,10 @@ export function ContactForm() {
   }
 
   return (
-    <div className="border border-[var(--rule-strong)] bg-[var(--card)] p-6 sm:p-8">
+    <div
+      className="border border-[var(--rule-strong)] bg-[var(--card)] p-6 sm:p-8"
+      style={{ boxShadow: 'var(--panel-shadow)' }}
+    >
       <div className="flex items-baseline justify-between border-b border-[var(--rule)] pb-3.5 mb-6">
         <span className="lbl">
           <span className="text-[var(--accent)] mr-2">$</span>compose_message

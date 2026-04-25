@@ -12,7 +12,7 @@ export function CtaSection() {
           Get in touch
         </p>
         <h2 className="mt-6 font-serif text-[44px] lg:text-[52px] leading-[1.05] tracking-tight font-medium max-w-[18ch]">
-          Hiring? Or got something<br />that needs to hold up?
+          Got something<br />that needs to hold up?
         </h2>
         <div className="mt-10 flex flex-wrap items-center gap-x-9 gap-y-5">
           <a

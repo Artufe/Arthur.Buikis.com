@@ -30,7 +30,10 @@ export function HeroMonitor() {
   useEffect(() => setMounted(true), []);
 
   return (
-    <div className="relative border border-[var(--rule-strong)] bg-[var(--card)] p-5 sm:p-6 flex flex-col gap-4 min-h-[320px]">
+    <div
+      className="relative border border-[var(--rule-strong)] bg-[var(--card)] p-5 sm:p-6 flex flex-col gap-4 min-h-[320px]"
+      style={{ boxShadow: 'var(--panel-shadow)' }}
+    >
       <div className="flex items-center justify-between">
         <span className="lbl">System</span>
         <span className="inline-flex items-center gap-2 font-mono text-[10px] text-[var(--fg-muted)]">
