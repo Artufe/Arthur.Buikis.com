@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { HeroMonitor } from '@/components/hero-monitor';
+import { getGitStats } from '@/lib/git-stats';
 
 export function Hero() {
+  const gitStats = getGitStats();
   return (
     <section className="relative mx-auto max-w-[1600px] px-6 pt-16 pb-20 lg:px-16 lg:pt-24 lg:pb-28">
       <div className="grid gap-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-16">
@@ -52,7 +54,7 @@ export function Hero() {
         </div>
 
         <div className="lg:pt-2 fade-in-late">
-          <HeroMonitor />
+          <HeroMonitor gitStats={gitStats} />
         </div>
       </div>
     </section>
