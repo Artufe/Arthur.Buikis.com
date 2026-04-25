@@ -4,7 +4,7 @@
  * Single fragment-shader plasma effect: orbiting wave sources interfere on a
  * dark warm-neutral palette; the cursor is its own wave emitter; clicks drop
  * transient pulses. Tuned for the artufe.github.io hero: minimal intensity,
- * slow drift, almost no grain, mid hue shift toward the site's amber accent.
+ * slow drift, almost no grain.
  *
  * Usage:
  *   <canvas id="hero-bg" style="position:fixed;inset:0;width:100%;height:100%;z-index:-1"></canvas>
@@ -12,7 +12,13 @@
  *   <script>HeroShader.mount(document.getElementById('hero-bg'));</script>
  *
  * Or with options:
- *   HeroShader.mount(canvas, { intensity: 0.55, speed: 0.35, grain: 0.012, hue: 18 });
+ *   HeroShader.mount(canvas, {
+ *     intensity: 0.55, speed: 0.35, grain: 0.012,
+ *     seed: 0,                          // per-mount phase offset
+ *     deep:   [0.02, 0.025, 0.035],     // background / vignette color
+ *     mid:    [0.06, 0.09, 0.14],       // midtone
+ *     accent: [0.95, 0.72, 0.35],       // bright color in highlights
+ *   });
  *
  * No deps. ~3KB minified. Auto-pauses when offscreen / tab hidden.
  */
@@ -110,7 +116,7 @@
       .forEach(k => u[k] = gl.getUniformLocation(prog, k));
 
     // Defaults — tuned for hero use: lowest intensity, slow speed, almost no
-    // grain, mid hue shift (toward the site's amber accent).
+    // grain. Palette defaults to the prior hardcoded amber-on-near-black.
     const state = {
       intensity: opts.intensity ?? 0.55,
       speed:     opts.speed     ?? 0.35,
