@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { openPalette } from '@/lib/palette-bus';
 import type { GitStats } from '@/lib/git-stats';
 
@@ -13,23 +14,105 @@ type Chip = {
   href?: string;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TICK_MS = 60_000;
+const SERVER_TIME = -1;
+
+let clientNow: number | null = null;
+let intervalId: ReturnType<typeof setInterval> | null = null;
+const listeners = new Set<() => void>();
+
+function notify() {
+  listeners.forEach((fn) => fn());
+}
+
+function subscribe(onChange: () => void) {
+  listeners.add(onChange);
+  if (clientNow === null) {
+    clientNow = Date.now();
+    queueMicrotask(notify);
+  }
+  if (intervalId === null) {
+    intervalId = setInterval(() => {
+      clientNow = Date.now();
+      notify();
+    }, TICK_MS);
+  }
+  return () => {
+    listeners.delete(onChange);
+    if (listeners.size === 0 && intervalId !== null) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  };
+}
+
+function getSnapshot() {
+  return clientNow ?? SERVER_TIME;
+}
+
+function getServerSnapshot() {
+  return SERVER_TIME;
+}
+
 function toneDotClass(tone: Tone) {
   if (tone === 'live') return 'live-dot';
   if (tone === 'amber') return 'amber-dot';
   return 'inline-block h-[6px] w-[6px] rounded-full bg-[var(--fg-faint)]';
 }
 
-function buildChips(g: GitStats): Chip[] {
-  const deploy: Chip = g.available
-    ? {
-        label: 'Deploy',
-        value: g.shortSha,
-        meta: g.ageLabel ? `${g.ageLabel} · master` : 'master',
-        tone: g.isStale ? 'amber' : 'live',
-      }
-    : { label: 'Deploy', value: 'master', meta: 'github pages · auto', tone: 'live' };
+function formatAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const months = Math.floor(days / 30);
+  if (months >= 1) return `${months}mo ago`;
+  if (days >= 1) return `${days}d ago`;
+  if (hours >= 1) return `${hours}h ago`;
+  if (minutes >= 1) return `${minutes}m ago`;
+  return 'just now';
+}
 
-  const activity: Chip = g.isStale || !g.available
+function buildChips(g: GitStats, now: number): Chip[] {
+  const repoChip: Chip = {
+    label: 'Repo',
+    value: 'artufe.github.io',
+    meta: 'source · public',
+    tone: 'amber',
+    href: 'https://github.com/Artufe/Artufe.github.io',
+  };
+  const uptimeChip: Chip = {
+    label: 'Uptime',
+    value: '99.9% · 30d',
+    meta: 'cdn · no trackers',
+    tone: 'neutral',
+  };
+
+  if (!g.available) {
+    return [
+      { label: 'Deploy', value: 'master', meta: 'github pages · auto', tone: 'live' },
+      { label: 'Activity', value: 'quiet here lately', meta: 'still around · email me', tone: 'amber' },
+      repoChip,
+      uptimeChip,
+    ];
+  }
+
+  const ageMs = Math.max(0, now - new Date(g.commitIso).getTime());
+  const isStale = ageMs > 30 * DAY_MS;
+  const cutoff = now - 30 * DAY_MS;
+  const commitsLast30d = g.recentCommitIsos.filter((iso) => {
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) && t >= cutoff;
+  }).length;
+
+  const deploy: Chip = {
+    label: 'Deploy',
+    value: g.shortSha,
+    meta: `${formatAge(ageMs)} · master`,
+    tone: isStale ? 'amber' : 'live',
+  };
+
+  const activity: Chip = isStale
     ? {
         label: 'Activity',
         value: 'quiet here lately',
@@ -38,27 +121,19 @@ function buildChips(g: GitStats): Chip[] {
       }
     : {
         label: 'Activity',
-        value: `${g.commitsLast30d} commit${g.commitsLast30d === 1 ? '' : 's'} · 30d`,
+        value: `${commitsLast30d} commit${commitsLast30d === 1 ? '' : 's'} · 30d`,
         meta: g.latestSubject || 'commits trickle in',
         tone: 'live',
       };
 
-  return [
-    deploy,
-    activity,
-    {
-      label: 'Repo',
-      value: 'artufe.github.io',
-      meta: 'source · public',
-      tone: 'amber',
-      href: 'https://github.com/Artufe/Artufe.github.io',
-    },
-    { label: 'Uptime', value: '99.9% · 30d', meta: 'cdn · no trackers', tone: 'neutral' },
-  ];
+  return [deploy, activity, repoChip, uptimeChip];
 }
 
 export function HeroMonitor({ gitStats }: { gitStats: GitStats }) {
-  const chips = buildChips(gitStats);
+  const t = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const ssrNow = gitStats.builtAtIso ? new Date(gitStats.builtAtIso).getTime() : Date.now();
+  const now = t === SERVER_TIME ? ssrNow : t;
+  const chips = buildChips(gitStats, now);
 
   return (
     <div

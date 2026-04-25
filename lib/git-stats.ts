@@ -2,33 +2,21 @@ import { execSync } from 'node:child_process';
 
 export type GitStats = {
   shortSha: string;
-  ageLabel: string;
-  isStale: boolean;
-  commitsLast30d: number;
   latestSubject: string;
+  commitIso: string;
+  recentCommitIsos: string[];
+  builtAtIso: string;
   available: boolean;
 };
 
 const FALLBACK: GitStats = {
   shortSha: 'master',
-  ageLabel: '',
-  isStale: true,
-  commitsLast30d: 0,
   latestSubject: '',
+  commitIso: '',
+  recentCommitIsos: [],
+  builtAtIso: '',
   available: false,
 };
-
-function formatAge(ms: number): string {
-  const minutes = Math.floor(ms / 60_000);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  const months = Math.floor(days / 30);
-  if (months >= 1) return `${months}mo ago`;
-  if (days >= 1) return `${days}d ago`;
-  if (hours >= 1) return `${hours}h ago`;
-  if (minutes >= 1) return `${minutes}m ago`;
-  return 'just now';
-}
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -42,30 +30,26 @@ function git(args: string): string {
 export function getGitStats(): GitStats {
   try {
     const shortSha = git('rev-parse --short HEAD');
-    const dateIso = git('log -1 --format=%cI');
+    const commitIso = git('log -1 --format=%cI');
     const subject = git('log -1 --format=%s');
+    if (Number.isNaN(new Date(commitIso).getTime())) return FALLBACK;
 
-    const date = new Date(dateIso);
-    if (Number.isNaN(date.getTime())) return FALLBACK;
-
-    const ageMs = Date.now() - date.getTime();
-    const days = ageMs / (1000 * 60 * 60 * 24);
-    const isStale = days > 30;
-
-    let commitsLast30d = 0;
+    let recentCommitIsos: string[] = [];
     try {
-      const log = git('log --since=30.days --pretty=format:%H');
-      commitsLast30d = log.length > 0 ? log.split('\n').length : 0;
+      // Wider buffer than the 30d window so the rolling count stays accurate
+      // even when the page is viewed weeks after the most recent deploy.
+      const log = git('log --since=60.days --pretty=format:%cI');
+      recentCommitIsos = log.length > 0 ? log.split('\n') : [];
     } catch {
-      commitsLast30d = 0;
+      recentCommitIsos = [];
     }
 
     return {
       shortSha,
-      ageLabel: formatAge(ageMs),
-      isStale,
-      commitsLast30d,
       latestSubject: truncate(subject, 36),
+      commitIso,
+      recentCommitIsos,
+      builtAtIso: new Date().toISOString(),
       available: true,
     };
   } catch {
