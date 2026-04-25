@@ -7,7 +7,8 @@ export type CommandAction =
   | { type: 'theme'; value: 'light' | 'dark' | 'system' }
   | { type: 'copy'; value: string }
   | { type: 'whoami' }
-  | { type: 'help' };
+  | { type: 'help' }
+  | { type: 'plasma'; value: 'calm' | 'vivid' };
 
 export type CommandGroup = 'Navigate' | 'Meta' | 'Theme';
 
@@ -37,6 +38,8 @@ export const commands: Command[] = [
   { id: 'linkedin', label: 'linkedin', group: 'Meta', arrow: '↗', hint: 'profile', action: { type: 'external', href: 'https://www.linkedin.com/in/arthur-buikis-002145151/' } },
   { id: 'whoami', label: 'whoami', group: 'Meta', arrow: '?', hint: 'inline', action: { type: 'whoami' } },
   { id: 'help', label: 'help', group: 'Meta', arrow: '?', hint: 'shortcut keys', action: { type: 'help' } },
+  { id: 'plasma-calm',  label: 'plasma calm',  group: 'Meta', arrow: '◌', hint: 'low intensity',     action: { type: 'plasma', value: 'calm'  }, keywords: ['shader', 'background'] },
+  { id: 'plasma-vivid', label: 'plasma vivid', group: 'Meta', arrow: '●', hint: 'default intensity', action: { type: 'plasma', value: 'vivid' }, keywords: ['shader', 'background'] },
 
   // Theme
   { id: 'theme-light', label: 'theme light', group: 'Theme', arrow: '○', action: { type: 'theme', value: 'light' } },

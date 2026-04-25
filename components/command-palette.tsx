@@ -13,6 +13,7 @@ import {
 } from '@/lib/commands';
 import { fuzzyMatch, type FuzzyMatch } from '@/lib/fuzzy';
 import { onPaletteClose, onPaletteOpen } from '@/lib/palette-bus';
+import { setPlasmaMode } from '@/lib/plasma-bus';
 
 type Inline =
   | { kind: 'whoami' }
@@ -119,6 +120,10 @@ export function CommandPalette() {
           break;
         case 'help':
           setInline({ kind: 'help' });
+          break;
+        case 'plasma':
+          setPlasmaMode(cmd.action.value);
+          close();
           break;
       }
     },
