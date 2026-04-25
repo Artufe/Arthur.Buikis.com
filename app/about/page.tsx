@@ -68,7 +68,7 @@ export default function AboutPage() {
           </p>
         </div>
         <div>
-          <p className="lbl">At a glance</p>
+          <h2 className="lbl">At a glance</h2>
           <ul className="mt-4 font-mono text-[12px] text-[var(--fg)]/80">
             {atAGlance.map((row) => (
               <li
@@ -85,7 +85,7 @@ export default function AboutPage() {
 
       {/* TIMELINE */}
       <section className="px-6 py-14 lg:px-16 lg:py-16 border-t border-[var(--rule)]">
-        <p className="lbl">Where I&apos;ve been</p>
+        <h2 className="lbl">Where I&apos;ve been</h2>
 
         <div className="mt-7 border border-[var(--rule-strong)] px-4 py-3.5 flex flex-wrap gap-x-7 gap-y-3 font-mono text-[11px]">
           <div>
@@ -130,11 +130,11 @@ export default function AboutPage() {
 
       {/* STACK */}
       <section className="px-6 py-14 lg:px-16 lg:py-16 border-t border-[var(--rule)]">
-        <p className="lbl">Stack · what I actually reach for</p>
+        <h2 className="lbl">Stack · what I actually reach for</h2>
         <div className="mt-8 grid gap-10 md:grid-cols-2 lg:grid-cols-4">
           {stackGroups.map((g) => (
             <div key={g.title}>
-              <h4 className="font-serif text-[19px] tracking-tight font-medium mb-3">{g.title}</h4>
+              <h3 className="font-serif text-[19px] tracking-tight font-medium mb-3">{g.title}</h3>
               <ul className="font-mono text-[12px] text-[var(--fg)]/80 leading-[1.9]">
                 {g.items.map((i) => (
                   <li key={i}>{i}</li>
@@ -150,12 +150,12 @@ export default function AboutPage() {
 
       {/* SIDE THINGS */}
       <section className="px-6 py-14 lg:px-16 lg:py-16 border-t border-[var(--rule)]">
-        <p className="lbl">Side things · what I&apos;ve built on my own time</p>
+        <h2 className="lbl">Side things · what I&apos;ve built on my own time</h2>
         <div className="mt-8 grid gap-8 md:grid-cols-3">
           {sideThings.map((p) => (
             <div key={p.title} className="border-t border-[var(--rule-strong)] pt-5">
               <p className="font-mono text-[10px] text-[var(--fg-muted)] mb-3">{p.kind}</p>
-              <h5 className="font-serif text-[22px] tracking-tight font-medium mb-3">{p.title}</h5>
+              <h3 className="font-serif text-[22px] tracking-tight font-medium mb-3">{p.title}</h3>
               <p className="text-[13px] leading-[1.65] text-[var(--fg-muted)] mb-3.5">{p.body}</p>
               <p className="font-mono text-[10px] text-[var(--fg-muted)]">{p.meta}</p>
               {p.link && (
@@ -179,7 +179,7 @@ export default function AboutPage() {
       <section className="px-6 py-14 lg:px-16 lg:py-16 border-t border-[var(--rule)] bg-[var(--card)]">
         <div className="grid gap-14 lg:grid-cols-[1fr_2fr]">
           <div>
-            <p className="lbl">What I don&apos;t do</p>
+            <h2 className="lbl">What I don&apos;t do</h2>
             <p className="mt-3 font-serif text-[28px] leading-[1.15] tracking-tight">A short anti-list.</p>
           </div>
           <ul>
@@ -198,7 +198,7 @@ export default function AboutPage() {
 
       {/* BELIEFS */}
       <section className="px-6 py-14 lg:px-16 lg:py-16 border-t border-[var(--rule)]">
-        <p className="lbl">What I believe</p>
+        <h2 className="lbl">What I believe</h2>
         <div className="mt-8 grid gap-8 md:grid-cols-2 max-w-[1100px]">
           {beliefs.map((b, i) => (
             <p

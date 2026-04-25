@@ -19,8 +19,8 @@
   --bg: #F7F5F1;
   --bg-muted: #EBE5DE;
   --fg: #0F0F0F;
-  --fg-muted: rgba(15, 15, 15, 0.58);
-  --fg-faint: rgba(15, 15, 15, 0.38);
+  --fg-muted: rgba(15, 15, 15, 0.66);
+  --fg-faint: rgba(15, 15, 15, 0.58);
   --rule: rgba(15, 15, 15, 0.10);
   --rule-strong: rgba(15, 15, 15, 0.22);
   --accent: #B25C0D;
@@ -42,8 +42,8 @@
   --bg: #0F0F0F;
   --bg-muted: #17161480;
   --fg: #F5F3EF;
-  --fg-muted: rgba(245, 243, 239, 0.62);
-  --fg-faint: rgba(245, 243, 239, 0.38);
+  --fg-muted: rgba(245, 243, 239, 0.7);
+  --fg-faint: rgba(245, 243, 239, 0.55);
   --rule: rgba(245, 243, 239, 0.08);
   --rule-strong: rgba(245, 243, 239, 0.18);
   --accent: #FFB84D;

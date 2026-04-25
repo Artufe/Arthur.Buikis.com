@@ -8,9 +8,9 @@ export function BuildingTeaser() {
         <div className="grid gap-14 lg:grid-cols-[1fr_1.5fr] items-start">
           <div>
             <p className="lbl">Currently</p>
-            <p className="mt-3 font-serif text-[28px] leading-[1.12] tracking-tight">
+            <h2 className="mt-3 font-serif text-[28px] leading-[1.12] tracking-tight font-medium">
               Building something<br />on the side.
-            </p>
+            </h2>
           </div>
           <div>
             <div

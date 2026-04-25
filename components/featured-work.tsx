@@ -142,11 +142,11 @@ export function FeaturedWork() {
         <div className="grid gap-14 lg:grid-cols-[1fr_2.5fr]">
           <div>
             <p className="lbl">Selected work</p>
-            <p className="mt-3 font-serif text-[30px] leading-[1.12] tracking-tight">
+            <h2 className="mt-3 font-serif text-[30px] leading-[1.12] tracking-tight font-medium">
               Cases —<br />
               still writing<br />
               them.
-            </p>
+            </h2>
             <p className="mt-5 font-mono text-[10px] text-[var(--fg-faint)] leading-[1.6]">
               Three shown.
               <br />
