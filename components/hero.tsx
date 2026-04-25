@@ -5,7 +5,7 @@ export function Hero() {
   return (
     <section className="relative mx-auto max-w-[1600px] px-6 pt-16 pb-20 lg:px-16 lg:pt-24 lg:pb-28">
       <div className="grid gap-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-16">
-        <div>
+        <div className="stagger">
           <div className="font-mono text-[11px] text-[var(--fg-muted)] tracking-wide" aria-hidden>
             <span className="text-[var(--accent)] mr-2">$</span>whoami --verbose
           </div>
@@ -51,7 +51,7 @@ export function Hero() {
           </div>
         </div>
 
-        <div className="lg:pt-2">
+        <div className="lg:pt-2 fade-in-late">
           <HeroMonitor />
         </div>
       </div>

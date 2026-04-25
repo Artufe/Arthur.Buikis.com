@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { openPalette } from '@/lib/palette-bus';
 
 type Tone = 'live' | 'amber' | 'neutral';
@@ -26,9 +25,6 @@ function toneDotClass(tone: Tone) {
 }
 
 export function HeroMonitor() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
   return (
     <div
       className="relative border border-[var(--rule-strong)] bg-[var(--card)] p-5 sm:p-6 flex flex-col gap-4 min-h-[320px]"
@@ -66,10 +62,9 @@ export function HeroMonitor() {
         type="button"
         onClick={() => openPalette()}
         aria-label="Open command palette"
-        suppressHydrationWarning
         className="absolute bottom-4 right-4 inline-flex items-center gap-2 font-mono text-[10px] text-[var(--fg-faint)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
       >
-        <span className="kbd">{mounted && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : '/'}</span>
+        <span className="kbd">/</span>
         commands
       </button>
     </div>
