@@ -52,22 +52,22 @@
       vec2 p = (uv - 0.5);
       p.x *= uRes.x/uRes.y;
 
-      float t = uTime * 0.6 * uSpeed;
+      float t = uTime * 0.35 * uSpeed;
 
       float v = 0.0;
       for(int i=0;i<4;i++){
         float fi = float(i);
         vec2 s = vec2(cos(t*0.4 + fi*1.7 + uSeed), sin(t*0.5 + fi*2.3 + uSeed*1.3)) * 0.35;
-        v += sin(length(p - s)*14.0 - t*2.0 + fi);
+        v += sin(length(p - s)*10.0 - t*1.2 + fi);
       }
 
       vec2 m = uMouse;
       m.x = (m.x - 0.5) * (uRes.x/uRes.y);
       m.y -= 0.5;
-      v += sin(length(p - m)*22.0 - t*3.0) * 1.4;
+      v += sin(length(p - m)*16.0 - t*1.4) * 0.45;
 
       vec2 cp = vec2((uClickPos.x-0.5)*uRes.x/uRes.y, uClickPos.y-0.5);
-      v += sin(length(p - cp)*30.0 - uTime*8.0) * uClick * 1.6;
+      v += sin(length(p - cp)*24.0 - uTime*4.0) * uClick * 0.7;
 
       v /= 6.0;
 
@@ -75,8 +75,8 @@
       float b = 0.5 + 0.5*cos(v*PI*2.0 - t*0.7);
 
       vec3 col = mix(uDeep, uMid, a);
-      col = mix(col, uAccent, pow(b, 3.0) * 0.85 * uIntensity);
-      col += exp(-length(p-m)*length(p-m)*10.0) * uAccent * 0.2 * uIntensity;
+      col = mix(col, uAccent, pow(b, 4.0) * 0.55 * uIntensity);
+      col += exp(-length(p-m)*length(p-m)*14.0) * uAccent * 0.08 * uIntensity;
 
       vec2 q = uv - 0.5;
       col = mix(uDeep, col, smoothstep(0.95, 0.25, dot(q,q)));

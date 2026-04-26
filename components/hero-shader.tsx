@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import Script from 'next/script';
 import { getPlasmaMode, onPlasmaModeChange, type PlasmaMode } from '@/lib/plasma-bus';
+
+const SHADER_EXCLUDED_ROUTES = ['/cv', '/contact'];
 
 type Vec3 = [number, number, number];
 type ShaderOpts = Partial<{
@@ -28,17 +31,20 @@ const PALETTES = {
     deep:      [0.059, 0.059, 0.059] as Vec3, // #0F0F0F
     mid:       [0.102, 0.122, 0.180] as Vec3, // #1A1F2E
     accent:    [1.000, 0.722, 0.302] as Vec3, // #FFB84D
-    intensity: 0.55,
+    intensity: 0.30,
   },
   light: {
     deep:      [0.969, 0.961, 0.945] as Vec3, // #F7F5F1
     mid:       [0.922, 0.898, 0.871] as Vec3, // #EBE5DE
     accent:    [0.698, 0.361, 0.051] as Vec3, // #B25C0D
-    intensity: 0.32,
+    intensity: 0.18,
   },
 } as const;
 
 const CALM_FACTOR = 0.55;
+const BASE_SPEED = 0.18;
+const BASE_GRAIN = 0.006;
+const PEAK_OPACITY = 0.7;
 
 function applyState(handle: HeroShaderHandle, theme: string | undefined, mode: PlasmaMode) {
   const palette = theme === 'light' ? PALETTES.light : PALETTES.dark;
@@ -51,11 +57,20 @@ function applyState(handle: HeroShaderHandle, theme: string | undefined, mode: P
   });
   // Reduced-motion override runs LAST so it always wins, regardless of theme/plasma changes.
   if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-    handle.set({ speed: 0, intensity: 0.35 });
+    handle.set({ speed: 0, intensity: 0.18 });
   }
 }
 
 export function HeroShader() {
+  const pathname = usePathname();
+  const excluded = SHADER_EXCLUDED_ROUTES.some(
+    (r) => pathname === r || pathname.startsWith(`${r}/`),
+  );
+  if (excluded) return null;
+  return <HeroShaderMount />;
+}
+
+function HeroShaderMount() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<HeroShaderHandle | null>(null);
   const modeRef = useRef<PlasmaMode>('vivid');
@@ -91,7 +106,7 @@ export function HeroShader() {
       if (raf !== null) return;
       raf = requestAnimationFrame(() => {
         const r = Math.max(0, Math.min(1, 1 - window.scrollY / heroH));
-        canvas.style.opacity = String(r);
+        canvas.style.opacity = String(r * PEAK_OPACITY);
         raf = null;
       });
     };
@@ -124,6 +139,8 @@ export function HeroShader() {
           modeRef.current = getPlasmaMode();
           handleRef.current = window.HeroShader.mount(canvasRef.current, {
             seed: Math.random() * 6.2831853,
+            speed: BASE_SPEED,
+            grain: BASE_GRAIN,
           });
           applyState(handleRef.current, resolvedTheme, modeRef.current);
         }}

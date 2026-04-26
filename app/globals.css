@@ -27,7 +27,7 @@
   --accent-glow: rgba(178, 92, 13, 0.35);
   --live: #1F7A4C;
   --live-glow: rgba(31, 122, 76, 0.35);
-  --card: rgba(15, 15, 15, 0.04);
+  --card: #F0EBE4;
   --panel-shadow: 0 1px 2px rgba(15, 15, 15, 0.04), 0 8px 24px rgba(15, 15, 15, 0.06);
 
   --dur-fast: 200ms;
@@ -40,7 +40,7 @@
 
 .dark {
   --bg: #0F0F0F;
-  --bg-muted: #17161480;
+  --bg-muted: #171614;
   --fg: #F5F3EF;
   --fg-muted: rgba(245, 243, 239, 0.7);
   --fg-faint: rgba(245, 243, 239, 0.55);
@@ -50,7 +50,7 @@
   --accent-glow: rgba(255, 184, 77, 0.5);
   --live: #67E8A2;
   --live-glow: rgba(103, 232, 162, 0.55);
-  --card: rgba(245, 243, 239, 0.02);
+  --card: #13110F;
   --panel-shadow: none;
 }
 
