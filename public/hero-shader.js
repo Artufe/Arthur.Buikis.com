@@ -130,20 +130,38 @@
       clickPos: [0.5, 0.5],
     };
 
-    const onMove = (e) => {
+    const setMouseAt = (clientX, clientY) => {
       const r = canvas.getBoundingClientRect();
       state.mouse = [
-        (e.clientX - r.left) / r.width,
-        1 - (e.clientY - r.top) / r.height,
+        (clientX - r.left) / r.width,
+        1 - (clientY - r.top) / r.height,
       ];
     };
-    const onDown = (e) => {
+    const setClickAt = (clientX, clientY) => {
       const r = canvas.getBoundingClientRect();
       state.clickPos = [
-        (e.clientX - r.left) / r.width,
-        1 - (e.clientY - r.top) / r.height,
+        (clientX - r.left) / r.width,
+        1 - (clientY - r.top) / r.height,
       ];
       state.click = 1;
+    };
+
+    const onMove = (e) => setMouseAt(e.clientX, e.clientY);
+    const onDown = (e) => setClickAt(e.clientX, e.clientY);
+
+    // Mobile: touchstart drops a pulse and seeds the mouse position so the
+    // emitter doesn't snap from a stale desktop coordinate. touchmove tracks
+    // drags. Both are passive so page scroll stays smooth.
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      if(!t) return;
+      setMouseAt(t.clientX, t.clientY);
+      setClickAt(t.clientX, t.clientY);
+    };
+    const onTouchMove = (e) => {
+      const t = e.touches[0];
+      if(!t) return;
+      setMouseAt(t.clientX, t.clientY);
     };
 
     const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
@@ -201,6 +219,8 @@
       animating = true;
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mousedown', onDown);
+      window.addEventListener('touchstart', onTouchStart, { passive: true });
+      window.addEventListener('touchmove', onTouchMove, { passive: true });
       document.addEventListener('visibilitychange', onVis);
       if('IntersectionObserver' in window){
         io = new IntersectionObserver(([entry]) => {
@@ -219,6 +239,8 @@
       cancelAnimationFrame(raf);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
       document.removeEventListener('visibilitychange', onVis);
       if(io){ io.disconnect(); io = null; }
     }
