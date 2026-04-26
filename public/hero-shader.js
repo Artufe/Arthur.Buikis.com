@@ -124,7 +124,6 @@
       clickPos: [0.5, 0.5],
     };
 
-    const target = opts.eventTarget || canvas;
     const onMove = (e) => {
       const r = canvas.getBoundingClientRect();
       state.mouse = [
@@ -140,8 +139,6 @@
       ];
       state.click = 1;
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mousedown', onDown);
 
     const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
     function resize(){
@@ -151,13 +148,7 @@
       gl.viewport(0, 0, w, h);
     }
 
-    let raf, running = true, t0 = performance.now();
-    function frame(){
-      if(!running){ raf = requestAnimationFrame(frame); return; }
-      resize();
-      const t = (performance.now() - t0) / 1000;
-      state.click *= 0.94;
-
+    function draw(t){
       gl.useProgram(prog);
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.enableVertexAttribArray(aPos);
@@ -175,32 +166,80 @@
       gl.uniform3fv(u.uMid, state.mid);
       gl.uniform3fv(u.uAccent, state.accent);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
 
+    let raf, running = true, t0 = performance.now();
+    function frame(){
+      if(!running){ raf = requestAnimationFrame(frame); return; }
+      resize();
+      const t = (performance.now() - t0) / 1000;
+      state.click *= 0.94;
+      draw(t);
       raf = requestAnimationFrame(frame);
     }
-    frame();
 
-    // pause when tab hidden or canvas offscreen
-    const onVis = () => { running = !document.hidden; };
-    document.addEventListener('visibilitychange', onVis);
-
-    let io;
-    if('IntersectionObserver' in window){
-      io = new IntersectionObserver(([entry]) => {
-        running = entry.isIntersecting && !document.hidden;
-      });
-      io.observe(canvas);
+    // Render a single static frame (used in reduced-motion mode and on resize).
+    function renderStatic(){
+      resize();
+      state.click = 0;
+      draw(0);
     }
 
+    const onVis = () => { running = !document.hidden; };
+    const onResize = () => renderStatic();
+
+    let io;
+    let animating = false;
+    function startAnimation(){
+      if(animating) return;
+      animating = true;
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mousedown', onDown);
+      document.addEventListener('visibilitychange', onVis);
+      if('IntersectionObserver' in window){
+        io = new IntersectionObserver(([entry]) => {
+          running = entry.isIntersecting && !document.hidden;
+        });
+        io.observe(canvas);
+      }
+      t0 = performance.now();
+      running = true;
+      frame();
+    }
+    function stopAnimation(){
+      if(!animating) return;
+      animating = false;
+      running = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mousedown', onDown);
+      document.removeEventListener('visibilitychange', onVis);
+      if(io){ io.disconnect(); io = null; }
+    }
+
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    function applyMotionPreference(){
+      if(reducedMotion && reducedMotion.matches){
+        stopAnimation();
+        renderStatic();
+        window.addEventListener('resize', onResize);
+      } else {
+        window.removeEventListener('resize', onResize);
+        startAnimation();
+      }
+    }
+    applyMotionPreference();
+    reducedMotion?.addEventListener('change', applyMotionPreference);
+
     return {
-      set(opts){ Object.assign(state, opts); },
+      set(opts){
+        Object.assign(state, opts);
+        if(!animating) renderStatic();
+      },
       stop(){
-        running = false;
-        cancelAnimationFrame(raf);
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mousedown', onDown);
-        document.removeEventListener('visibilitychange', onVis);
-        if(io) io.disconnect();
+        stopAnimation();
+        window.removeEventListener('resize', onResize);
+        reducedMotion?.removeEventListener('change', applyMotionPreference);
       },
     };
   }
