@@ -34,12 +34,30 @@ export const metadata: Metadata = {
 const personLd = {
   '@context': 'https://schema.org',
   '@type': 'Person',
+  '@id': `${site.url}/#person`,
   name: site.name,
   url: site.url,
   email: `mailto:${site.email}`,
-  jobTitle: 'Senior software engineer',
-  description: site.description,
+  jobTitle: site.bio.jobTitle,
+  description: site.bio.summary,
+  address: {
+    '@type': 'PostalAddress',
+    addressLocality: site.bio.location.city,
+    addressCountry: site.bio.location.country,
+  },
+  knowsAbout: site.bio.knowsAbout,
   sameAs: site.socials.map((s) => s.href),
+};
+
+const websiteLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  '@id': `${site.url}/#website`,
+  url: site.url,
+  name: site.name,
+  description: site.description,
+  inLanguage: 'en',
+  publisher: { '@id': `${site.url}/#person` },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -49,6 +67,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(personLd) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteLd) }}
         />
         <ThemeProvider>
           <HeroShader />

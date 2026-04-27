@@ -57,14 +57,25 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
   if (!load) notFound();
   const { default: Content, meta } = await load();
 
+  const pageUrl = `${site.url}/work/${slug}/`;
   const articleLd = {
     '@context': 'https://schema.org',
     '@type': 'Article',
     headline: meta.title,
     description: meta.subtitle,
     datePublished: meta.date,
-    author: { '@type': 'Person', name: site.name, url: site.url },
-    mainEntityOfPage: `${site.url}/work/${slug}/`,
+    author: { '@id': `${site.url}/#person` },
+    mainEntityOfPage: pageUrl,
+    isPartOf: { '@id': `${site.url}/#website` },
+  };
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: `${site.url}/` },
+      { '@type': 'ListItem', position: 2, name: 'Work', item: `${site.url}/#work` },
+      { '@type': 'ListItem', position: 3, name: meta.title, item: pageUrl },
+    ],
   };
 
   return (
@@ -72,6 +83,10 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
       />
       <Link href="/#work" className="lbl hover:text-[var(--accent)] transition-colors">
         ← All work
