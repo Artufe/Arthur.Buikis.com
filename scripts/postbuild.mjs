@@ -35,10 +35,13 @@ await fs.copyFile(SRC, DEST);
 await fs.unlink(SRC);
 
 const html = await walk(ROOT);
-// Match only the URL with a hex/alphanum content-hash query so we don't
-// greedily consume a trailing backslash inside escaped JSON in the RSC
-// payload (which would leave an unescaped " behind and break parsing).
-const RE = /\/opengraph-image(\?[A-Za-z0-9_-]+)?/g;
+// Match only the URL with an optional hex/alphanum content-hash query, and
+// only when it isn't already followed by .png. The hash-class avoids eating
+// a trailing backslash inside RSC escaped JSON (which would leave an
+// unescaped " and break parsing). The .png lookahead keeps the rule
+// idempotent so source code that pre-references /opengraph-image.png
+// doesn't get double-suffixed to .png.png.
+const RE = /\/opengraph-image(\?[A-Za-z0-9_-]+)?(?!\.png)/g;
 let patched = 0;
 for (const file of html) {
   const before = await fs.readFile(file, 'utf-8');
