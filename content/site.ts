@@ -7,6 +7,7 @@ export const site = {
   formspreeEndpoint: 'https://formspree.io/f/xaqadvlz',
   nav: [
     { label: 'Work', href: '/#work' },
+    { label: 'Notes', href: '/notes' },
     { label: 'Building', href: '/building' },
     { label: 'About', href: '/about' },
     { label: 'CV', href: '/cv' },
