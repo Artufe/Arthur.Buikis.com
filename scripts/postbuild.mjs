@@ -35,7 +35,10 @@ await fs.copyFile(SRC, DEST);
 await fs.unlink(SRC);
 
 const html = await walk(ROOT);
-const RE = /\/opengraph-image(\?[^"'\s)]*)?/g;
+// Match only the URL with a hex/alphanum content-hash query so we don't
+// greedily consume a trailing backslash inside escaped JSON in the RSC
+// payload (which would leave an unescaped " behind and break parsing).
+const RE = /\/opengraph-image(\?[A-Za-z0-9_-]+)?/g;
 let patched = 0;
 for (const file of html) {
   const before = await fs.readFile(file, 'utf-8');
