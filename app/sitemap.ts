@@ -4,7 +4,7 @@ import { getNotesIndex } from '@/lib/notes';
 
 export const dynamic = 'force-static';
 
-const STATIC_ROUTES = ['/', '/about/', '/building/', '/contact/', '/cv/', '/notes/'] as const;
+const STATIC_ROUTES = ['/', '/about/', '/building/', '/contact/', '/cv/', '/notes/', '/subscribe/'] as const;
 const WORK_SLUGS = ['lethub-scraping-ml'] as const;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

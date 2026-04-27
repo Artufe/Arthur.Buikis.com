@@ -5,6 +5,11 @@ export const site = {
   brand: 'ab.',
   description: 'Senior full-stack engineer. Ships systems that hold up.',
   formspreeEndpoint: 'https://formspree.io/f/xaqadvlz',
+  // Set to your newsletter provider's form-submit URL (Beehiiv,
+  // ConvertKit/Kit, MailerLite, Buttondown — anything that accepts a
+  // POST with form-encoded "email"). Leave empty to render a
+  // "coming soon" CTA instead of a live form.
+  subscribeEndpoint: '',
   nav: [
     { label: 'Work', href: '/#work' },
     { label: 'Notes', href: '/notes' },
