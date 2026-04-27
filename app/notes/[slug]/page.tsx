@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { site } from '@/content/site';
 import { getNoteSlugs, loadNote, type NoteFAQ, type NoteHowTo } from '@/lib/notes';
+import { SubscribeForm } from '@/components/subscribe-form';
 
 export function generateStaticParams() {
   return getNoteSlugs().map((slug) => ({ slug }));
@@ -191,6 +192,10 @@ export default async function NoteDetailPage({
 
       {meta.howTo && <HowToBlock howTo={meta.howTo} />}
       {meta.faq && meta.faq.length > 0 && <FAQBlock items={meta.faq} />}
+
+      <div className="mt-20">
+        <SubscribeForm variant="panel" />
+      </div>
     </article>
   );
 }

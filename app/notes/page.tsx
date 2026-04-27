@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getNotesIndex } from '@/lib/notes';
 import { site } from '@/content/site';
+import { SubscribeForm } from '@/components/subscribe-form';
 
 export const metadata: Metadata = {
   title: 'Notes',
@@ -72,6 +73,10 @@ export default async function NotesIndexPage() {
           ))}
         </ul>
       )}
+
+      <div className="mt-20">
+        <SubscribeForm variant="panel" />
+      </div>
     </div>
   );
 }

@@ -21,6 +21,7 @@ export async function GET() {
     '## Pages',
     `- [Home](${base}/): summary, featured work, current focus`,
     `- [Notes](${base}/notes/): AI in production, not in pitches — short, opinionated takes from the senior-engineer side of AI/ML`,
+    `- [Subscribe](${base}/subscribe/): get notes in your inbox when they ship`,
     `- [About](${base}/about/): background, working style`,
     `- [Building](${base}/building/): what I'm currently shipping`,
     `- [CV](${base}/cv/): full resume`,
