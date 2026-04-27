@@ -10,6 +10,7 @@ interface WorkModule {
     title: string;
     subtitle: string;
     date: string;
+    datePublished: string;
     role: string;
     stack: string;
     duration: string;
@@ -40,8 +41,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       title: meta.title,
       description: meta.subtitle,
       url: path,
-      publishedTime: meta.date,
+      publishedTime: meta.datePublished,
       authors: [site.name],
+      images: ['/opengraph-image.png'],
     },
     twitter: {
       card: 'summary_large_image',
@@ -63,7 +65,13 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
     '@type': 'Article',
     headline: meta.title,
     description: meta.subtitle,
-    datePublished: meta.date,
+    datePublished: meta.datePublished,
+    image: {
+      '@type': 'ImageObject',
+      url: `${site.url}/opengraph-image.png`,
+      width: 1200,
+      height: 630,
+    },
     author: { '@id': `${site.url}/#person` },
     mainEntityOfPage: pageUrl,
     isPartOf: { '@id': `${site.url}/#website` },
