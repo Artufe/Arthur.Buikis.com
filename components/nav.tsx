@@ -35,13 +35,14 @@ export function Nav() {
       <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-4 lg:px-16">
         <Link
           href="/"
-          className="font-mono text-sm tracking-tight inline-flex items-center gap-2"
+          className="font-mono text-sm tracking-tight inline-flex items-center gap-2.5"
         >
-          <span className="text-[var(--accent)]">§</span>
-          <span>{site.brand}</span>
+          <span className="text-[var(--accent)] text-[20px] leading-none font-serif">§</span>
+          <span>ab.</span>
+          <span className="live-dot" title="online" />
         </Link>
         <div className="flex items-center gap-4 md:gap-6">
-          <ul className="hidden md:flex items-center gap-6 font-mono text-[11px] tracking-wide">
+          <ul className="hidden md:flex items-center gap-7 font-mono text-[12px] tracking-wide">
             {site.nav.map((item) => {
               const active = pathname === item.href || (item.href !== '/' && pathname !== null && pathname.startsWith(item.href));
               return (
@@ -49,8 +50,8 @@ export function Nav() {
                   <Link
                     href={item.href}
                     className={cn(
-                      'transition-colors duration-[var(--dur-fast)] hover:text-[var(--accent)]',
-                      active ? 'text-[var(--fg)]' : 'text-[var(--fg-muted)]'
+                      'relative px-0 py-1.5 transition-colors duration-[var(--dur-fast)] hover:text-[var(--fg)]',
+                      active ? 'text-[var(--fg)] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-px after:bg-[var(--accent)]' : 'text-[var(--fg-muted)]'
                     )}
                   >
                     {item.label.toLowerCase()}
@@ -63,10 +64,10 @@ export function Nav() {
             type="button"
             onClick={() => openPalette()}
             aria-label="Open command palette"
-            className="hidden md:inline-flex items-center gap-2 font-mono text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
+            className="hidden md:inline-flex items-center gap-2 px-2.5 py-1.5 border border-[var(--rule)] text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 transition-colors duration-[var(--dur-fast)]"
           >
-            <span className="kbd">/</span>
-            <span>commands</span>
+            <span className="text-[var(--accent)] font-mono text-[10px]">/</span>
+            <span className="font-mono">commands</span>
           </button>
           <ThemeToggle />
           <button

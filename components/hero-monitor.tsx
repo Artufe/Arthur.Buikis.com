@@ -137,32 +137,39 @@ export function HeroMonitor({ gitStats }: { gitStats: GitStats }) {
 
   return (
     <div
-      className="relative border border-[var(--rule-strong)] bg-[var(--card)] p-5 sm:p-6 flex flex-col gap-4 min-h-[320px]"
-      style={{ boxShadow: 'var(--panel-shadow)' }}
+      className="relative border border-[var(--rule)] bg-[color-mix(in_srgb,var(--bg-muted)_70%,var(--bg)_30%)] font-mono text-[12.5px] overflow-hidden"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between px-[18px] py-3.5 border-b border-[var(--rule)] text-[var(--fg-faint)]">
         <span className="lbl">System</span>
-        <span className="inline-flex items-center gap-2 font-mono text-[10px] text-[var(--fg-muted)]">
+        <span className="inline-flex items-center gap-2 text-[11px] tracking-wider text-[var(--live)] lowercase">
           <span className="live-dot" />
           live
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-px bg-[var(--rule-strong)]">
-        {chips.map((chip) => {
+      <div className="grid grid-cols-2">
+        {chips.map((chip, i) => {
+          const isRight = i % 2 === 1;
+          const isLastRow = i >= chips.length - 2;
           const inner = (
             <>
               <span className="flex items-center gap-2 lbl">
                 <span className={toneDotClass(chip.tone)} />
                 {chip.label}
               </span>
-              <span className="font-mono text-[12px] text-[var(--fg)] leading-snug group-hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]">
+              <span className="text-[15px] text-[var(--fg)] leading-snug flex items-baseline gap-2 group-hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]">
                 {chip.value}
-                {chip.href && <span className="ml-1 text-[var(--fg-faint)] group-hover:text-[var(--accent)]">↗</span>}
+                {chip.href && <span className="ml-1 text-[11px] text-[var(--fg-faint)] group-hover:text-[var(--accent)]">↗</span>}
               </span>
-              <span className="font-mono text-[10px] text-[var(--fg-faint)]">{chip.meta}</span>
+              <span className="text-[11px] text-[var(--fg-muted)] leading-relaxed">{chip.meta}</span>
             </>
           );
+          const classes = [
+            'p-5 flex flex-col gap-1.5',
+            isRight ? '' : 'border-r border-[var(--rule)]',
+            isLastRow ? '' : 'border-b border-[var(--rule)]',
+          ].join(' ');
           if (chip.href) {
             return (
               <a
@@ -170,36 +177,37 @@ export function HeroMonitor({ gitStats }: { gitStats: GitStats }) {
                 href={chip.href}
                 target="_blank"
                 rel="noreferrer"
-                className="group bg-[var(--bg)] p-3.5 flex flex-col gap-1.5 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]"
+                className={`group ${classes} focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)]`}
               >
                 {inner}
               </a>
             );
           }
           return (
-            <div key={chip.label} className="bg-[var(--bg)] p-3.5 flex flex-col gap-1.5">
+            <div key={chip.label} className={classes}>
               {inner}
             </div>
           );
         })}
       </div>
 
-      <div className="border-t border-[var(--rule-strong)] pt-3.5">
-        <span className="lbl mb-2 block">Currently</span>
-        <p className="font-serif italic text-[15px] leading-relaxed text-[var(--fg)]/85">
-          Heads-down on API perf — indexes, rewrites, the usual.
-        </p>
+      <div className="border-t border-[var(--rule)] px-[18px] py-4 flex items-center justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <span className="lbl mb-1.5 block">Currently</span>
+          <p className="font-serif italic text-[18px] leading-[1.35] text-[var(--fg)] text-wrap-pretty">
+            Heads-down on API perf — indexes, rewrites, the usual.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => openPalette()}
+          aria-label="Open command palette"
+          className="shrink-0 inline-flex items-center gap-2 px-2.5 py-1.5 border border-[var(--rule)] text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 transition-colors duration-[var(--dur-fast)]"
+        >
+          <span className="kbd">/</span>
+          commands
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={() => openPalette()}
-        aria-label="Open command palette"
-        className="absolute bottom-4 right-4 inline-flex items-center gap-2 font-mono text-[10px] text-[var(--fg-faint)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
-      >
-        <span className="kbd">/</span>
-        commands
-      </button>
     </div>
   );
 }
