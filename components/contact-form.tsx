@@ -55,14 +55,18 @@ export function ContactForm() {
         <span className="font-mono text-[10px] text-[var(--fg-faint)]">sent via formspree · no tracking</span>
       </div>
 
-      {status === 'success' && (
-        <p className="mb-5 font-serif italic text-[17px] text-[var(--accent)]">
-          Thanks — I&apos;ll get back to you soon.
-        </p>
-      )}
-      {status === 'error' && (
-        <p className="mb-5 font-mono text-[12px] text-red-400">Failed to send: {errorMsg}</p>
-      )}
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {status === 'success' && (
+          <p className="mb-5 font-serif italic text-[17px] text-[var(--accent)]">
+            Thanks — I&apos;ll get back to you soon.
+          </p>
+        )}
+        {status === 'error' && (
+          <p className="mb-5 font-mono text-[12px] text-red-700 dark:text-red-300">
+            Failed to send: {errorMsg}
+          </p>
+        )}
+      </div>
 
       <form onSubmit={onSubmit} className="space-y-6">
         <input type="hidden" name="_subject" value="New message from buikis.com" />

@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { MetaRow } from '@/components/ui/meta-row';
 import Link from 'next/link';
+import { site } from '@/content/site';
 
 interface WorkModule {
   default: React.ComponentType;
@@ -29,7 +30,25 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const load = works[slug];
   if (!load) return { title: 'Not found' };
   const { meta } = await load();
-  return { title: meta.title, description: meta.subtitle };
+  const path = `/work/${slug}/`;
+  return {
+    title: meta.title,
+    description: meta.subtitle,
+    alternates: { canonical: path },
+    openGraph: {
+      type: 'article',
+      title: meta.title,
+      description: meta.subtitle,
+      url: path,
+      publishedTime: meta.date,
+      authors: [site.name],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: meta.title,
+      description: meta.subtitle,
+    },
+  };
 }
 
 export default async function WorkDetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -38,8 +57,37 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
   if (!load) notFound();
   const { default: Content, meta } = await load();
 
+  const pageUrl = `${site.url}/work/${slug}/`;
+  const articleLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: meta.title,
+    description: meta.subtitle,
+    datePublished: meta.date,
+    author: { '@id': `${site.url}/#person` },
+    mainEntityOfPage: pageUrl,
+    isPartOf: { '@id': `${site.url}/#website` },
+  };
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: `${site.url}/` },
+      { '@type': 'ListItem', position: 2, name: 'Work', item: `${site.url}/#work` },
+      { '@type': 'ListItem', position: 3, name: meta.title, item: pageUrl },
+    ],
+  };
+
   return (
     <article className="mx-auto max-w-[720px] px-6 py-16 lg:py-24">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
+      />
       <Link href="/#work" className="lbl hover:text-[var(--accent)] transition-colors">
         ← All work
       </Link>

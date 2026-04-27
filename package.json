@@ -5,6 +5,7 @@
     "scripts": {
         "dev": "node scripts/dev.mjs",
         "build": "next build",
+        "postbuild": "node scripts/postbuild.mjs",
         "start": "next start",
         "lint": "next lint",
         "typecheck": "tsc --noEmit",
@@ -14,7 +15,6 @@
     },
     "dependencies": {
         "@mdx-js/loader": "^3.1.1",
-        "@mdx-js/react": "^3.1.1",
         "@next/mdx": "^16.2.4",
         "@types/mdx": "^2.0.13",
         "class-variance-authority": "^0.7.1",
