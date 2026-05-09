@@ -39,3 +39,6 @@ tsconfig.tsbuildinfo
 # playwright
 test-results/
 playwright-report/
+
+# superset / agent local state
+.superset/

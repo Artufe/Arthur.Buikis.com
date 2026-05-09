@@ -1,13 +1,6 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg: #F7F5F1;
-  --color-bg-muted: #EBE5DE;
-  --color-fg: #0F0F0F;
-  --color-fg-muted: #6C6863;
-  --color-accent: #C46B0F;
-  --color-live: #1F7A4C;
-
   --font-serif: var(--font-fraunces);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jetbrains-mono);
@@ -56,7 +49,9 @@
 
 * { border-radius: 0 !important; }
 
-html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
 
 body {
   background: var(--bg);
