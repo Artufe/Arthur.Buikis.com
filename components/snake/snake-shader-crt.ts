@@ -91,18 +91,18 @@ export type CrtUniforms = {
 
 export const CRT_DEFAULTS: CrtUniforms = {
   uTime: 0,
-  uAberration: 0.6,
-  uGrain: 0.06,
-  uScanlines: 0.18,
-  uVignette: 0.55,
-  uBarrel: 0.04,
+  uAberration: 0.25,
+  uGrain: 0.025,
+  uScanlines: 0.10,
+  uVignette: 0.35,
+  uBarrel: 0.015,
 };
 
 export const CRT_REDUCED_MOTION: CrtUniforms = {
   uTime: 0,
   uAberration: 0.0,
   uGrain: 0.0,
-  uScanlines: 0.18,
-  uVignette: 0.55,
-  uBarrel: 0.04,
+  uScanlines: 0.10,
+  uVignette: 0.35,
+  uBarrel: 0.015,
 };

@@ -58,6 +58,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   const handleRef = useRef<RendererHandle | null>(null);
   const rafRef = useRef<number | null>(null);
   const reducedMotionRef = useRef(false);
+  const prevTailRef = useRef<Cell | null>(null);
   const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState<GameState['status']>('idle');
   const [score, setScore] = useState(0);
@@ -99,6 +100,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         best: readBest(),
       });
       stateRef.current = initial;
+      prevTailRef.current = initial.snake[initial.snake.length - 1];
       onConsoleChange?.(initial.consoleLines);
       setStatus(initial.status);
       setScore(initial.score);
@@ -134,25 +136,36 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           if (after.status !== before.status) setStatus(after.status);
           if (after.score !== before.score) setScore(after.score);
           if (after.best !== before.best) setBest(after.best);
+          // Save the pre-tick tail so we can lerp from it during the next frame.
+          // On growth ticks the tail didn't move, so prevTail equals the new tail's cell anyway.
+          prevTailRef.current = before.snake[before.snake.length - 1];
           stateRef.current = after;
           acc -= tickInterval;
         }
-        // Head tween position
+        // Head + tail tweens for fluid motion at both ends of the snake.
         const s = stateRef.current;
         const head = s.snake[0];
+        const tail = s.snake[s.snake.length - 1];
         let headTween: Cell;
+        let tailTween: Cell;
         if (reducedMotionRef.current) {
           headTween = head;
+          tailTween = tail;
         } else {
           const tickInterval2 = 1000 / s.tickRate;
           const tweenT = Math.min(1, acc / tickInterval2);
-          const prev = s.snake[1] ?? head;
+          const headPrev = s.snake[1] ?? head;
           headTween = {
-            x: prev.x + (head.x - prev.x) * tweenT,
-            y: prev.y + (head.y - prev.y) * tweenT,
+            x: headPrev.x + (head.x - headPrev.x) * tweenT,
+            y: headPrev.y + (head.y - headPrev.y) * tweenT,
+          };
+          const tailPrev = prevTailRef.current ?? tail;
+          tailTween = {
+            x: tailPrev.x + (tail.x - tailPrev.x) * tweenT,
+            y: tailPrev.y + (tail.y - tailPrev.y) * tweenT,
           };
         }
-        handleRef.current.render(s, headTween);
+        handleRef.current.render(s, headTween, tailTween);
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -184,6 +197,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         e.preventDefault();
         const next = applyInput({ ...s, best: readBest() }, { type: 'restart' });
         stateRef.current = next;
+        prevTailRef.current = next.snake[next.snake.length - 1];
         setStatus(next.status);
         setScore(next.score);
         setBest(next.best);
@@ -251,6 +265,12 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         }}
         data-mounted={mounted ? '1' : '0'}
       />
+      <div className="absolute top-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none">
+        score {score}
+      </div>
+      <div className="absolute top-2 right-2 font-mono text-[11px] text-[var(--fg-muted)] pointer-events-none select-none">
+        best {best}
+      </div>
       {status === 'paused' && (
         <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[12px] text-[var(--accent)] pointer-events-none">
           // paused

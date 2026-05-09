@@ -22,7 +22,7 @@ import {
 } from './snake-shader-crt';
 
 export type RendererHandle = {
-  render(state: GameState, headTween: Cell): void;
+  render(state: GameState, headTween: Cell, tailTween: Cell): void;
   triggerShockwave(at: Cell): void;
   flashGlitch(): void;
   setReducedMotion(on: boolean): void;
@@ -104,28 +104,13 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     text: '',
     style: new TextStyle({
       fontFamily: 'monospace',
-      fontSize: opts.cellSize * 0.7,
+      fontSize: opts.cellSize * 0.8,
       fill: opts.accentHex,
       align: 'center',
     }),
   });
   pelletText.anchor.set(0.5);
   root.addChild(pelletText);
-
-  const scoreText = new Text({
-    text: 'score 0',
-    style: new TextStyle({ fontFamily: 'monospace', fontSize: 11, fill: opts.accentHex }),
-  });
-  scoreText.position.set(8, 6);
-  root.addChild(scoreText);
-
-  const bestText = new Text({
-    text: 'best 0',
-    style: new TextStyle({ fontFamily: 'monospace', fontSize: 11, fill: 0x888888 }),
-  });
-  bestText.anchor.set(1, 0);
-  bestText.position.set(opts.gridCount * opts.cellSize - 8, 6);
-  root.addChild(bestText);
 
   let timeAccum = 0;
   let shockwaveStart = -1;
@@ -184,16 +169,18 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     }
   });
 
-  function render(state: GameState, headTween: Cell) {
-    drawBody(body, state, headTween, opts);
+  function render(state: GameState, headTween: Cell, tailTween: Cell) {
+    drawBody(body, state, headTween, tailTween, opts);
     pelletText.text = state.pellet.glyph;
     pelletText.style.fill = state.pellet.kind === 'panic' ? opts.panicHex : opts.accentHex;
+    // Auto-size: short symbols can be big; longer keywords need to fit.
+    const len = state.pellet.glyph.length;
+    const target = len <= 1 ? opts.cellSize * 0.95 : opts.cellSize * 1.6 / len;
+    pelletText.style.fontSize = Math.max(8, Math.min(opts.cellSize * 0.95, target));
     pelletText.position.set(
       state.pellet.cell.x * opts.cellSize + opts.cellSize / 2,
       state.pellet.cell.y * opts.cellSize + opts.cellSize / 2,
     );
-    scoreText.text = `score ${state.score}`;
-    bestText.text = `best ${state.best}`;
   }
 
   function triggerShockwave(at: Cell) {
@@ -248,14 +235,21 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
   return { render, triggerShockwave, flashGlitch, setReducedMotion, dispose };
 }
 
-function drawBody(g: Graphics, state: GameState, headTween: Cell, opts: RendererOpts) {
+function drawBody(
+  g: Graphics,
+  state: GameState,
+  headTween: Cell,
+  tailTween: Cell,
+  opts: RendererOpts,
+) {
   g.clear();
   if (state.snake.length === 0) return;
   const cs = opts.cellSize;
   const half = cs / 2;
   const points: Cell[] = [...state.snake];
-  // Replace head index 0 with the tween-interpolated head position so motion looks fluid.
+  // Replace head and tail with their tween-interpolated positions so both ends move fluidly.
   points[0] = headTween;
+  points[points.length - 1] = tailTween;
 
   // Walk tail → head, drawing through cell centers.
   g.moveTo(points[points.length - 1].x * cs + half, points[points.length - 1].y * cs + half);
