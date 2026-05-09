@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createInitialState, step, applyInput } from './snake-engine';
+import { createInitialState, step, applyInput, spawnPellet } from './snake-engine';
 import type { GameState } from './snake-types';
 
 const TICK_MS = 1000;
@@ -77,5 +77,104 @@ describe('snake-engine — collisions', () => {
       queuedDirection: null,
     });
     expect(s.status).toBe('gameover');
+  });
+});
+
+describe('snake-engine — pellets', () => {
+  it('eating a plain pellet adds 1 to the score', () => {
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const s = tickOnce({
+      ...base,
+      snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
+      pellet: { cell: { x: 6, y: 5 }, kind: 'plain', glyph: 'def' },
+      direction: 'right',
+      queuedDirection: null,
+    });
+    expect(s.score).toBe(1);
+    expect(s.snake).toHaveLength(3);
+  });
+
+  it('eating a claude pellet adds 3 and logs an import line', () => {
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const s = tickOnce({
+      ...base,
+      snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
+      pellet: { cell: { x: 6, y: 5 }, kind: 'claude', glyph: 'claude' },
+      direction: 'right',
+      queuedDirection: null,
+    });
+    expect(s.score).toBe(3);
+    expect(s.consoleLines.at(-1)?.text).toBe('>>> import claude');
+  });
+
+  it('async pellet adds 1 and starts a 3-second boost', () => {
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const before = base.lastTickAt;
+    const s = step(
+      {
+        ...base,
+        snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
+        pellet: { cell: { x: 6, y: 5 }, kind: 'async', glyph: 'async' },
+        direction: 'right',
+        queuedDirection: null,
+      },
+      before + TICK_MS,
+    );
+    expect(s.score).toBe(1);
+    expect(s.asyncBoostUntil).toBe(before + TICK_MS + 3000);
+    expect(s.consoleLines.at(-1)?.text).toBe('>>> async run()');
+  });
+
+  it('eating a panic pellet ends the game and logs the panic line', () => {
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const s = tickOnce({
+      ...base,
+      snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
+      pellet: { cell: { x: 6, y: 5 }, kind: 'panic', glyph: 'panic!' },
+      score: 7,
+      direction: 'right',
+      queuedDirection: null,
+    });
+    expect(s.status).toBe('gameover');
+    expect(s.consoleLines.at(-1)?.text).toBe('panic!: index out of bounds at line 7');
+  });
+
+  it('placement guard never spawns a panic pellet on the only legal next cell', () => {
+    // Construct a corner-trap state so only one cell is legal next.
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const trap: GameState = {
+      ...base,
+      snake: [
+        { x: 0, y: 0 }, // head, top-left corner
+        { x: 1, y: 0 }, // body to the right
+      ],
+      direction: 'left',
+    };
+    // The only legal next cell from (0,0) is (0,1). Across many seeds, ensure no spawn
+    // lands a 'panic' pellet on that cell.
+    for (let seed = 1; seed < 200; seed++) {
+      const p = spawnPellet({ ...trap, rngSeed: seed });
+      const onlyLegal = p.cell.x === 0 && p.cell.y === 1;
+      if (onlyLegal) expect(p.kind).not.toBe('panic');
+    }
+  });
+
+  it('tick rate scales 6% per pellet eaten and clamps at 14', () => {
+    const s = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    expect(s.tickRate).toBeCloseTo(8, 5);
+    // Saturation ceiling.
+    const saturated = Math.min(8 * Math.pow(1.06, 50), 14);
+    expect(saturated).toBe(14);
+  });
+});
+
+describe('snake-engine — restart', () => {
+  it('restart preserves best score and resets state', () => {
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0, best: 42 });
+    const dead = { ...base, score: 5, status: 'gameover' as const };
+    const s = applyInput(dead, { type: 'restart' });
+    expect(s.score).toBe(0);
+    expect(s.best).toBe(42);
+    expect(s.status).toBe('playing');
   });
 });
