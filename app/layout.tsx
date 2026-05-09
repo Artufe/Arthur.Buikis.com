@@ -8,6 +8,7 @@ import { Gridlines } from '@/components/gridlines';
 import { Grain } from '@/components/grain';
 import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
+import { SnakeWindowHost } from '@/components/snake/snake-window-host';
 import { site } from '@/content/site';
 import './globals.css';
 
@@ -79,6 +80,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Nav />
           <main className="relative z-10 pt-20">{children}</main>
           <Footer />
+          <SnakeWindowHost />
           <CommandPaletteLazy />
         </ThemeProvider>
       </body>
