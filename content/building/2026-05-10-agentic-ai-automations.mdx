@@ -1,0 +1,148 @@
+---
+title: "Agentic AI Automations: Building the Next Wave of Agentic Software"
+date: "2026-05-10"
+description: "Practical guide and analysis on agentic AI automations—Hermes, OpenClaw, Claude Opus 4.7, GPT-5.5—and how to design and integrate them using open-design principles."
+author: "Arthur Buikis"
+tags:
+  - AI
+  - agentic
+  - automation
+  - open-design
+seo_keywords: ["Arthur Buikis", "ArtDev", "AI", "Agentic"]
+---
+
+<!--
+  Draft blog post (1000–1500 words). Hand this to a writer or paste to the site's MDX template.
+  Integration notes: assign coder agent to integrate per open-design (https://github.com/nexu-io/open-design).
+-->
+
+import ExampleComponent from '../../components/mdx/ExampleComponent'
+
+A working title with a hook: "Agentic AI Automations: How Today's Agents Turn Ideas into Action (and How to Build Them)"
+
+Introduction — Why this matters
+
+AI has moved beyond single-prompt helpers into systems that take initiative, chain actions, and orchestrate other tools. Call them "agentic" systems: they sense, plan, and act. This post explains what agentic automations are, surveys leading examples (Hermes, OpenClaw, Claude Opus 4.7, GPT-5.5), and gives a pragmatic guide for developers who want to design, ship, and integrate these systems using the open-design method.
+
+The Promise and the Problem
+
+- The promise: higher developer productivity, consistent automation patterns, and new product paradigms where software composes goal-driven agents rather than fixed APIs.
+- The problem: complexity explodes — safety, observability, recoverability, and design discipline become critical. Without a principled approach, agentic systems create brittle automation spaghetti.
+
+Section 1 — What is agentic software? (Context & taxonomy)
+
+1.1 Definitions and scope
+
+- Agentic vs. assistant: assistants reply; agents take sustained actions across systems.
+- Key capabilities: stateful memory, tool-use (APIs, shell, DB), planning (task decomposition), and feedback loops.
+
+1.2 A quick taxonomy
+
+- Playground agents (experiments, prototypes)
+- Productized agents (embedded in apps for triaging, synthesis)
+- Orchestrator agents (coordinate multiple specialized agents)
+
+Why the distinction matters: different expectations for testing, monitoring, and user control.
+
+Section 2 — Survey of today’s notable systems
+
+2.1 Hermes (example)
+
+- What it is: a lightweight orchestration layer for developer workflows.
+- Strengths: predictable pipelines, plugin architecture, quick bootstrapping.
+- Use-case example: automated PR triage + dependency updates.
+
+2.2 OpenClaw (example)
+
+- What it is: research-focused agent framework optimized for tool chaining and grounding.
+- Strengths: composability, transparent traces of decisions (good for audits).
+
+2.3 Claude Opus 4.7 and GPT-5.5 (models shaping agent behavior)
+
+- Claude Opus 4.7 — strengths in instruction-following, safety defaults, and long-context planning.
+- GPT-5.5 — frontier capabilities: better reasoning, faster iterations, and more seamless tool integrations.
+- Practical note: pick models by capability, cost, and safety needs — not hype.
+
+Section 3 — Design principles (open-design applied to agents)
+
+3.1 Why open-design for agentic systems?
+
+- Open-design emphasizes collaborative, iterative, and transparent design artifacts — ideal when behaviors, interfaces, and expectations are evolving.
+- It aligns stakeholders (designers, engineers, operators) early and keeps decision artifacts discoverable.
+
+3.2 Core principles to apply
+
+- Intent-first specs: design the agent's goals and measurable success criteria before coding.
+- Observable traces: every action an agent takes should be logged, explainable, and linkable to the original prompt/plan.
+- Safer defaults: require explicit opt-in for irreversible actions, and implement sandboxed staging flows.
+- Modular tool contracts: define exact input/output for each tool the agent invokes.
+
+3.3 A minimal open-design checklist for an agent
+
+- Goals & KPIs
+- Personas & threat model
+- Interaction flow diagrams (human-in-loop points)
+- Tool API contracts
+- Test harnesses (unit + integration + chaos scenarios)
+
+Section 4 — A practical how-to (developer workflow)
+
+4.1 Prototype: narrow a single, automatable task
+
+- Example: automate release notes from merged PRs — inputs (PR diff), output (markdown), safety gate (human approval).
+- Keep the scope tiny for first iterations.
+
+4.2 Build: small loop, repeatable tests
+
+- Start unit tests for transformation functions, then mock tool integrations for the agent logic.
+- Use replayable traces for debugging (record inputs, intermediate reasoning steps, and outputs).
+
+4.3 Integrate: design the surface
+
+- Add explicit UX: explain what the agent did and why; provide undo/rollback hooks.
+- Provide clear rate limits and operational dashboards.
+
+4.4 Operate: monitoring & incident response
+
+- SLOs for agent correctness (e.g., % of actions requiring human rollback)
+- Alerting on anomalous action patterns
+- Versioned agent configs so rollbacks are simple
+
+Section 5 — Examples & patterns
+
+- Pattern: planner + executors (planner decomposes, executors do single-responsibility work)
+- Pattern: canary actions + human-in-loop escalation
+- Pattern: synthetic testing via recorded traces
+
+Conclusion — Where to start and a call to action
+
+- Start by automating something you already do repetitively and that has a clear safety gate.
+- Use open-design rituals (intent docs, visible traces) to keep agents understandable.
+- Experiment with model choices — combine Claude Opus 4.7 for safe planning and a higher-capability model for heavy-lift generation when needed.
+
+Call to action
+
+- Try the example: create an automation that drafts release notes for one repo. Share the results and traces.
+- If you want, the coder agent can integrate this post into the site and scaffold an example agent using the open-design repo (link below). Reply to this PR or ping @Arthur to start the design setup.
+
+Suggested internal links
+
+- /docs/superpowers/plans/ (design notes)
+- /content/work/ (case studies)
+- /content/cv.ts (author)
+
+Suggested external links
+
+- https://github.com/nexu-io/open-design (open-design method)
+- Claude Opus release notes
+- OpenAI / GPT-5.5 docs (or model provider pages)
+
+SEO & meta notes
+
+- Sprinkle primary keywords: "Arthur Buikis", "ArtDev", "AI", "Agentic" in headings and meta description.
+
+Acknowledgements
+
+Thanks to early experimenters building agentic tooling and to the open-design community for shaping this approach.
+
+<!-- End of draft -->
