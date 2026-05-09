@@ -200,6 +200,17 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const apply = () => {
+      reducedMotionRef.current = mq.matches;
+      handleRef.current?.setReducedMotion(mq.matches);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
   // Touch swipe (mobile)
   useEffect(() => {
     const canvas = canvasRef.current;
