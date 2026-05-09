@@ -51,27 +51,31 @@ describe('snake-engine — movement', () => {
 
 describe('snake-engine — collisions', () => {
   it('ends the game on wall collision', () => {
-    let s = createInitialState({ gridCount: 22, seed: 1, now: 0 });
-    s.snake = [{ x: 21, y: 5 }, { x: 20, y: 5 }];
-    s.direction = 'right';
-    s.queuedDirection = null;
-    s = tickOnce(s);
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const s = tickOnce({
+      ...base,
+      snake: [{ x: 21, y: 5 }, { x: 20, y: 5 }],
+      direction: 'right',
+      queuedDirection: null,
+    });
     expect(s.status).toBe('gameover');
   });
 
   it('ends the game on self collision', () => {
-    let s = createInitialState({ gridCount: 22, seed: 1, now: 0 });
-    s.snake = [
-      { x: 5, y: 5 },
-      { x: 4, y: 5 },
-      { x: 4, y: 6 },
-      { x: 5, y: 6 },
-      { x: 6, y: 6 },
-      { x: 6, y: 5 },
-    ];
-    s.direction = 'down';
-    s.queuedDirection = null;
-    s = tickOnce(s);
+    const base = createInitialState({ gridCount: 22, seed: 1, now: 0 });
+    const s = tickOnce({
+      ...base,
+      snake: [
+        { x: 5, y: 5 },
+        { x: 4, y: 5 },
+        { x: 4, y: 6 },
+        { x: 5, y: 6 },
+        { x: 6, y: 6 },
+        { x: 6, y: 5 },
+      ],
+      direction: 'down',
+      queuedDirection: null,
+    });
     expect(s.status).toBe('gameover');
   });
 });

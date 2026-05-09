@@ -65,7 +65,6 @@ export function applyInput(state: GameState, input: EngineInput): GameState {
   if (input.type === 'turn') {
     if (state.status !== 'playing') return state;
     if (input.dir === OPPOSITE[state.direction]) return state; // drop 180°
-    if (state.queuedDirection === OPPOSITE[state.direction]) return state;
     return { ...state, queuedDirection: input.dir };
   }
   if (input.type === 'pause') {
@@ -146,7 +145,8 @@ export function step(state: GameState, now: number): GameState {
     newSnake = [next, ...state.snake.slice(0, -1)];
   }
 
-  // Boost expiry
+  // Boost expiry. The base cap is 14; boost layers ×1.3 on top with its own
+  // ceiling of 18 so `async` still feels like a rush at top base speed.
   let effectiveTickRate = newTickRate;
   if (newAsyncBoostUntil > 0) {
     if (now < newAsyncBoostUntil) effectiveTickRate = Math.min(newTickRate * 1.3, 18);
