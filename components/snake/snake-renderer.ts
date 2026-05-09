@@ -212,10 +212,16 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     pelletText.style.fill = fill;
     pelletText.alpha = alpha;
 
-    // Auto-size: short symbols can be big; longer keywords need to fit.
+    // Tiered sizing — keep food large enough to read at a glance. Multichar keywords
+    // intentionally spill into adjacent cells; the body's stroke draws over them harmlessly
+    // when the snake passes by.
     const len = state.pellet.glyph.length;
-    const target = len <= 1 ? opts.cellSize * 0.95 : opts.cellSize * 1.6 / len;
-    pelletText.style.fontSize = Math.max(8, Math.min(opts.cellSize * 0.95, target));
+    let fontSize: number;
+    if (len <= 2) fontSize = opts.cellSize * 1.05; // single-char symbols fill the cell
+    else if (len === 3) fontSize = opts.cellSize * 0.85;
+    else if (len === 4) fontSize = opts.cellSize * 0.75;
+    else fontSize = opts.cellSize * 0.65; // 5-6 chars (async, claude, panic!, await)
+    pelletText.style.fontSize = fontSize;
     pelletText.position.set(
       state.pellet.cell.x * opts.cellSize + opts.cellSize / 2,
       state.pellet.cell.y * opts.cellSize + opts.cellSize / 2,
@@ -333,16 +339,17 @@ function drawBody(
   if (state.snake.length === 0) return;
   const cs = opts.cellSize;
   const half = cs / 2;
-  const points: Cell[] = [...state.snake];
-  // Replace head and tail with their tween-interpolated positions so both ends move fluidly.
-  points[0] = headTween;
-  points[points.length - 1] = tailTween;
 
-  // Walk tail → head, drawing through cell centers.
-  g.moveTo(points[points.length - 1].x * cs + half, points[points.length - 1].y * cs + half);
-  for (let i = points.length - 2; i >= 0; i--) {
-    g.lineTo(points[i].x * cs + half, points[i].y * cs + half);
+  // Path: tailTween (between previous tail and current tail) → walk through every snake
+  // cell from current tail toward the head → headTween (between current second-cell and head).
+  // Replacing snake[length-1] outright would drop the new tail cell from the geometry and
+  // the line would visibly cut across the corner during the tween.
+  g.moveTo(tailTween.x * cs + half, tailTween.y * cs + half);
+  for (let i = state.snake.length - 1; i >= 1; i--) {
+    const c = state.snake[i];
+    g.lineTo(c.x * cs + half, c.y * cs + half);
   }
+  g.lineTo(headTween.x * cs + half, headTween.y * cs + half);
   g.stroke({ width: cs - 2, color: opts.accentHex, alpha: 1, cap: 'round', join: 'round' });
 }
 

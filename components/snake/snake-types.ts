@@ -44,4 +44,6 @@ export type EngineInput =
   | { type: 'pause' }
   | { type: 'restart' };
 
-export const PLAIN_GLYPHS = ['def', 'fn', 'let', 'await', 'pub', '→', 'λ', ':='] as const;
+// Mix of Python (`def`, `await`), Rust (`fn`, `impl`, `::`), JS (`=>`, `let`), and
+// pure-functional symbols (`→`, `λ`). Each reads at a glance and stays under 4 chars.
+export const PLAIN_GLYPHS = ['def', 'fn', 'let', 'impl', '=>', '→', 'λ', '::'] as const;

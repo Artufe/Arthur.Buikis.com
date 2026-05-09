@@ -120,7 +120,11 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         const t = performance.now();
         const dt = t - lastFrame;
         lastFrame = t;
-        acc += dt;
+        // Only advance the accumulator while playing. Otherwise gameover/paused time would
+        // pile up and on resume the step loop would fire many ticks at once — restart used
+        // to teleport the snake straight into a wall.
+        if (stateRef.current.status === 'playing') acc += dt;
+        else acc = 0;
         const tickInterval = 1000 / stateRef.current.tickRate;
         while (acc >= tickInterval && stateRef.current.status === 'playing') {
           const before = stateRef.current;
@@ -291,26 +295,29 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       <div className="absolute top-2 right-2 font-mono text-[11px] text-[var(--fg-muted)] pointer-events-none select-none">
         best {best}
       </div>
-      {/* Combo badge — visible only while a streak is active. Builds tension and rewards
-          chaining non-plain pellets without nagging the player when they're not chaining. */}
+      {/* Combo badge — visible only while a streak is active. Bottom-left so it doesn't
+          compete with score (top-left) and pulses to signal momentum. */}
       {comboCount >= 2 && status === 'playing' && (
-        <div className="absolute bottom-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none animate-pulse">
-          combo ×{comboCount}
+        <div className="absolute bottom-2 left-2 font-mono text-[14px] font-bold text-[var(--accent)] pointer-events-none select-none animate-pulse tracking-wider">
+          ×{comboCount} combo
         </div>
       )}
       {status === 'paused' && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[12px] text-[var(--accent)] pointer-events-none">
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[13px] text-[var(--accent)] pointer-events-none">
           // paused
         </div>
       )}
       {status === 'gameover' && (
-        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 font-mono text-[12px] text-[#ff7070] pointer-events-none">
-          <div>panic!: index out of bounds at line {score}</div>
-          <div className="text-[var(--fg-muted)] mt-1">
-            longest snake {maxLength} · best combo ×{bestCombo}
+        <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center gap-2 font-mono pointer-events-none px-4 text-center">
+          <div className="text-[14px] text-[#ff7070] font-bold">
+            panic! at line {score}
           </div>
-          <div className="text-[var(--fg-muted)]">best score {best}</div>
-          <div className="text-[var(--accent)] mt-2">press r to restart</div>
+          <div className="text-[10px] text-[var(--fg-faint)] flex gap-3 mt-1">
+            <span>len <span className="text-[var(--fg-muted)]">{maxLength}</span></span>
+            <span>combo <span className="text-[var(--fg-muted)]">×{bestCombo}</span></span>
+            <span>best <span className="text-[var(--fg-muted)]">{best}</span></span>
+          </div>
+          <div className="text-[11px] text-[var(--accent)] mt-2">press r to restart</div>
         </div>
       )}
     </div>
