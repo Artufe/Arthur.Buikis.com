@@ -63,6 +63,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   const [status, setStatus] = useState<GameState['status']>('idle');
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
+  const [comboCount, setComboCount] = useState(0);
+  const [bestCombo, setBestCombo] = useState(0);
+  const [maxLength, setMaxLength] = useState(0);
 
   const gridCount = variant === 'page' ? 28 : 22;
   const cellSize = variant === 'page' ? 22 : 20;
@@ -105,6 +108,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       setStatus(initial.status);
       setScore(initial.score);
       setBest(initial.best);
+      setComboCount(initial.comboCount);
+      setBestCombo(initial.bestCombo);
+      setMaxLength(initial.maxLength);
       setMounted(true);
 
       let lastFrame = now;
@@ -120,6 +126,12 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           const before = stateRef.current;
           const after = step(before, before.lastTickAt + tickInterval);
           const ate = after.score !== before.score || after.snake.length !== before.snake.length;
+          if (ate) {
+            // Light shake on every eat — universal "thump" feedback.
+            // Heavier on claude (the rare big-payoff pellet).
+            const intensity = before.pellet.kind === 'claude' ? 6 : 3;
+            handleRef.current.triggerShake(intensity, 180);
+          }
           if (ate && before.pellet.kind === 'claude') {
             handleRef.current.triggerShockwave(before.pellet.cell);
           }
@@ -128,6 +140,8 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           }
           if (after.status === 'gameover' && before.status === 'playing') {
             handleRef.current.flashGlitch();
+            handleRef.current.triggerShake(12, 400);
+            handleRef.current.triggerDeathCascade(before.snake);
             if (after.score > readBest()) writeBest(after.score);
           }
           if (after.consoleLines !== before.consoleLines) {
@@ -136,6 +150,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           if (after.status !== before.status) setStatus(after.status);
           if (after.score !== before.score) setScore(after.score);
           if (after.best !== before.best) setBest(after.best);
+          if (after.comboCount !== before.comboCount) setComboCount(after.comboCount);
+          if (after.bestCombo !== before.bestCombo) setBestCombo(after.bestCombo);
+          if (after.maxLength !== before.maxLength) setMaxLength(after.maxLength);
           // Save the pre-tick tail so we can lerp from it during the next frame.
           // On growth ticks the tail didn't move, so prevTail equals the new tail's cell anyway.
           prevTailRef.current = before.snake[before.snake.length - 1];
@@ -165,7 +182,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
             y: tailPrev.y + (tail.y - tailPrev.y) * tweenT,
           };
         }
-        handleRef.current.render(s, headTween, tailTween);
+        handleRef.current.render(s, headTween, tailTween, t);
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -201,6 +218,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         setStatus(next.status);
         setScore(next.score);
         setBest(next.best);
+        setComboCount(next.comboCount);
+        setBestCombo(next.bestCombo);
+        setMaxLength(next.maxLength);
         onConsoleChange?.(next.consoleLines);
         return;
       }
@@ -271,6 +291,13 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       <div className="absolute top-2 right-2 font-mono text-[11px] text-[var(--fg-muted)] pointer-events-none select-none">
         best {best}
       </div>
+      {/* Combo badge — visible only while a streak is active. Builds tension and rewards
+          chaining non-plain pellets without nagging the player when they're not chaining. */}
+      {comboCount >= 2 && status === 'playing' && (
+        <div className="absolute bottom-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none animate-pulse">
+          combo ×{comboCount}
+        </div>
+      )}
       {status === 'paused' && (
         <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[12px] text-[var(--accent)] pointer-events-none">
           // paused
@@ -279,8 +306,11 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       {status === 'gameover' && (
         <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 font-mono text-[12px] text-[#ff7070] pointer-events-none">
           <div>panic!: index out of bounds at line {score}</div>
-          <div className="text-[var(--fg-muted)]">best: {best}</div>
-          <div className="text-[var(--accent)]">press r to restart</div>
+          <div className="text-[var(--fg-muted)] mt-1">
+            longest snake {maxLength} · best combo ×{bestCombo}
+          </div>
+          <div className="text-[var(--fg-muted)]">best score {best}</div>
+          <div className="text-[var(--accent)] mt-2">press r to restart</div>
         </div>
       )}
     </div>

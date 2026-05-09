@@ -22,9 +22,11 @@ import {
 } from './snake-shader-crt';
 
 export type RendererHandle = {
-  render(state: GameState, headTween: Cell, tailTween: Cell): void;
+  render(state: GameState, headTween: Cell, tailTween: Cell, now: number): void;
   triggerShockwave(at: Cell): void;
   flashGlitch(): void;
+  triggerShake(intensity: number, durationMs: number): void;
+  triggerDeathCascade(snake: Cell[]): void;
   setReducedMotion(on: boolean): void;
   dispose(): void;
 };
@@ -115,6 +117,10 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
   let timeAccum = 0;
   let shockwaveStart = -1;
   let glitchUntil = -1;
+  // Screen shake — jitters root x/y for `shakeUntil - now` ms with falling intensity.
+  let shakeUntil = -1;
+  let shakeStart = -1;
+  let shakePeak = 0;
 
   app.ticker.add((tick) => {
     const now = performance.now();
@@ -137,7 +143,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
       }
     }
 
-    // Particles
+    // Particles — gravity pulls them down so the death cascade reads as falling debris.
     for (let i = liveParticles.length - 1; i >= 0; i--) {
       const lp = liveParticles[i];
       lp.life += tick.deltaMS;
@@ -147,6 +153,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         liveParticles.splice(i, 1);
         continue;
       }
+      lp.vy += 0.15 * (tick.deltaMS / 16); // gravity
       lp.p.x += lp.vx * (tick.deltaMS / 16);
       lp.p.y += lp.vy * (tick.deltaMS / 16);
       lp.p.alpha = 1 - t;
@@ -167,12 +174,44 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         crtFilter.resources.crtUniforms.uniforms.uGrain = 0.18;
       }
     }
+
+    // Screen shake — physical "this moment matters" feedback. Linear decay from peak to zero.
+    if (shakeUntil > 0) {
+      const total = shakeUntil - shakeStart;
+      const elapsed = now - shakeStart;
+      if (elapsed >= total) {
+        shakeUntil = -1;
+        root.position.set(0, 0);
+      } else {
+        const t = elapsed / total;
+        const mag = shakePeak * (1 - t);
+        root.position.set((Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2);
+      }
+    }
   });
 
-  function render(state: GameState, headTween: Cell, tailTween: Cell) {
+  function render(state: GameState, headTween: Cell, tailTween: Cell, now: number) {
     drawBody(body, state, headTween, tailTween, opts);
     pelletText.text = state.pellet.glyph;
-    pelletText.style.fill = state.pellet.kind === 'panic' ? opts.panicHex : opts.accentHex;
+
+    // Telegraph: panic pellets pulse + dim during the pre-arm window so the player
+    // sees the threat before it can kill them. Live panic is solid red, plain pellets
+    // and active boosts use the accent color.
+    let fill = opts.accentHex;
+    let alpha = 1;
+    if (state.pellet.kind === 'panic') {
+      const armed = now >= state.pellet.armedAt;
+      fill = opts.panicHex;
+      if (!armed) {
+        // Sine pulse over the telegraph window — alpha 0.4 → 1 → 0.4.
+        const left = state.pellet.armedAt - now;
+        const phase = (left / 200) * Math.PI; // ~5 pulses across 1.2s
+        alpha = 0.6 + 0.4 * Math.sin(phase);
+      }
+    }
+    pelletText.style.fill = fill;
+    pelletText.alpha = alpha;
+
     // Auto-size: short symbols can be big; longer keywords need to fit.
     const len = state.pellet.glyph.length;
     const target = len <= 1 ? opts.cellSize * 0.95 : opts.cellSize * 1.6 / len;
@@ -217,6 +256,46 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     glitchUntil = performance.now() + 300;
   }
 
+  function triggerShake(intensity: number, durationMs: number) {
+    if (reducedMotionRef.current) return;
+    shakeStart = performance.now();
+    shakeUntil = shakeStart + durationMs;
+    shakePeak = intensity;
+  }
+
+  // Death cascade — explode each body segment into particles falling and fading.
+  // Closes the "abrupt freeze" gap and gives weight to the loss.
+  function triggerDeathCascade(snake: Cell[]) {
+    if (reducedMotionRef.current) return;
+    body.clear(); // hide the snake body; particles take over
+    const cs = opts.cellSize;
+    for (let i = 0; i < snake.length; i++) {
+      const c = snake[i];
+      // 4 particles per segment with random outward velocities + gravity.
+      for (let j = 0; j < 4; j++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 2.5;
+        const p = new Particle({
+          texture: dotTex,
+          x: c.x * cs + cs / 2,
+          y: c.y * cs + cs / 2,
+          scaleX: cs / 6,
+          scaleY: cs / 6,
+          tint: opts.accentHex,
+          alpha: 1,
+        });
+        particles.addParticle(p);
+        liveParticles.push({
+          p,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1, // initial upward kick
+          life: 0,
+          maxLife: 800 + Math.random() * 400,
+        });
+      }
+    }
+  }
+
   function setReducedMotion(on: boolean) {
     reducedMotionRef.current = on;
     const u = on ? CRT_REDUCED_MOTION : CRT_DEFAULTS;
@@ -232,7 +311,15 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     app.destroy(true, { children: true });
   }
 
-  return { render, triggerShockwave, flashGlitch, setReducedMotion, dispose };
+  return {
+    render,
+    triggerShockwave,
+    flashGlitch,
+    triggerShake,
+    triggerDeathCascade,
+    setReducedMotion,
+    dispose,
+  };
 }
 
 function drawBody(

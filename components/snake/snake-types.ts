@@ -8,6 +8,10 @@ export type Pellet = {
   cell: Cell;
   kind: PelletKind;
   glyph: string;
+  // ms timestamp when the pellet's effect activates. For panic, this is spawn + 1200ms so
+  // the player gets a telegraph window in which the pellet is visible but inert (treated as
+  // a plain pellet on contact).
+  armedAt: number;
 };
 
 export type GameStatus = 'idle' | 'playing' | 'paused' | 'gameover';
@@ -30,6 +34,9 @@ export type GameState = {
   nextLineId: number;
   lastTickAt: number;            // ms timestamp of last engine tick
   rngSeed: number;               // for deterministic tests
+  comboCount: number;            // consecutive non-plain pellets eaten this run; resets on plain
+  bestCombo: number;             // max comboCount reached this run — surfaced on game-over
+  maxLength: number;             // max snake length reached this run — surfaced on game-over
 };
 
 export type EngineInput =

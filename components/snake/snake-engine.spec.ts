@@ -86,7 +86,7 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'plain', glyph: 'def' },
+      pellet: { cell: { x: 6, y: 5 }, kind: 'plain', glyph: 'def', armedAt: 0 },
       direction: 'right',
       queuedDirection: null,
     });
@@ -99,7 +99,7 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'claude', glyph: 'claude' },
+      pellet: { cell: { x: 6, y: 5 }, kind: 'claude', glyph: 'claude', armedAt: 0 },
       direction: 'right',
       queuedDirection: null,
     });
@@ -114,7 +114,7 @@ describe('snake-engine — pellets', () => {
       {
         ...base,
         snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-        pellet: { cell: { x: 6, y: 5 }, kind: 'async', glyph: 'async' },
+        pellet: { cell: { x: 6, y: 5 }, kind: 'async', glyph: 'async', armedAt: 0 },
         direction: 'right',
         queuedDirection: null,
       },
@@ -130,7 +130,7 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'panic', glyph: 'panic!' },
+      pellet: { cell: { x: 6, y: 5 }, kind: 'panic', glyph: 'panic!', armedAt: 0 },
       score: 7,
       direction: 'right',
       queuedDirection: null,

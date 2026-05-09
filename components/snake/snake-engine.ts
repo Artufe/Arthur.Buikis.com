@@ -45,7 +45,7 @@ export function createInitialState(opts: {
     snake,
     direction: 'right',
     queuedDirection: null,
-    pellet: { cell: { x: 0, y: 0 }, kind: 'plain', glyph: 'def' },
+    pellet: { cell: { x: 0, y: 0 }, kind: 'plain', glyph: 'def', armedAt: opts.now },
     status: 'playing',
     score: 0,
     best: opts.best ?? 0,
@@ -56,8 +56,11 @@ export function createInitialState(opts: {
     nextLineId: 1,
     lastTickAt: opts.now,
     rngSeed: opts.seed,
+    comboCount: 0,
+    bestCombo: 0,
+    maxLength: snake.length,
   };
-  state.pellet = spawnPellet(state);
+  state.pellet = spawnPellet(state, opts.now);
   return state;
 }
 
@@ -106,8 +109,10 @@ export function step(state: GameState, now: number): GameState {
     return endGame(state, now);
   }
 
-  // panic! pellet ends the run on contact
-  if (willEat && state.pellet.kind === 'panic') {
+  // panic! pellet ends the run on contact — but only if the telegraph window has elapsed.
+  // During the pre-arm window the pellet is visible but inert; eating it acts like a plain
+  // pellet (one of the "varied tactics" — players who can race the timer get a free score).
+  if (willEat && state.pellet.kind === 'panic' && now >= state.pellet.armedAt) {
     return appendPanic(endGame(state, now), state.score);
   }
 
@@ -118,9 +123,11 @@ export function step(state: GameState, now: number): GameState {
   let newAsyncBoostUntil = state.asyncBoostUntil;
   let consoleLines = state.consoleLines;
   let nextLineId = state.nextLineId;
+  let comboCount = state.comboCount;
 
   if (willEat) {
     newSnake = [next, ...state.snake];
+    const eatenAsPlain = state.pellet.kind === 'panic'; // pre-arm panic counts as plain
     if (state.pellet.kind === 'claude') newScore += 3;
     else newScore += 1;
 
@@ -128,10 +135,16 @@ export function step(state: GameState, now: number): GameState {
 
     if (state.pellet.kind === 'async') {
       newAsyncBoostUntil = now + 3000;
+      comboCount += 1;
       ({ consoleLines, nextLineId } = pushLine(state, '>>> async run()', 'info'));
     } else if (state.pellet.kind === 'claude') {
+      comboCount += 1;
       ({ consoleLines, nextLineId } = pushLine(state, '>>> import claude', 'info'));
+    } else if (eatenAsPlain) {
+      // Pre-arm panic eaten — narrow win, fun beat. Doesn't break combo (treated as nothing happened).
+      ({ consoleLines, nextLineId } = pushLine(state, '>>> caught(panic!) // defused', 'info'));
     } else {
+      comboCount = 0; // plain pellet resets combo
       ({ consoleLines, nextLineId } = pushLine(state, `>>> ${state.pellet.glyph}`, 'info'));
     }
 
@@ -140,7 +153,7 @@ export function step(state: GameState, now: number): GameState {
       snake: newSnake,
       consoleLines,
       nextLineId,
-    });
+    }, now);
   } else {
     newSnake = [next, ...state.snake.slice(0, -1)];
   }
@@ -165,6 +178,9 @@ export function step(state: GameState, now: number): GameState {
     consoleLines,
     nextLineId,
     lastTickAt: now,
+    comboCount,
+    bestCombo: Math.max(state.bestCombo, comboCount),
+    maxLength: Math.max(state.maxLength, newSnake.length),
   };
 }
 
@@ -193,7 +209,7 @@ function pushLine(
   return { consoleLines: lines, nextLineId: state.nextLineId + 1 };
 }
 
-export function spawnPellet(state: GameState): Pellet {
+export function spawnPellet(state: GameState, now: number = state.lastTickAt): Pellet {
   const rand = rng(state.rngSeed + state.score * 1000 + state.snake.length);
   const occupied = new Set(state.snake.map((c) => `${c.x},${c.y}`));
   const candidates: Cell[] = [];
@@ -225,7 +241,9 @@ export function spawnPellet(state: GameState): Pellet {
   }
 
   const glyph = kindToGlyph(kind, rand);
-  return { cell, kind, glyph };
+  // panic pellets get a 1.2s telegraph window before they arm; everything else is armed immediately.
+  const armedAt = kind === 'panic' ? now + 1200 : now;
+  return { cell, kind, glyph, armedAt };
 }
 
 function legalNextCells(state: GameState, head: Cell): Cell[] {
