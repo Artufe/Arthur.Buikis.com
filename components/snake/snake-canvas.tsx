@@ -59,6 +59,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   const rafRef = useRef<number | null>(null);
   const reducedMotionRef = useRef(false);
   const [mounted, setMounted] = useState(false);
+  const [status, setStatus] = useState<GameState['status']>('idle');
+  const [score, setScore] = useState(0);
+  const [best, setBest] = useState(0);
 
   const gridCount = variant === 'page' ? 28 : 22;
   const cellSize = variant === 'page' ? 22 : 20;
@@ -97,6 +100,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       });
       stateRef.current = initial;
       onConsoleChange?.(initial.consoleLines);
+      setStatus(initial.status);
+      setScore(initial.score);
+      setBest(initial.best);
       setMounted(true);
 
       let lastFrame = now;
@@ -125,6 +131,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           if (after.consoleLines !== before.consoleLines) {
             onConsoleChange?.(after.consoleLines);
           }
+          if (after.status !== before.status) setStatus(after.status);
+          if (after.score !== before.score) setScore(after.score);
+          if (after.best !== before.best) setBest(after.best);
           stateRef.current = after;
           acc -= tickInterval;
         }
@@ -166,12 +175,19 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       if (!s) return;
       if (e.key === ' ') {
         e.preventDefault();
-        stateRef.current = applyInput(s, { type: 'pause' });
+        const next = applyInput(s, { type: 'pause' });
+        stateRef.current = next;
+        setStatus(next.status);
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
-        stateRef.current = applyInput({ ...s, best: readBest() }, { type: 'restart' });
+        const next = applyInput({ ...s, best: readBest() }, { type: 'restart' });
+        stateRef.current = next;
+        setStatus(next.status);
+        setScore(next.score);
+        setBest(next.best);
+        onConsoleChange?.(next.consoleLines);
         return;
       }
       const dir = KEY_TO_DIR[e.key];
@@ -213,15 +229,29 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        width: gridCount * cellSize,
-        height: gridCount * cellSize,
-        display: 'block',
-        touchAction: 'none',
-      }}
-      data-mounted={mounted ? '1' : '0'}
-    />
+    <div style={{ position: 'relative' }}>
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: gridCount * cellSize,
+          height: gridCount * cellSize,
+          display: 'block',
+          touchAction: 'none',
+        }}
+        data-mounted={mounted ? '1' : '0'}
+      />
+      {status === 'paused' && (
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[12px] text-[var(--accent)] pointer-events-none">
+          // paused
+        </div>
+      )}
+      {status === 'gameover' && (
+        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 font-mono text-[12px] text-[#ff7070] pointer-events-none">
+          <div>panic!: index out of bounds at line {score}</div>
+          <div className="text-[var(--fg-muted)]">best: {best}</div>
+          <div className="text-[var(--accent)]">press r to restart</div>
+        </div>
+      )}
+    </div>
   );
 }
