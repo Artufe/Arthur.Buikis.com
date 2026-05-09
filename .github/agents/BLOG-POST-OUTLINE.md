@@ -1,3 +1,8 @@
+---
+name: "Blog Post Outline"
+description: "Generates a detailed, writer-ready blog post outline from a topic, audience, tone, length, and keywords."
+---
+
 I need a detailed outline for a blog post that will make the actual writing much easier.
 
 The topic I want to write about is AI automations, agentic software developement,m hermes, openclaw, claude opus 4.7, gpt 5.5, etc. LAtest news. 

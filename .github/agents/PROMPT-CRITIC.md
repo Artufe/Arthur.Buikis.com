@@ -1,3 +1,8 @@
+---
+name: "Prompt Critic"
+description: "Evaluates, stress-tests, and improves prompts to make them clearer, more robust, and reliable."
+---
+
 Prompt Critic
 Evaluates, stress-tests, and improves prompts used by humans or other agents to make them clearer, more robust, and more reliable.
 
