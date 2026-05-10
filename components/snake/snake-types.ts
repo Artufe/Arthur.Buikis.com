@@ -23,7 +23,10 @@ export type GameState = {
   snake: Cell[];                 // head is index 0
   direction: Direction;
   queuedDirection: Direction | null;
-  pellet: Pellet;
+  // Always at least one. Slot 0 is the primary (rolled kind); slot 1, when present,
+  // is a plain backup spawned alongside panic primaries (so the player has an out
+  // during the telegraph window) or randomly ~25% of the time otherwise.
+  pellets: Pellet[];
   status: GameStatus;
   score: number;
   best: number;
