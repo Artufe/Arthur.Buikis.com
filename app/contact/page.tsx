@@ -15,58 +15,47 @@ const expectations = [
 
 export default function ContactPage() {
   return (
-    <div className="mx-auto max-w-[1600px] px-6 pt-12 pb-20 lg:px-16 lg:pt-16 lg:pb-28">
-      <div className="font-mono text-[11px] text-[var(--fg-muted)]">
-        <span className="text-[var(--accent)] mr-2">$</span>echo &quot;hi&quot; | mail
+    <div className="page">
+      <div className="section-header" style={{ padding: '0 28px', maxWidth: 1200, margin: '0 auto 20px' }}>
+        <h2>Contact</h2>
+        <div className="count">say hi</div>
       </div>
-      <h1 className="mt-5 font-serif text-[clamp(48px,7vw,80px)] leading-[0.96] tracking-[-0.03em] font-medium">
-        Get in touch.
-      </h1>
-
-      <div className="mt-14 grid gap-16 lg:grid-cols-[1fr_1.3fr]">
+      <div className="l-asym" style={{ padding: '0 28px', maxWidth: 1200, margin: '0 auto' }}>
         <div>
-          <div className="mb-8">
-            <p className="lbl">Direct</p>
-            <a
-              href={`mailto:${site.email}`}
-              className="mt-2.5 inline-block font-serif text-[22px] underline underline-offset-[6px] decoration-[var(--rule-strong)] hover:decoration-[var(--accent)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
-            >
-              {site.email}
-            </a>
-          </div>
-
-          <div className="mb-8">
-            <p className="lbl">Elsewhere</p>
-            <ul className="mt-3 font-mono text-[13px] leading-[2] text-[var(--fg)]/85">
-              {site.socials.map((s) => (
-                <li key={s.href}>
-                  <a
-                    href={s.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
-                  >
-                    {s.label} <span className="text-[var(--fg-faint)]">↗</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <p className="lbl">What to expect</p>
-            <div className="mt-3 max-w-[40ch] space-y-3">
-              {expectations.map((line, i) => (
-                <p key={i} className="text-[13px] leading-[1.7] text-[var(--fg)]/78">
-                  {line}
-                </p>
-              ))}
+          <form action={site.formspreeEndpoint} method="POST" className="contact-grid">
+            <input type="text" name="name" placeholder="name" required />
+            <input type="email" name="email" placeholder="email" required />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <textarea name="message" placeholder="message" required />
             </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <button type="submit">Send →</button>
+            </div>
+          </form>
+          <div className="socials">
+            {site.socials.map((s) => (
+              <a key={s.href} href={s.href} target="_blank" rel="noopener">
+                {s.label} ↗
+              </a>
+            ))}
           </div>
         </div>
-
         <div>
-          <ContactForm />
+          <div className="side-sticky">
+            <div className="card" style={{ padding: 16 }}>
+              <div className="mono" style={{ marginBottom: 6 }}>direct</div>
+              <p style={{ fontSize: 13, marginBottom: 3 }}>{site.email}</p>
+              <p style={{ fontSize: '10.5px', color: 'var(--muted)' }}>response within 24h</p>
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '2px solid var(--border)' }}>
+                <div className="mono" style={{ marginBottom: 6 }}>also</div>
+                <div style={{ fontSize: 12, lineHeight: 2 }}>
+                  Upwork: 100% Job Success<br />
+                  LinkedIn: arthur-buikis<br />
+                  GitHub: Artufe
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

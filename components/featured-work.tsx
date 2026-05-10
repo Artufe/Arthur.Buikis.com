@@ -71,48 +71,47 @@ const CASES: Case[] = [
 ];
 
 function TagPill({ tag, tone }: { tag: string; tone?: Case['tagTone'] }) {
-  const baseCls = 'px-2.5 py-0.5 border font-mono text-[10px] tracking-wide';
   if (tone === 'current') {
     return (
-      <span className={`${baseCls} text-[var(--live)] border-[var(--live)]/40`}>
+      <span className="px-2.5 py-0.5 border-2 font-mono text-[10px] tracking-wide text-[var(--accent)] border-[var(--accent)]/40">
         <span className="mr-1.5">●</span>
         {tag}
       </span>
     );
   }
-  return <span className={`${baseCls} text-[var(--fg-muted)] border-[var(--rule-strong)]`}>{tag}</span>;
+  return <span className="px-2.5 py-0.5 border-2 font-mono text-[10px] tracking-wide dim border-[var(--border)]">{tag}</span>;
 }
 
 function CaseItem({ c, first }: { c: Case; first: boolean }) {
   const body = (
     <>
-      <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-[var(--fg-muted)]">
+      <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono dim">
         <TagPill tag={c.tag} tone={c.tagTone} />
         <span>{c.years}</span>
         <span>{c.org}</span>
         <span>{c.role}</span>
       </div>
-      <h3 className="mt-3 font-serif text-[26px] lg:text-[28px] leading-[1.1] tracking-tight max-w-[48ch]">
+      <h3 className="mt-3 font-display text-[26px] lg:text-[28px] leading-[1.1] tracking-tight max-w-[48ch]">
         {c.title}
       </h3>
-      <p className="mt-3.5 text-[13px] leading-[1.7] text-[var(--fg-muted)] max-w-[72ch]">
+      <p className="mt-3.5 text-[13px] leading-[1.7] dim max-w-[72ch]">
         {c.summary}
       </p>
-      <dl className="mt-4 pt-3.5 border-t border-[var(--rule)] flex flex-wrap gap-x-8 gap-y-3 font-mono text-[11px]">
+      <dl className="mt-4 pt-3.5 border-t-2 border-[var(--border)] flex flex-wrap gap-x-8 gap-y-3 font-mono text-[11px]">
         {c.meta.map((m) => (
           <div key={m.label}>
-            <dt className="lbl mb-1">{m.label}</dt>
+            <dt className="mono" style={{ marginBottom: 4, fontSize: 9 }}>{m.label}</dt>
             <dd>{m.value}</dd>
           </div>
         ))}
       </dl>
-      <p className="mt-4 font-mono text-[11px] text-[var(--fg-muted)] underline underline-offset-4 decoration-[var(--rule-strong)] group-hover:text-[var(--accent)] group-hover:decoration-[var(--accent)] transition-colors duration-[var(--dur-fast)]">
+      <p className="mt-4 font-mono text-[11px] dim underline underline-offset-4 decoration-[var(--border)] group-hover:text-[var(--accent)] group-hover:decoration-[var(--accent)] transition-colors duration-[var(--dur)]">
         {c.cta}
       </p>
     </>
   );
 
-  const borderCls = first ? 'border-t border-[var(--rule-strong)]' : 'border-t border-[var(--rule)]';
+  const borderCls = first ? 'border-t-2 border-[var(--border)]' : 'border-t-2 border-[var(--border)]';
   const className = `group block py-7 ${borderCls}`;
 
   if (c.href && c.external) {
@@ -136,18 +135,19 @@ export function FeaturedWork() {
   return (
     <section
       id="work"
-      className="mx-auto max-w-[1600px] px-6 py-20 lg:px-16 lg:py-28 border-t border-[var(--rule)]"
+      className="mx-auto max-w-[1600px] px-6 py-20 lg:px-16 lg:py-28"
+      style={{ borderTop: '2px solid var(--border)' }}
     >
       <ScrollReveal>
         <div className="grid gap-14 lg:grid-cols-[1fr_2.5fr]">
           <div>
-            <p className="lbl">Selected work</p>
-            <h2 className="mt-3 font-serif text-[30px] leading-[1.12] tracking-tight font-medium">
+            <p className="mono" style={{ marginBottom: 12 }}>Selected work</p>
+            <h2 className="font-display text-[30px] leading-[1.12] tracking-tight" style={{ margin: 0 }}>
               Cases —<br />
               still writing<br />
               them.
             </h2>
-            <p className="mt-5 font-mono text-[10px] text-[var(--fg-faint)] leading-[1.6]">
+            <p className="mt-5 font-mono text-[10px] dim leading-[1.6]">
               Three shown.
               <br />
               More as I write them up.
@@ -159,7 +159,7 @@ export function FeaturedWork() {
             ))}
             <Link
               href="/work/lethub-scraping-ml"
-              className="mt-1 block py-5 font-mono text-[11px] text-[var(--fg-faint)] border-t border-dashed border-[var(--rule-strong)] hover:text-[var(--accent)] transition-colors duration-[var(--dur-fast)]"
+              className="mt-1 block py-5 font-mono text-[11px] dim border-t-2 border-dashed border-[var(--border)] hover:text-[var(--accent)] transition-colors duration-[var(--dur)]"
             >
               [ next case · lethub scraping pipeline — writing it up ]
             </Link>

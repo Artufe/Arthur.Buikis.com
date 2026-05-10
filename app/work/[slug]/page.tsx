@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { MetaRow } from '@/components/ui/meta-row';
 import Link from 'next/link';
 import { site } from '@/content/site';
 
@@ -87,7 +86,7 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
   };
 
   return (
-    <article className="mx-auto max-w-[720px] px-6 py-16 lg:py-24">
+    <article className="page" style={{ maxWidth: 720, margin: '0 auto', padding: '40px 28px 80px' }}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
@@ -96,22 +95,26 @@ export default async function WorkDetailPage({ params }: { params: Promise<{ slu
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
       />
-      <Link href="/#work" className="lbl hover:text-[var(--accent)] transition-colors">
-        ← All work
-      </Link>
-      <p className="mt-8 lbl">Case study · {meta.date}</p>
-      <h1 className="mt-4 font-serif text-[clamp(36px,5vw,56px)] leading-[1.02] tracking-tight">{meta.title}</h1>
-      <p className="mt-4 font-serif italic text-xl text-[var(--fg-muted)] leading-snug">{meta.subtitle}</p>
-      <MetaRow
-        className="mt-10"
-        items={[
-          { label: 'Role', value: meta.role },
-          { label: 'Stack', value: meta.stack },
-          { label: 'Duration', value: meta.duration },
-          { label: 'Outcome', value: meta.outcome },
-        ]}
-      />
-      <div className="mt-16 max-w-none">
+      <div className="section-header">
+        <Link href="/#work" className="count" style={{ textDecoration: 'underline' }}>
+          ← All work
+        </Link>
+      </div>
+      <div className="meta">{meta.date} · {meta.role}</div>
+      <h1 className="mt-2">{meta.title}</h1>
+      <p style={{ fontSize: '13.5px', color: 'var(--muted)', marginBottom: 10, lineHeight: 1.7 }}>
+        {meta.subtitle}
+      </p>
+
+      <div className="card" style={{ padding: 14, marginBottom: 28 }}>
+        <div className="tags">
+          {['Role: ' + meta.role, 'Stack: ' + meta.stack, 'Duration: ' + meta.duration, 'Outcome: ' + meta.outcome].map((t) => (
+            <span key={t} className="tag">{t}</span>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 'none' }}>
         <Content />
       </div>
     </article>

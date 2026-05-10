@@ -44,20 +44,17 @@ export function ContactForm() {
   }
 
   return (
-    <div
-      className="border border-[var(--rule-strong)] bg-[var(--card)] p-6 sm:p-8"
-      style={{ boxShadow: 'var(--panel-shadow)' }}
-    >
-      <div className="flex items-baseline justify-between border-b border-[var(--rule)] pb-3.5 mb-6">
-        <span className="lbl">
-          <span className="text-[var(--accent)] mr-2">$</span>compose_message
+    <div className="card" style={{ padding: '24px' }}>
+      <div className="flex items-baseline justify-between" style={{ borderBottom: '2px solid var(--border)', paddingBottom: 12, marginBottom: 20 }}>
+        <span className="mono">
+          <span className="ch mr-2">$</span>compose_message
         </span>
-        <span className="font-mono text-[10px] text-[var(--fg-faint)]">sent via formspree · no tracking</span>
+        <span className="font-mono text-[10px] dim">sent via formspree · no tracking</span>
       </div>
 
       <div role="status" aria-live="polite" aria-atomic="true">
         {status === 'success' && (
-          <p className="mb-5 font-serif italic text-[17px] text-[var(--accent)]">
+          <p className="mb-5 font-display italic text-[17px] ch">
             Thanks — I&apos;ll get back to you soon.
           </p>
         )}
@@ -80,27 +77,27 @@ export function ContactForm() {
         />
         <div className="grid gap-6 md:grid-cols-2">
           <div>
-            <label htmlFor="name" className="lbl mb-2 block">Name</label>
+            <label htmlFor="name" className="mono block mb-2">Name</label>
             <Input id="name" name="name" type="text" placeholder="e.g. Anna" required />
           </div>
           <div>
-            <label htmlFor="email" className="lbl mb-2 block">Email</label>
+            <label htmlFor="email" className="mono block mb-2">Email</label>
             <Input id="email" name="email" type="email" placeholder="anna@somewhere.co" required />
           </div>
         </div>
         <div>
-          <label htmlFor="message" className="lbl mb-2 block">Message</label>
+          <label htmlFor="message" className="mono block mb-2">Message</label>
           <Textarea id="message" name="message" rows={6} placeholder="What are you building? What's in the way?" required />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
           <button
             type="submit"
             disabled={status === 'sending'}
-            className="h-11 px-5 bg-[var(--fg)] text-[var(--bg)] font-sans text-[11px] tracking-wide uppercase hover:bg-[var(--accent)] transition-colors duration-[var(--dur-fast)] disabled:opacity-50"
+            className="h-11 px-5 border-2 border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] font-mono text-[12px] uppercase tracking-[0.12em] hover:bg-[var(--accent)] hover:border-[var(--accent)] transition-colors duration-[var(--dur)] disabled:opacity-50"
           >
             {status === 'sending' ? 'Sending…' : 'Send message'}
           </button>
-          <span className="font-mono text-[10px] text-[var(--fg-faint)] inline-flex items-center gap-2">
+          <span className="font-mono text-[10px] dim inline-flex items-center gap-2">
             <span className="kbd">/</span>
             or use commands anywhere
           </span>

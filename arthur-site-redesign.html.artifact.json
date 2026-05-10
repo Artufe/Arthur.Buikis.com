@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "html",
+  "title": "Arthur Buikis — Brutalist/Terminal Site Redesign",
+  "entry": "arthur-site-redesign.html",
+  "renderer": "html",
+  "status": "complete",
+  "exports": [
+    "html",
+    "pdf",
+    "zip"
+  ],
+  "createdAt": "2026-05-10T00:05:07.088Z",
+  "updatedAt": "2026-05-10T00:05:07.112Z",
+  "metadata": {
+    "identifier": "arthur-site-redesign",
+    "artifactType": "text/html",
+    "inferred": false
+  }
+}

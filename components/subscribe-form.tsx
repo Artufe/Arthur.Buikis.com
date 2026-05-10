@@ -45,26 +45,25 @@ export function SubscribeForm({ variant = 'panel', className }: { variant?: Vari
 
   const wrapper = cn(
     variant === 'panel'
-      ? 'border border-[var(--rule-strong)] bg-[var(--card)] p-6 sm:p-8'
-      : 'border-t border-[var(--rule-strong)] pt-10',
+      ? 'border-2 border-[var(--border)] p-6 sm:p-8'
+      : 'pt-10',
     className,
   );
-  const wrapperStyle = variant === 'panel' ? { boxShadow: 'var(--panel-shadow)' } : undefined;
 
   return (
-    <section className={wrapper} style={wrapperStyle} aria-labelledby="subscribe-title">
-      <p className="lbl">{COPY.eyebrow}</p>
+    <section className={wrapper} aria-labelledby="subscribe-title">
+      <p className="mono">{COPY.eyebrow}</p>
       <h2
         id="subscribe-title"
-        className="mt-3 font-serif text-2xl sm:text-3xl leading-snug"
+        className="mt-3 font-display text-2xl sm:text-3xl leading-snug"
       >
         {COPY.title}
       </h2>
-      <p className="mt-2 text-[var(--fg-muted)] leading-relaxed max-w-[52ch]">{COPY.body}</p>
+      <p className="mt-2 dim leading-relaxed max-w-[52ch]">{COPY.body}</p>
 
       <div role="status" aria-live="polite" aria-atomic="true">
         {status === 'success' && (
-          <p className="mt-5 font-serif italic text-[17px] text-[var(--accent)]">
+          <p className="mt-5 font-display italic text-[17px] ch">
             You&apos;re on the list. Watch your inbox.
           </p>
         )}
@@ -86,7 +85,7 @@ export function SubscribeForm({ variant = 'panel', className }: { variant?: Vari
             style={{ position: 'absolute', left: '-9999px', width: 0, height: 0 }}
           />
           <div className="flex-1">
-            <label htmlFor="subscribe-email" className="lbl mb-2 block">
+            <label htmlFor="subscribe-email" className="mono mb-2 block">
               Email
             </label>
             <Input
@@ -101,18 +100,18 @@ export function SubscribeForm({ variant = 'panel', className }: { variant?: Vari
           <button
             type="submit"
             disabled={status === 'sending'}
-            className="h-11 px-5 bg-[var(--fg)] text-[var(--bg)] font-sans text-[11px] tracking-wide uppercase hover:bg-[var(--accent)] focus-visible:bg-[var(--accent)] transition-colors duration-[var(--dur-fast)] disabled:opacity-50 sm:self-end whitespace-nowrap"
+            className="h-11 px-5 border-2 border-[var(--fg)] bg-[var(--fg)] text-[var(--bg)] font-mono text-[12px] uppercase tracking-[0.12em] hover:bg-[var(--accent)] hover:border-[var(--accent)] transition-colors duration-[var(--dur)] disabled:opacity-50 whitespace-nowrap"
           >
             {status === 'sending' ? 'Subscribing…' : 'Subscribe'}
           </button>
         </form>
       ) : (
-        <p className="mt-6 font-mono text-[12px] text-[var(--fg-faint)] leading-relaxed max-w-[52ch]">
+        <p className="mt-6 font-mono text-[12px] dim leading-relaxed max-w-[52ch]">
           {COPY.comingSoon}
         </p>
       )}
 
-      <p className="mt-4 font-mono text-[10px] text-[var(--fg-faint)]">
+      <p className="mt-4 font-mono text-[10px] dim">
         no spam · unsubscribe anytime
       </p>
     </section>

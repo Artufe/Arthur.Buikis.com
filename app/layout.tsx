@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { fraunces, inter, jetBrainsMono } from './fonts';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
-import { Gridlines } from '@/components/gridlines';
-import { Grain } from '@/components/grain';
+import { ScanLine } from '@/components/scan-line';
 import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
 import { SnakeWindowHost } from '@/components/snake/snake-window-host';
@@ -63,7 +61,7 @@ const websiteLd = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${inter.variable} ${jetBrainsMono.variable}`}>
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen">
         <script
           type="application/ld+json"
@@ -75,10 +73,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
         <ThemeProvider>
           <HeroShader />
-          <Gridlines />
-          <Grain />
+          <ScanLine />
           <Nav />
-          <main className="relative z-10 pt-20">{children}</main>
+          <main className="relative z-10 pt-16">{children}</main>
           <Footer />
           <SnakeWindowHost />
           <CommandPaletteLazy />

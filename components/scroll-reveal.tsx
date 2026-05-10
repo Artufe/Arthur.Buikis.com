@@ -39,8 +39,8 @@ export function ScrollReveal({
     <div
       ref={ref}
       className={cn(
-        'transition-[opacity,transform] duration-[var(--dur-slow)] ease-[var(--ease-luxury)]',
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3',
+        'reveal',
+        visible ? 'vis' : '',
         className
       )}
     >
