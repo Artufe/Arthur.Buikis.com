@@ -42,3 +42,6 @@ playwright-report/
 
 # superset / agent local state
 .superset/
+
+# Cursor / Claude Code local project state
+.claude/
