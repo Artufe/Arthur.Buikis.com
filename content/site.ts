@@ -5,10 +5,17 @@ export const site = {
   brand: 'ab.',
   description: 'Senior full-stack engineer. Ships systems that hold up.',
   formspreeEndpoint: 'https://formspree.io/f/xaqadvlz',
-  // Set to your newsletter provider's form-submit URL (Beehiiv,
-  // ConvertKit/Kit, MailerLite, Buttondown — anything that accepts a
-  // POST with form-encoded "email"). Leave empty to render a
-  // "coming soon" CTA instead of a live form.
+  // Newsletter provider form-submit URL. Anything that accepts a POST
+  // with form-encoded `email` works — components/subscribe-form.tsx is
+  // service-agnostic. Recommended: Buttondown (free <100 subs, no
+  // branding, one-click unsubscribe baked in). Drop in one of:
+  //   Buttondown:   https://buttondown.email/api/emails/embed-subscribe/<username>
+  //   Formspree:    https://formspree.io/f/<form-id>
+  //   ConvertKit:   https://app.convertkit.com/forms/<form-id>/subscriptions
+  //   MailerLite:   https://assets.mailerlite.com/jsonp/<account>/forms/<id>/subscribe
+  // Leave empty to render a "coming soon" CTA instead of a live form.
+  // After updating: `node scripts/test-live-subscribe.mjs` against prod
+  // confirms a real round-trip.
   subscribeEndpoint: '',
   nav: [
     { label: 'Work', href: '/#work' },
