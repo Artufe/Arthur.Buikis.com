@@ -19,10 +19,13 @@ describe('snake-engine — initial state', () => {
     expect(s.snake[0].y).toBe(11);
   });
 
-  it('places a pellet not on the snake', () => {
+  it('places at least one pellet, never on the snake', () => {
     const s = createInitialState({ gridCount: 22, seed: 1, now: 0 });
-    const onSnake = s.snake.some((c) => c.x === s.pellet.cell.x && c.y === s.pellet.cell.y);
-    expect(onSnake).toBe(false);
+    expect(s.pellets.length).toBeGreaterThanOrEqual(1);
+    for (const p of s.pellets) {
+      const onSnake = s.snake.some((c) => c.x === p.cell.x && c.y === p.cell.y);
+      expect(onSnake).toBe(false);
+    }
   });
 });
 
@@ -86,7 +89,7 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'plain', glyph: 'def', armedAt: 0 },
+      pellets: [{ cell: { x: 6, y: 5 }, kind: 'plain', glyph: 'def', armedAt: 0 }],
       direction: 'right',
       queuedDirection: null,
     });
@@ -99,7 +102,7 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'claude', glyph: 'claude', armedAt: 0 },
+      pellets: [{ cell: { x: 6, y: 5 }, kind: 'claude', glyph: 'claude', armedAt: 0 }],
       direction: 'right',
       queuedDirection: null,
     });
@@ -114,7 +117,7 @@ describe('snake-engine — pellets', () => {
       {
         ...base,
         snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-        pellet: { cell: { x: 6, y: 5 }, kind: 'async', glyph: 'async', armedAt: 0 },
+        pellets: [{ cell: { x: 6, y: 5 }, kind: 'async', glyph: 'async', armedAt: 0 }],
         direction: 'right',
         queuedDirection: null,
       },
@@ -130,13 +133,29 @@ describe('snake-engine — pellets', () => {
     const s = tickOnce({
       ...base,
       snake: [{ x: 5, y: 5 }, { x: 4, y: 5 }],
-      pellet: { cell: { x: 6, y: 5 }, kind: 'panic', glyph: 'panic!', armedAt: 0 },
+      pellets: [{ cell: { x: 6, y: 5 }, kind: 'panic', glyph: 'panic!', armedAt: 0 }],
       score: 7,
       direction: 'right',
       queuedDirection: null,
     });
     expect(s.status).toBe('gameover');
     expect(s.consoleLines.at(-1)?.text).toBe('panic!: index out of bounds at line 7');
+  });
+
+  it('panic primary always spawns alongside a plain backup', () => {
+    // Sweep many seeds; whenever createInitialState lands on a panic primary, assert
+    // that a second pellet exists and is plain. Backup keeps the player from being
+    // stranded during the telegraph window.
+    let sawPanicPrimary = 0;
+    for (let seed = 1; seed < 500; seed++) {
+      const s = createInitialState({ gridCount: 22, seed, now: 0 });
+      if (s.pellets[0].kind === 'panic') {
+        sawPanicPrimary += 1;
+        expect(s.pellets.length).toBe(2);
+        expect(s.pellets[1].kind).toBe('plain');
+      }
+    }
+    expect(sawPanicPrimary).toBeGreaterThan(0); // sanity: 6% rate × 500 seeds
   });
 
   it('placement guard never spawns a panic pellet on the only legal next cell', () => {

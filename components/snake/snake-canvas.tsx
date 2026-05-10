@@ -130,17 +130,16 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           const before = stateRef.current;
           const after = step(before, before.lastTickAt + tickInterval);
           const ate = after.score !== before.score || after.snake.length !== before.snake.length;
-          if (ate) {
+          // The eaten pellet is the one whose cell matches the new head's destination.
+          const newHead = after.snake[0];
+          const eaten = ate ? before.pellets.find((p) => p.cell.x === newHead.x && p.cell.y === newHead.y) : null;
+          if (ate && eaten) {
             // Light shake on every eat — universal "thump" feedback.
             // Heavier on claude (the rare big-payoff pellet).
-            const intensity = before.pellet.kind === 'claude' ? 6 : 3;
+            const intensity = eaten.kind === 'claude' ? 6 : 3;
             handleRef.current.triggerShake(intensity, 180);
-          }
-          if (ate && before.pellet.kind === 'claude') {
-            handleRef.current.triggerShockwave(before.pellet.cell);
-          }
-          if (ate && before.pellet.kind === 'async') {
-            handleRef.current.flashGlitch();
+            if (eaten.kind === 'claude') handleRef.current.triggerShockwave(eaten.cell);
+            if (eaten.kind === 'async') handleRef.current.flashGlitch();
           }
           if (after.status === 'gameover' && before.status === 'playing') {
             handleRef.current.flashGlitch();

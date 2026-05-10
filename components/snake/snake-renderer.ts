@@ -120,17 +120,24 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
   const body = new Graphics();
   root.addChild(body);
 
-  const pelletText = new Text({
-    text: '',
-    style: new TextStyle({
-      fontFamily: 'monospace',
-      fontSize: opts.cellSize * 0.8,
-      fill: opts.accentHex,
-      align: 'center',
-    }),
-  });
-  pelletText.anchor.set(0.5);
-  root.addChild(pelletText);
+  // Pellet text pool — sized to match state.pellets.length each frame; max 2 in practice.
+  const pelletTexts: Text[] = [];
+  function ensurePelletText(i: number): Text {
+    if (i < pelletTexts.length) return pelletTexts[i];
+    const t = new Text({
+      text: '',
+      style: new TextStyle({
+        fontFamily: 'monospace',
+        fontSize: opts.cellSize * 0.8,
+        fill: opts.accentHex,
+        align: 'center',
+      }),
+    });
+    t.anchor.set(0.5);
+    root.addChild(t);
+    pelletTexts.push(t);
+    return t;
+  }
 
   let timeAccum = 0;
   let shockwaveStart = -1;
@@ -210,40 +217,50 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
 
   function render(state: GameState, headTween: Cell, tailTween: Cell, now: number) {
     drawBody(body, state, headTween, tailTween, opts);
-    pelletText.text = state.pellet.glyph;
 
-    // Telegraph: panic pellets pulse + dim during the pre-arm window so the player
-    // sees the threat before it can kill them. Live panic is solid red, plain pellets
-    // and active boosts use the accent color.
-    let fill = opts.accentHex;
-    let alpha = 1;
-    if (state.pellet.kind === 'panic') {
-      const armed = now >= state.pellet.armedAt;
-      fill = opts.panicHex;
-      if (!armed) {
-        // Sine pulse over the telegraph window — alpha 0.4 → 1 → 0.4.
-        const left = state.pellet.armedAt - now;
-        const phase = (left / 200) * Math.PI; // ~5 pulses across 1.2s
-        alpha = 0.6 + 0.4 * Math.sin(phase);
+    // Render every pellet on the board (1 or 2 in practice). Pool reuses Text instances.
+    state.pellets.forEach((pellet, i) => {
+      const txt = ensurePelletText(i);
+      txt.visible = true;
+      txt.text = pellet.glyph;
+
+      // Telegraph: panic pellets pulse + dim during the pre-arm window so the player
+      // sees the threat before it can kill them. Live panic is solid red, plain pellets
+      // and active boosts use the accent color.
+      let fill = opts.accentHex;
+      let alpha = 1;
+      if (pellet.kind === 'panic') {
+        const armed = now >= pellet.armedAt;
+        fill = opts.panicHex;
+        if (!armed) {
+          // Sine pulse over the telegraph window — alpha 0.6 → 1 → 0.6.
+          const left = pellet.armedAt - now;
+          const phase = (left / 200) * Math.PI; // ~5 pulses across 1.2s
+          alpha = 0.6 + 0.4 * Math.sin(phase);
+        }
       }
-    }
-    pelletText.style.fill = fill;
-    pelletText.alpha = alpha;
+      txt.style.fill = fill;
+      txt.alpha = alpha;
 
-    // Tiered sizing — keep food large enough to read at a glance. Multichar keywords
-    // intentionally spill into adjacent cells; the body's stroke draws over them harmlessly
-    // when the snake passes by.
-    const len = state.pellet.glyph.length;
-    let fontSize: number;
-    if (len <= 2) fontSize = opts.cellSize * 1.05; // single-char symbols fill the cell
-    else if (len === 3) fontSize = opts.cellSize * 0.85;
-    else if (len === 4) fontSize = opts.cellSize * 0.75;
-    else fontSize = opts.cellSize * 0.65; // 5-6 chars (async, claude, panic!, await)
-    pelletText.style.fontSize = fontSize;
-    pelletText.position.set(
-      state.pellet.cell.x * opts.cellSize + opts.cellSize / 2,
-      state.pellet.cell.y * opts.cellSize + opts.cellSize / 2,
-    );
+      // Tiered sizing — keep food large enough to read at a glance. Multichar keywords
+      // intentionally spill into adjacent cells; the body's stroke draws over them harmlessly
+      // when the snake passes by.
+      const len = pellet.glyph.length;
+      let fontSize: number;
+      if (len <= 2) fontSize = opts.cellSize * 1.05;
+      else if (len === 3) fontSize = opts.cellSize * 0.85;
+      else if (len === 4) fontSize = opts.cellSize * 0.75;
+      else fontSize = opts.cellSize * 0.65;
+      txt.style.fontSize = fontSize;
+      txt.position.set(
+        pellet.cell.x * opts.cellSize + opts.cellSize / 2,
+        pellet.cell.y * opts.cellSize + opts.cellSize / 2,
+      );
+    });
+    // Hide unused pool slots from previous renders.
+    for (let i = state.pellets.length; i < pelletTexts.length; i++) {
+      pelletTexts[i].visible = false;
+    }
   }
 
   function triggerShockwave(at: Cell) {
