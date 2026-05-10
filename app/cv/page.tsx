@@ -3,9 +3,25 @@ import { cvHeadline, cvExperience, cvProjects, cvLanguages } from '@/content/cv'
 import { stackGroups } from '@/content/about';
 import { site } from '@/content/site';
 
+const title = 'CV';
+const description = 'Senior backend / platform engineer — Python, Rust, data pipelines, Kubernetes.';
+const path = '/cv/';
+
 export const metadata: Metadata = {
-  title: 'CV',
-  description: 'Senior backend / platform engineer — Python, Rust, data pipelines, Kubernetes.',
+  title,
+  description,
+  alternates: { canonical: path },
+  openGraph: {
+    type: 'website',
+    title,
+    description,
+    url: path,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title,
+    description,
+  },
 };
 
 export default function CVPage() {

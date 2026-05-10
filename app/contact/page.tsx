@@ -2,9 +2,25 @@ import type { Metadata } from 'next';
 import { ContactForm } from '@/components/contact-form';
 import { site } from '@/content/site';
 
+const title = 'Contact';
+const description = 'Get in touch about freelance, consulting, or full-time work.';
+const path = '/contact/';
+
 export const metadata: Metadata = {
-  title: 'Contact',
-  description: 'Get in touch about freelance, consulting, or full-time work.',
+  title,
+  description,
+  alternates: { canonical: path },
+  openGraph: {
+    type: 'website',
+    title,
+    description,
+    url: path,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title,
+    description,
+  },
 };
 
 const expectations = [
