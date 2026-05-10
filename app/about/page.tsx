@@ -9,9 +9,25 @@ import {
   beliefs,
 } from '@/content/about';
 
+const title = 'About';
+const description = 'Backend & platform engineer · Riga · twelve-ish years in.';
+const path = '/about/';
+
 export const metadata: Metadata = {
-  title: 'About',
-  description: 'Backend & platform engineer · Riga · twelve-ish years in.',
+  title,
+  description,
+  alternates: { canonical: path },
+  openGraph: {
+    type: 'website',
+    title,
+    description,
+    url: path,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title,
+    description,
+  },
 };
 
 export default function AboutPage() {

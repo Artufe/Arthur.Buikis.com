@@ -1,9 +1,25 @@
 import type { Metadata } from 'next';
 import Content, { meta } from '@/content/building/index.mdx';
 
+const title = 'Building';
+const description = 'What I\'m currently building — status, scope, and how to follow.';
+const path = '/building/';
+
 export const metadata: Metadata = {
-  title: 'Building',
-  description: 'What I\'m currently building — status, scope, and how to follow.',
+  title,
+  description,
+  alternates: { canonical: path },
+  openGraph: {
+    type: 'website',
+    title,
+    description,
+    url: path,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title,
+    description,
+  },
 };
 
 export default function BuildingPage() {
