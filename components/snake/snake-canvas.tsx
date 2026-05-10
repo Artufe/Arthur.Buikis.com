@@ -278,7 +278,16 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   }, []);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div
+      style={{
+        position: 'relative',
+        // Subtle accent-toned frame so the play-area edges read clearly against
+        // the surrounding background. 1px hard line + a soft outer glow ties it
+        // to the rest of the terminal/CRT vibe without re-adding the shader.
+        border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+        boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 0 18px color-mix(in srgb, var(--accent) 12%, transparent)',
+      }}
+    >
       <canvas
         ref={canvasRef}
         style={{
@@ -289,6 +298,17 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         }}
         data-mounted={mounted ? '1' : '0'}
       />
+      {/* Corner brackets — terminal-style "this is your bounded play area" markers.
+          Quick visual confirmation of the four corners on top of the soft frame. */}
+      {(['top-1 left-1 border-t border-l', 'top-1 right-1 border-t border-r', 'bottom-1 left-1 border-b border-l', 'bottom-1 right-1 border-b border-r'] as const).map(
+        (pos, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className={`absolute ${pos} w-3 h-3 border-[var(--accent)]/70 pointer-events-none`}
+          />
+        ),
+      )}
       <div className="absolute top-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none">
         score {score}
       </div>
