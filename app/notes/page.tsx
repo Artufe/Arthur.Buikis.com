@@ -37,44 +37,40 @@ export default async function NotesIndexPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[720px] px-6 py-16 lg:py-24">
+    <div className="page" style={{ maxWidth: 720, margin: '0 auto', padding: '40px 28px 80px' }}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(blogLd) }}
       />
 
-      <p className="lbl">Notes</p>
-      <h1 className="mt-4 font-serif text-[clamp(36px,5vw,56px)] leading-[1.02] tracking-tight">
-        AI in production, not in pitches.
-      </h1>
-      <p className="mt-4 font-serif italic text-xl text-[var(--fg-muted)] leading-snug">
-        Short, opinionated notes from the senior-engineer side of AI/ML.
+      <div className="section-header">
+        <h2>Notes</h2>
+        <div className="count">{notes.length} post{notes.length !== 1 ? 's' : ''}</div>
+      </div>
+      <p style={{ fontSize: '13.5px', color: 'var(--muted)', marginBottom: 28, lineHeight: 1.7 }}>
+        AI in production, not in pitches. Short, opinionated notes from the senior-engineer side of AI/ML.
       </p>
 
       {notes.length === 0 ? (
-        <p className="mt-16 text-[var(--fg-muted)]">Nothing here yet.</p>
+        <p style={{ color: 'var(--muted)' }}>Nothing here yet.</p>
       ) : (
-        <ul className="mt-16 divide-y divide-[var(--rule)]">
+        <div>
           {notes.map(({ slug, meta }) => (
-            <li key={slug} className="py-8 first:pt-0">
+            <div key={slug} className="card reveal">
+              <div className="meta">{formatDate(meta.datePublished)}</div>
               <Link
                 href={`/notes/${slug}/`}
-                className="group block transition-colors duration-[var(--dur-fast)]"
+                style={{ textDecoration: 'none', color: 'inherit' }}
               >
-                <p className="lbl text-[var(--fg-faint)] group-hover:text-[var(--accent)]">
-                  {formatDate(meta.datePublished)}
-                </p>
-                <h2 className="mt-2 font-serif text-2xl leading-tight group-hover:text-[var(--accent)]">
-                  {meta.title}
-                </h2>
-                <p className="mt-2 text-[var(--fg-muted)] leading-relaxed">{meta.description}</p>
+                <h3 style={{ fontSize: 20 }}>{meta.title}</h3>
               </Link>
-            </li>
+              <p>{meta.description}</p>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
 
-      <div className="mt-20">
+      <div style={{ marginTop: 40 }}>
         <SubscribeForm variant="panel" />
       </div>
     </div>

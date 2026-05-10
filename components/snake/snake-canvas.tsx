@@ -312,7 +312,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       <div className="absolute top-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none">
         score {score}
       </div>
-      <div className="absolute top-2 right-2 font-mono text-[11px] text-[var(--fg-muted)] pointer-events-none select-none">
+      <div className="absolute top-2 right-2 font-mono text-[11px] dim pointer-events-none select-none">
         best {best}
       </div>
       {/* Combo badge — visible only while a streak is active. Bottom-left so it doesn't
@@ -332,10 +332,10 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           <div className="text-[14px] text-[#ff7070] font-bold">
             panic! at line {score}
           </div>
-          <div className="text-[10px] text-[var(--fg-faint)] flex gap-3 mt-1">
-            <span>len <span className="text-[var(--fg-muted)]">{maxLength}</span></span>
-            <span>combo <span className="text-[var(--fg-muted)]">×{bestCombo}</span></span>
-            <span>best <span className="text-[var(--fg-muted)]">{best}</span></span>
+          <div className="text-[10px] dim flex gap-3 mt-1">
+            <span>len <span className="dim">{maxLength}</span></span>
+            <span>combo <span className="dim">×{bestCombo}</span></span>
+            <span>best <span className="dim">{best}</span></span>
           </div>
           <div className="text-[11px] text-[var(--accent)] mt-2">press r to restart</div>
         </div>

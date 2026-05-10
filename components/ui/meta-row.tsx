@@ -10,13 +10,13 @@ export function MetaRow({ items, className }: { items: MetaItem[]; className?: s
   return (
     <dl
       className={cn(
-        'flex flex-wrap gap-x-10 gap-y-6 pt-4 border-t border-[var(--rule-strong)] font-mono text-xs',
+        'flex flex-wrap gap-x-10 gap-y-6 pt-4 border-t-2 border-[var(--border)] font-mono text-xs',
         className
       )}
     >
       {items.map((item) => (
         <div key={item.label}>
-          <dt className="block font-sans text-[9px] uppercase tracking-[0.2em] text-[var(--fg-muted)] mb-1.5">
+          <dt className="block font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--muted)] mb-1.5">
             {item.label}
           </dt>
           <dd>{item.value}</dd>

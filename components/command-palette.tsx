@@ -46,7 +46,7 @@ function Highlight({ text, indices }: { text: string; indices: number[] }) {
   return (
     <>
       {[...text].map((ch, i) => (
-        <span key={i} className={set.has(i) ? 'text-[var(--accent)]' : undefined}>
+        <span key={i} className={set.has(i) ? 'ch' : undefined}>
           {ch}
         </span>
       ))}
@@ -233,7 +233,7 @@ export function CommandPalette() {
   return (
     <>
       {hintVisible && !open && (
-        <div className="fixed bottom-5 right-5 hidden md:flex items-center gap-2 font-mono text-[10px] text-[var(--fg-faint)] pointer-events-none z-40">
+        <div className="fixed bottom-5 right-5 hidden md:flex items-center gap-2 font-mono text-[10px] text-[var(--muted)] pointer-events-none z-40">
           <span>press</span>
           <span className="kbd">/</span>
           <span>for commands</span>
@@ -242,23 +242,24 @@ export function CommandPalette() {
 
       {open && (
         <div
-          className="fixed inset-0 z-[100] bg-[#080808]/85 backdrop-blur-md flex items-start justify-center pt-[14vh] px-4"
+          className="fixed inset-0 z-[100] flex items-start justify-center pt-[14vh] px-4"
+          style={{ background: 'oklch(0% 0 0 / 0.88)' }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) close();
           }}
         >
-          <div className="w-full max-w-[540px] bg-[color-mix(in_srgb,var(--bg-muted)_75%,var(--bg)_25%)] border border-[var(--rule)] shadow-[0_40px_80px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.03)] font-mono">
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--rule)]">
-              <span className="text-[var(--accent)] text-[16px] leading-none">›</span>
+          <div className="w-full max-w-[540px] font-mono" style={{ background: 'var(--bg)', border: '2px solid var(--border)', animation: 'panel-in 250ms var(--ease)' }}>
+            <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: '2px solid var(--border)' }}>
+              <span className="text-[var(--accent)] text-[16px] leading-none animate-[blink_1s_step-end_infinite]">$</span>
               <input
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="type a command…"
                 aria-label="Command palette"
-                className="flex-1 bg-transparent border-none outline-none font-mono text-[14px] text-[var(--fg)] placeholder:text-[var(--fg-faint)]"
+                className="flex-1 bg-transparent border-none outline-none font-mono text-[14px] text-[var(--fg)] placeholder:text-[var(--muted)]"
               />
-              <span className="text-[11px] text-[var(--fg-faint)] tracking-wider">
+              <span className="text-[11px] tracking-wider" style={{ color: 'var(--muted)' }}>
                 {inline?.kind === 'whoami'
                   ? 'ran'
                   : inline?.kind === 'help'
@@ -272,16 +273,16 @@ export function CommandPalette() {
             </div>
 
             {inline?.kind === 'whoami' && (
-              <div className="px-5 py-4 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)] border-b border-[var(--rule)] text-[13.5px] leading-[1.75] text-[var(--fg)]/90">
-                <div className="text-[var(--fg-muted)] font-medium">{whoamiLines.prompt}</div>
+              <div className="px-5 py-4 text-[13.5px] leading-[1.75]" style={{ background: 'color-mix(in srgb, var(--accent) 6%, transparent)', borderBottom: '2px solid var(--border)' }}>
+                <div style={{ color: 'var(--muted)', fontWeight: 500, marginBottom: 3 }}>{whoamiLines.prompt}</div>
                 {whoamiLines.lines.map((l, i) => (
                   <div key={i}>{l}</div>
                 ))}
-                <div className="mt-2 text-[var(--fg-faint)]">
+                <div className="mt-2" style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
                   — try also:{' '}
                   {whoamiLines.hintSuggestions.map((tok, i, arr) => (
                     <span key={tok}>
-                      <span className="text-[var(--accent)]">{tok}</span>
+                      <span className="ch">{tok}</span>
                       {i < arr.length - 1 ? ', ' : ''}
                     </span>
                   ))}
@@ -290,18 +291,18 @@ export function CommandPalette() {
             )}
 
             {inline?.kind === 'help' && (
-              <div className="px-5 py-4 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)] border-b border-[var(--rule)] text-[13.5px] leading-[1.8] text-[var(--fg)]/90">
-                <div className="text-[var(--fg-muted)] font-medium">{helpLines.prompt}</div>
+              <div className="px-5 py-4 text-[13.5px] leading-[1.8]" style={{ background: 'color-mix(in srgb, var(--accent) 6%, transparent)', borderBottom: '2px solid var(--border)' }}>
+                <div style={{ color: 'var(--muted)', fontWeight: 500, marginBottom: 3 }}>{helpLines.prompt}</div>
                 {helpLines.lines.map((l, i) => (
                   <div key={i}>{l}</div>
                 ))}
-                <div className="mt-2 text-[var(--fg-faint)]">— {helpLines.hint}</div>
+                <div className="mt-2" style={{ fontSize: '10.5px', color: 'var(--muted)' }}>— {helpLines.hint}</div>
               </div>
             )}
 
             {inline?.kind === 'copied' && (
-              <div className="px-5 py-4 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)] border-b border-[var(--rule)] text-[13.5px] text-[var(--fg)]/90">
-                copied to clipboard · <span className="text-[var(--accent)]">{inline.value}</span>
+              <div className="px-5 py-4 text-[13.5px]" style={{ background: 'color-mix(in srgb, var(--accent) 6%, transparent)', borderBottom: '2px solid var(--border)' }}>
+                copied to clipboard · <span className="ch">{inline.value}</span>
               </div>
             )}
 
@@ -309,7 +310,7 @@ export function CommandPalette() {
               <div className="max-h-[50vh] overflow-y-auto py-2">
                 {grouped.map(({ group, items }) => (
                   <div key={group}>
-                    <div className="px-5 pt-2 pb-1 text-[9px] font-sans uppercase tracking-[0.22em] text-[var(--fg-faint)]/70">
+                    <div className="px-5 pt-2 pb-1 text-[9px] uppercase tracking-[0.2em]" style={{ color: 'var(--muted)' }}>
                       {group}
                     </div>
                     {items.map(({ cmd, match }) => {
@@ -327,13 +328,18 @@ export function CommandPalette() {
                           onClick={() => runAction(cmd)}
                           className={`w-full flex items-center gap-3 text-[13px] text-left transition-colors duration-[var(--dur-fast)] ${
                             isSelected
-                              ? 'pl-[18px] pr-5 py-2 bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] text-[var(--accent)] border-l-[2px] border-[var(--accent)]'
-                              : 'px-5 py-2 text-[var(--fg)]/80 border-l-[2px] border-transparent'
+                              ? 'pl-[18px] pr-5 py-2 text-[var(--accent)]'
+                              : 'px-5 py-2 text-[var(--fg)]/80'
                           }`}
+                          style={
+                            isSelected
+                              ? { background: 'color-mix(in srgb, var(--accent) 10%, transparent)', borderLeft: '2px solid var(--accent)' }
+                              : { borderLeft: '2px solid transparent' }
+                          }
                         >
                           <span
                             className={`text-[12px] ${
-                              isSelected ? 'text-[var(--accent)]' : 'text-[var(--fg-faint)]'
+                              isSelected ? 'ch' : 'dim'
                             }`}
                           >
                             {cmd.arrow}
@@ -343,7 +349,7 @@ export function CommandPalette() {
                           </span>
                           <span
                             className={`text-[10.5px] ${
-                              isSelected ? 'text-[var(--accent)]/80' : 'text-[var(--fg-faint)]'
+                              isSelected ? 'text-[var(--accent)]/80' : 'dim'
                             }`}
                           >
                             {isCurrentTheme ? 'current' : cmd.hint ?? ''}
@@ -357,14 +363,14 @@ export function CommandPalette() {
             )}
 
             {!inline && grouped.length === 0 && (
-              <div className="px-5 py-10 text-center text-[13px] text-[var(--fg-faint)]">
+              <div className="px-5 py-10 text-center text-[13px] dim">
                 no matches. try{' '}
-                <span className="text-[var(--accent)]">help</span> or{' '}
-                <span className="text-[var(--accent)]">whoami</span>.
+                <span className="ch">help</span> or{' '}
+                <span className="ch">whoami</span>.
               </div>
             )}
 
-            <div className="flex items-center justify-between px-5 py-2.5 border-t border-[var(--rule)] text-[10.5px] text-[var(--fg-faint)] bg-[var(--bg)]/30">
+            <div className="flex items-center justify-between px-5 py-2.5 text-[10.5px]" style={{ borderTop: '2px solid var(--border)', color: 'var(--muted)', background: 'color-mix(in srgb, var(--bg) 70%, transparent)' }}>
               <div className="flex gap-3">
                 {inline ? (
                   <>
@@ -394,7 +400,7 @@ export function CommandPalette() {
                   ? 'easter egg'
                   : query
                     ? `fuzzy · ${flatResults.length} of ${commands.length}`
-                    : 'v1'}
+                    : 'v3'}
               </span>
             </div>
           </div>

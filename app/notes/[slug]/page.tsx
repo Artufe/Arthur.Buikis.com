@@ -47,13 +47,13 @@ function formatDate(iso: string) {
 
 function FAQBlock({ items }: { items: NoteFAQ[] }) {
   return (
-    <section className="mt-16 border-t border-[var(--rule-strong)] pt-10">
-      <p className="lbl mb-6">FAQ</p>
+    <section className="mt-16 pt-10" style={{ borderTop: '2px solid var(--border)' }}>
+      <p className="mono mb-6">FAQ</p>
       <dl className="space-y-6">
         {items.map((item) => (
           <div key={item.q}>
-            <dt className="font-serif text-lg leading-snug">{item.q}</dt>
-            <dd className="mt-2 text-[var(--fg-muted)] leading-relaxed">{item.a}</dd>
+            <dt className="font-display text-lg leading-snug">{item.q}</dt>
+            <dd className="mt-2 dim leading-relaxed">{item.a}</dd>
           </div>
         ))}
       </dl>
@@ -63,23 +63,23 @@ function FAQBlock({ items }: { items: NoteFAQ[] }) {
 
 function HowToBlock({ howTo }: { howTo: NoteHowTo }) {
   return (
-    <section className="mt-16 border-t border-[var(--rule-strong)] pt-10">
-      <p className="lbl mb-6">{howTo.name}</p>
+    <section className="mt-16 pt-10" style={{ borderTop: '2px solid var(--border)' }}>
+      <p className="mono mb-6">{howTo.name}</p>
       {howTo.description && (
-        <p className="text-[var(--fg-muted)] leading-relaxed mb-6">{howTo.description}</p>
+        <p className="dim leading-relaxed mb-6">{howTo.description}</p>
       )}
-      <ol className="space-y-5 list-none counter-reset-[step]">
+      <ol className="space-y-5 list-none">
         {howTo.steps.map((step, i) => (
           <li key={step.name} className="flex gap-5">
             <span
-              className="font-mono text-[11px] text-[var(--fg-faint)] mt-1 w-6 shrink-0"
+              className="font-mono text-[11px] dim mt-1 w-6 shrink-0"
               aria-hidden
             >
               {String(i + 1).padStart(2, '0')}
             </span>
             <div>
-              <p className="font-serif text-lg leading-snug">{step.name}</p>
-              <p className="mt-1 text-[var(--fg-muted)] leading-relaxed">{step.text}</p>
+              <p className="font-display text-lg leading-snug">{step.name}</p>
+              <p className="mt-1 dim leading-relaxed">{step.text}</p>
             </div>
           </li>
         ))}
@@ -153,7 +153,7 @@ export default async function NoteDetailPage({
   };
 
   return (
-    <article className="mx-auto max-w-[720px] px-6 py-16 lg:py-24">
+    <article className="page" style={{ maxWidth: 720, margin: '0 auto', padding: '40px 28px 80px' }}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(blogPostingLd) }}
@@ -175,14 +175,14 @@ export default async function NoteDetailPage({
         />
       )}
 
-      <Link href="/notes/" className="lbl hover:text-[var(--accent)] transition-colors">
+      <Link href="/notes/" className="mono hover:text-[var(--accent)] transition-colors">
         ← All notes
       </Link>
-      <p className="mt-8 lbl">{formatDate(meta.datePublished)}</p>
-      <h1 className="mt-4 font-serif text-[clamp(36px,5vw,56px)] leading-[1.02] tracking-tight">
+      <p className="mt-8 mono">{formatDate(meta.datePublished)}</p>
+      <h1 className="mt-4">
         {meta.title}
       </h1>
-      <p className="mt-4 font-serif italic text-xl text-[var(--fg-muted)] leading-snug">
+      <p className="mt-4 font-display italic text-xl dim leading-snug">
         {meta.description}
       </p>
 

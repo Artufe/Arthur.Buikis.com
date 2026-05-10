@@ -123,8 +123,8 @@ export function SnakeWindow({
 
   return (
     <div
-      style={baseStyle}
-      className="bg-[var(--bg-muted)] border border-[var(--rule)] shadow-[0_40px_80px_rgba(0,0,0,0.7)] flex flex-col font-mono"
+      style={{ ...baseStyle, background: 'var(--surface)', border: '2px solid var(--border)' }}
+      className="flex flex-col font-mono"
       role="dialog"
       aria-label="snake.py"
     >
@@ -133,17 +133,18 @@ export function SnakeWindow({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        className={`flex items-center justify-between px-4 py-2 border-b border-[var(--rule)] select-none ${
+        className={`flex items-center justify-between px-4 py-2 select-none ${
           isMobile ? '' : dragging ? 'cursor-grabbing' : 'cursor-grab'
         }`}
+        style={{ borderBottom: '2px solid var(--border)' }}
       >
-        <span className="text-[12px] text-[var(--fg)]/80">&gt; snake.py</span>
+        <span className="text-[12px]">&gt; snake.py</span>
         <div className="flex items-center gap-1" data-no-drag>
           <button
             type="button"
             onClick={onExpand}
             aria-label="open in full page"
-            className="px-2 py-0.5 text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)]"
+            className="px-2 py-0.5 text-[11px] dim hover:text-[var(--accent)]"
           >
             ↗
           </button>
@@ -151,7 +152,7 @@ export function SnakeWindow({
             type="button"
             onClick={closeSnake}
             aria-label="close"
-            className="px-2 py-0.5 text-[11px] text-[var(--fg-muted)] hover:text-[var(--accent)]"
+            className="px-2 py-0.5 text-[11px] dim hover:text-[var(--accent)]"
           >
             ×
           </button>
