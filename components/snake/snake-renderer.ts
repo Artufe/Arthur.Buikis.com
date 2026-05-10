@@ -50,8 +50,11 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     height: opts.gridCount * opts.cellSize,
     backgroundColor: opts.bgHex,
     antialias: true,
-    autoDensity: true,
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    // autoDensity + DPR scaling was producing fractional CSS pixels (e.g. 616.364px from
+    // Windows 167% scaling) that bled faint sub-pixel lines at the rendered scene's edges.
+    // Force 1:1 integer pixels — slightly less crisp on retina but no corner artifacts.
+    autoDensity: false,
+    resolution: 1,
   });
 
   const stage = app.stage;
@@ -75,7 +78,10 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
       },
     },
   });
-  root.filters = [crtFilter];
+  // CRT filter constructed but NOT applied to root — the shader was producing a faint edge
+  // artifact tracking the snake near canvas corners. Game looks clean without it; can be
+  // re-enabled once we have a leaner CRT pass that doesn't sample outside texture bounds.
+  // root.filters = [crtFilter];
 
   const reducedMotionRef = { current: opts.reducedMotion };
 
@@ -134,7 +140,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         shockwaveStart = -1;
         dispFilter.scale.set(0, 0);
         dispSprite.scale.set(0);
-        root.filters = [crtFilter];
+        root.filters = null;
       } else {
         const radius = 1 + 6 * t;
         const strength = 30 * (1 - t);
@@ -232,7 +238,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     if (reducedMotionRef.current) return;
     dispSprite.position.set(at.x * opts.cellSize + opts.cellSize / 2, at.y * opts.cellSize + opts.cellSize / 2);
     shockwaveStart = performance.now();
-    root.filters = [crtFilter, dispFilter];
+    root.filters = [dispFilter];
     // Particle burst — 30 dots, random radial velocities.
     for (let i = 0; i < 30; i++) {
       const angle = Math.random() * Math.PI * 2;
