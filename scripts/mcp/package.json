@@ -1,0 +1,12 @@
+{
+    "name": "arts-site-mcp-image-server",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "description": "Local MCP server exposing image generation to the Claude Code GitHub Action.",
+    "main": "image-server.mjs",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.4",
+        "openai": "^4.77.0"
+    }
+}
