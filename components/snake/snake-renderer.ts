@@ -105,6 +105,18 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
   };
   const liveParticles: LiveParticle[] = [];
 
+  // Faint cell-grid drawn once on mount. Sits behind the snake and pellet so the player
+  // can read positions without the field looking like a busy graph paper.
+  const grid = new Graphics();
+  for (let i = 1; i < opts.gridCount; i++) {
+    grid.moveTo(i * opts.cellSize, 0);
+    grid.lineTo(i * opts.cellSize, opts.gridCount * opts.cellSize);
+    grid.moveTo(0, i * opts.cellSize);
+    grid.lineTo(opts.gridCount * opts.cellSize, i * opts.cellSize);
+  }
+  grid.stroke({ width: 1, color: opts.accentHex, alpha: 0.07 });
+  root.addChild(grid);
+
   const body = new Graphics();
   root.addChild(body);
 

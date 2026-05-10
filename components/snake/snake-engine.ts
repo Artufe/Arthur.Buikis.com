@@ -49,8 +49,8 @@ export function createInitialState(opts: {
     status: 'playing',
     score: 0,
     best: opts.best ?? 0,
-    tickRate: 8,
-    baseTickRate: 8,
+    tickRate: 6,
+    baseTickRate: 6,
     asyncBoostUntil: 0,
     consoleLines: [],
     nextLineId: 1,
@@ -158,11 +158,11 @@ export function step(state: GameState, now: number): GameState {
     newSnake = [next, ...state.snake.slice(0, -1)];
   }
 
-  // Boost expiry. The base cap is 14; boost layers ×1.3 on top with its own
-  // ceiling of 18 so `async` still feels like a rush at top base speed.
+  // Boost expiry. Base cap is 14; boost layers ×1.15 on top with a ceiling of 16,
+  // so `async` is a noticeable nudge instead of a panic-inducing surge.
   let effectiveTickRate = newTickRate;
   if (newAsyncBoostUntil > 0) {
-    if (now < newAsyncBoostUntil) effectiveTickRate = Math.min(newTickRate * 1.3, 18);
+    if (now < newAsyncBoostUntil) effectiveTickRate = Math.min(newTickRate * 1.15, 16);
     else newAsyncBoostUntil = 0;
   }
 

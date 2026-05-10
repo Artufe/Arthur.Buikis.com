@@ -15,7 +15,7 @@ describe('snake-engine — initial state', () => {
     expect(s.direction).toBe('right');
     expect(s.status).toBe('playing');
     expect(s.score).toBe(0);
-    expect(s.tickRate).toBe(8);
+    expect(s.tickRate).toBe(6);
     expect(s.snake[0].y).toBe(11);
   });
 
@@ -161,9 +161,9 @@ describe('snake-engine — pellets', () => {
 
   it('tick rate scales 6% per pellet eaten and clamps at 14', () => {
     const s = createInitialState({ gridCount: 22, seed: 1, now: 0 });
-    expect(s.tickRate).toBeCloseTo(8, 5);
-    // Saturation ceiling.
-    const saturated = Math.min(8 * Math.pow(1.06, 50), 14);
+    expect(s.tickRate).toBeCloseTo(6, 5);
+    // Saturation ceiling — ramp from 6 still hits the 14 cap before the 50-pellet horizon.
+    const saturated = Math.min(6 * Math.pow(1.06, 50), 14);
     expect(saturated).toBe(14);
   });
 });
