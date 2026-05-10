@@ -40,26 +40,53 @@ export default function CVPage() {
         </div>
       </div>
 
-      <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: 28, maxWidth: 620, lineHeight: 1.7 }}>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20, maxWidth: 620, lineHeight: 1.6 }}>
         {cvHeadline}
       </p>
 
+      <div
+        className="mono"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px 16px',
+          paddingBottom: 16,
+          marginBottom: 20,
+          borderBottom: '2px solid var(--border)',
+          fontSize: 11,
+        }}
+      >
+        <span><span className="dim">Email: </span><a href={`mailto:${site.email}`} className="ch underline underline-offset-4">{site.email}</a></span>
+        <span><span className="dim">Based: </span>Riga, LV · Remote · EU-time</span>
+        {site.socials.map((s, i) => (
+          <span key={s.href}>
+            <a href={s.href} target="_blank" rel="noreferrer" className="ch underline underline-offset-4">{s.label}</a>
+          </span>
+        ))}
+      </div>
+
       {/* Experience */}
+      <h3 style={{ marginBottom: 10, marginTop: 0 }}>Experience</h3>
       {cvExperience.map((job) => (
-        <div key={`${job.period}-${job.company}`} className="card reveal">
-          <div className="meta">{job.period} &middot; {job.company}</div>
-          <h3>{job.role}</h3>
-          {job.blurb && <p>{job.blurb}</p>}
+        <div key={`${job.period}-${job.company}`} className="card" style={{ padding: '12px 16px', marginBottom: 8 }}>
+          <div className="meta" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <span style={{ fontSize: 11, fontWeight: 400, fontFamily: 'var(--font-display)', color: 'var(--fg)' }}>{job.role}</span>
+            <span>{job.company}</span>
+            <span style={{ marginLeft: 'auto' }}>{job.period}</span>
+          </div>
+          {job.blurb && (
+            <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6, marginBottom: 4, lineHeight: 1.5 }}>{job.blurb}</p>
+          )}
           {job.bullets.length > 0 && (
-            <ul style={{ fontSize: '12.5px', color: 'var(--muted)', lineHeight: 1.7, paddingLeft: 16, marginBottom: 10 }}>
+            <ul style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, paddingLeft: 14, marginTop: 4, marginBottom: 4 }}>
               {job.bullets.map((b, i) => (
-                <li key={i} style={{ marginBottom: 3 }}>{b}</li>
+                <li key={i} style={{ marginBottom: 2 }}>{b}</li>
               ))}
             </ul>
           )}
           {job.stack && (
-            <div className="tags">
-              {job.stack.split('·').map((t) => (
+            <div className="tags" style={{ marginTop: 4, gap: 3 }}>
+              {job.stack.split(' · ').map((t) => (
                 <span key={t.trim()} className="tag">{t.trim()}</span>
               ))}
             </div>
@@ -68,58 +95,54 @@ export default function CVPage() {
       ))}
 
       {/* Side Projects */}
-      <div style={{ marginTop: 28 }}>
-        <h3>Side Projects</h3>
-        <div className="project-grid" style={{ marginTop: 16 }}>
-          {cvProjects.map((p) => (
-            <div key={p.name} className="card reveal">
-              <div className="meta">
-                {p.link ? (
-                  <a href={p.link.href} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                    {p.name} ↗
-                  </a>
-                ) : p.name}
-              </div>
-              <p>{p.body}</p>
-              {p.meta && (
-                <div className="tags">
-                  {p.meta.split('·').map((t) => (
-                    <span key={t.trim()} className="tag">{t.trim()}</span>
-                  ))}
-                </div>
-              )}
+      <h3 style={{ marginBottom: 10, marginTop: 22 }}>Side Projects</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+        {cvProjects.map((p) => (
+          <div key={p.name} className="card" style={{ padding: '12px 16px', marginBottom: 0 }}>
+            <div className="meta">
+              {p.link ? (
+                <a href={p.link.href} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 13 }}>
+                  {p.name} ↗
+                </a>
+              ) : p.name}
             </div>
-          ))}
-        </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, marginBottom: 4, lineHeight: 1.5 }}>{p.body}</p>
+            {p.meta && (
+              <div className="tags" style={{ marginTop: 4, gap: 3 }}>
+                {p.meta.split(' · ').map((t) => (
+                  <span key={t.trim()} className="tag">{t.trim()}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Stack */}
-      <div style={{ marginTop: 28 }}>
-        <h3>Stack</h3>
-        <div className="stack-grid" style={{ marginTop: 16 }}>
-          {stackGroups.map((g) => (
-            <div key={g.title} className="stack-group reveal">
-              <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {g.title}
-              </h3>
-              <div className="items">
-                {g.items.map((i) => (
-                  <span key={i} style={{ display: 'block' }}>{i}</span>
-                ))}
-              </div>
-              <div className="note">{g.note}</div>
+      <h3 style={{ marginBottom: 10, marginTop: 22 }}>Stack</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
+        {stackGroups.map((g) => (
+          <div key={g.title} className="card" style={{ padding: '12px 16px', marginBottom: 0 }}>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 4 }}>
+              {g.title}
             </div>
-          ))}
-        </div>
+            <div className="tags" style={{ gap: 3 }}>
+              {g.items.map((i) => (
+                <span key={i} className="tag">{i}</span>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Languages */}
-      <div className="glance-box" style={{ display: 'inline-block', marginTop: 28 }}>
-        <div className="mono">languages</div>
-        <div className="content" style={{ fontSize: '12.5px' }}>
-          {cvLanguages.map((l) => (
-            <span key={l.name}>
-              {l.name} ({l.level}){cvLanguages.indexOf(l) < cvLanguages.length - 1 ? ' · ' : ''}
+      <div className="card" style={{ padding: '12px 16px', marginTop: 22, marginBottom: 0, display: 'inline-block' }}>
+        <div className="mono" style={{ fontSize: 10, marginBottom: 4 }}>languages</div>
+        <div style={{ fontSize: 12, fontFamily: 'var(--font-body)' }}>
+          {cvLanguages.map((l, i) => (
+            <span key={l.name} className="dim">
+              {l.name} <span style={{ color: 'var(--muted)', opacity: 0.6 }}>({l.level})</span>
+              {i < cvLanguages.length - 1 && ' · '}
             </span>
           ))}
         </div>
