@@ -8,6 +8,10 @@ export type Pellet = {
   cell: Cell;
   kind: PelletKind;
   glyph: string;
+  // ms timestamp when the pellet's effect activates. For panic, this is spawn + 1200ms so
+  // the player gets a telegraph window in which the pellet is visible but inert (treated as
+  // a plain pellet on contact).
+  armedAt: number;
 };
 
 export type GameStatus = 'idle' | 'playing' | 'paused' | 'gameover';
@@ -19,7 +23,10 @@ export type GameState = {
   snake: Cell[];                 // head is index 0
   direction: Direction;
   queuedDirection: Direction | null;
-  pellet: Pellet;
+  // Always at least one. Slot 0 is the primary (rolled kind); slot 1, when present,
+  // is a plain backup spawned alongside panic primaries (so the player has an out
+  // during the telegraph window) or randomly ~25% of the time otherwise.
+  pellets: Pellet[];
   status: GameStatus;
   score: number;
   best: number;
@@ -30,6 +37,9 @@ export type GameState = {
   nextLineId: number;
   lastTickAt: number;            // ms timestamp of last engine tick
   rngSeed: number;               // for deterministic tests
+  comboCount: number;            // consecutive non-plain pellets eaten this run; resets on plain
+  bestCombo: number;             // max comboCount reached this run — surfaced on game-over
+  maxLength: number;             // max snake length reached this run — surfaced on game-over
 };
 
 export type EngineInput =
@@ -37,4 +47,6 @@ export type EngineInput =
   | { type: 'pause' }
   | { type: 'restart' };
 
-export const PLAIN_GLYPHS = ['def', 'fn', 'let', 'await', 'pub', '→', 'λ', ':='] as const;
+// Mix of Python (`def`, `await`), Rust (`fn`, `impl`, `::`), JS (`=>`, `let`), and
+// pure-functional symbols (`→`, `λ`). Each reads at a glance and stays under 4 chars.
+export const PLAIN_GLYPHS = ['def', 'fn', 'let', 'impl', '=>', '→', 'λ', '::'] as const;

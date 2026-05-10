@@ -22,9 +22,11 @@ import {
 } from './snake-shader-crt';
 
 export type RendererHandle = {
-  render(state: GameState, headTween: Cell, tailTween: Cell): void;
+  render(state: GameState, headTween: Cell, tailTween: Cell, now: number): void;
   triggerShockwave(at: Cell): void;
   flashGlitch(): void;
+  triggerShake(intensity: number, durationMs: number): void;
+  triggerDeathCascade(snake: Cell[]): void;
   setReducedMotion(on: boolean): void;
   dispose(): void;
 };
@@ -48,8 +50,11 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     height: opts.gridCount * opts.cellSize,
     backgroundColor: opts.bgHex,
     antialias: true,
-    autoDensity: true,
-    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    // autoDensity + DPR scaling was producing fractional CSS pixels (e.g. 616.364px from
+    // Windows 167% scaling) that bled faint sub-pixel lines at the rendered scene's edges.
+    // Force 1:1 integer pixels — slightly less crisp on retina but no corner artifacts.
+    autoDensity: false,
+    resolution: 1,
   });
 
   const stage = app.stage;
@@ -73,7 +78,10 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
       },
     },
   });
-  root.filters = [crtFilter];
+  // CRT filter constructed but NOT applied to root — the shader was producing a faint edge
+  // artifact tracking the snake near canvas corners. Game looks clean without it; can be
+  // re-enabled once we have a leaner CRT pass that doesn't sample outside texture bounds.
+  // root.filters = [crtFilter];
 
   const reducedMotionRef = { current: opts.reducedMotion };
 
@@ -97,24 +105,47 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
   };
   const liveParticles: LiveParticle[] = [];
 
+  // Faint cell-grid drawn once on mount. Sits behind the snake and pellet so the player
+  // can read positions without the field looking like a busy graph paper.
+  const grid = new Graphics();
+  for (let i = 1; i < opts.gridCount; i++) {
+    grid.moveTo(i * opts.cellSize, 0);
+    grid.lineTo(i * opts.cellSize, opts.gridCount * opts.cellSize);
+    grid.moveTo(0, i * opts.cellSize);
+    grid.lineTo(opts.gridCount * opts.cellSize, i * opts.cellSize);
+  }
+  grid.stroke({ width: 1, color: opts.accentHex, alpha: 0.07 });
+  root.addChild(grid);
+
   const body = new Graphics();
   root.addChild(body);
 
-  const pelletText = new Text({
-    text: '',
-    style: new TextStyle({
-      fontFamily: 'monospace',
-      fontSize: opts.cellSize * 0.8,
-      fill: opts.accentHex,
-      align: 'center',
-    }),
-  });
-  pelletText.anchor.set(0.5);
-  root.addChild(pelletText);
+  // Pellet text pool — sized to match state.pellets.length each frame; max 2 in practice.
+  const pelletTexts: Text[] = [];
+  function ensurePelletText(i: number): Text {
+    if (i < pelletTexts.length) return pelletTexts[i];
+    const t = new Text({
+      text: '',
+      style: new TextStyle({
+        fontFamily: 'monospace',
+        fontSize: opts.cellSize * 0.8,
+        fill: opts.accentHex,
+        align: 'center',
+      }),
+    });
+    t.anchor.set(0.5);
+    root.addChild(t);
+    pelletTexts.push(t);
+    return t;
+  }
 
   let timeAccum = 0;
   let shockwaveStart = -1;
   let glitchUntil = -1;
+  // Screen shake — jitters root x/y for `shakeUntil - now` ms with falling intensity.
+  let shakeUntil = -1;
+  let shakeStart = -1;
+  let shakePeak = 0;
 
   app.ticker.add((tick) => {
     const now = performance.now();
@@ -128,7 +159,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         shockwaveStart = -1;
         dispFilter.scale.set(0, 0);
         dispSprite.scale.set(0);
-        root.filters = [crtFilter];
+        root.filters = null;
       } else {
         const radius = 1 + 6 * t;
         const strength = 30 * (1 - t);
@@ -137,7 +168,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
       }
     }
 
-    // Particles
+    // Particles — gravity pulls them down so the death cascade reads as falling debris.
     for (let i = liveParticles.length - 1; i >= 0; i--) {
       const lp = liveParticles[i];
       lp.life += tick.deltaMS;
@@ -147,6 +178,7 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         liveParticles.splice(i, 1);
         continue;
       }
+      lp.vy += 0.15 * (tick.deltaMS / 16); // gravity
       lp.p.x += lp.vx * (tick.deltaMS / 16);
       lp.p.y += lp.vy * (tick.deltaMS / 16);
       lp.p.alpha = 1 - t;
@@ -167,27 +199,75 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
         crtFilter.resources.crtUniforms.uniforms.uGrain = 0.18;
       }
     }
+
+    // Screen shake — physical "this moment matters" feedback. Linear decay from peak to zero.
+    if (shakeUntil > 0) {
+      const total = shakeUntil - shakeStart;
+      const elapsed = now - shakeStart;
+      if (elapsed >= total) {
+        shakeUntil = -1;
+        root.position.set(0, 0);
+      } else {
+        const t = elapsed / total;
+        const mag = shakePeak * (1 - t);
+        root.position.set((Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2);
+      }
+    }
   });
 
-  function render(state: GameState, headTween: Cell, tailTween: Cell) {
+  function render(state: GameState, headTween: Cell, tailTween: Cell, now: number) {
     drawBody(body, state, headTween, tailTween, opts);
-    pelletText.text = state.pellet.glyph;
-    pelletText.style.fill = state.pellet.kind === 'panic' ? opts.panicHex : opts.accentHex;
-    // Auto-size: short symbols can be big; longer keywords need to fit.
-    const len = state.pellet.glyph.length;
-    const target = len <= 1 ? opts.cellSize * 0.95 : opts.cellSize * 1.6 / len;
-    pelletText.style.fontSize = Math.max(8, Math.min(opts.cellSize * 0.95, target));
-    pelletText.position.set(
-      state.pellet.cell.x * opts.cellSize + opts.cellSize / 2,
-      state.pellet.cell.y * opts.cellSize + opts.cellSize / 2,
-    );
+
+    // Render every pellet on the board (1 or 2 in practice). Pool reuses Text instances.
+    state.pellets.forEach((pellet, i) => {
+      const txt = ensurePelletText(i);
+      txt.visible = true;
+      txt.text = pellet.glyph;
+
+      // Telegraph: panic pellets pulse + dim during the pre-arm window so the player
+      // sees the threat before it can kill them. Live panic is solid red, plain pellets
+      // and active boosts use the accent color.
+      let fill = opts.accentHex;
+      let alpha = 1;
+      if (pellet.kind === 'panic') {
+        const armed = now >= pellet.armedAt;
+        fill = opts.panicHex;
+        if (!armed) {
+          // Sine pulse over the telegraph window — alpha 0.6 → 1 → 0.6.
+          const left = pellet.armedAt - now;
+          const phase = (left / 200) * Math.PI; // ~5 pulses across 1.2s
+          alpha = 0.6 + 0.4 * Math.sin(phase);
+        }
+      }
+      txt.style.fill = fill;
+      txt.alpha = alpha;
+
+      // Tiered sizing — keep food large enough to read at a glance. Multichar keywords
+      // intentionally spill into adjacent cells; the body's stroke draws over them harmlessly
+      // when the snake passes by.
+      const len = pellet.glyph.length;
+      let fontSize: number;
+      if (len <= 2) fontSize = opts.cellSize * 1.05;
+      else if (len === 3) fontSize = opts.cellSize * 0.85;
+      else if (len === 4) fontSize = opts.cellSize * 0.75;
+      else fontSize = opts.cellSize * 0.65;
+      txt.style.fontSize = fontSize;
+      txt.position.set(
+        pellet.cell.x * opts.cellSize + opts.cellSize / 2,
+        pellet.cell.y * opts.cellSize + opts.cellSize / 2,
+      );
+    });
+    // Hide unused pool slots from previous renders.
+    for (let i = state.pellets.length; i < pelletTexts.length; i++) {
+      pelletTexts[i].visible = false;
+    }
   }
 
   function triggerShockwave(at: Cell) {
     if (reducedMotionRef.current) return;
     dispSprite.position.set(at.x * opts.cellSize + opts.cellSize / 2, at.y * opts.cellSize + opts.cellSize / 2);
     shockwaveStart = performance.now();
-    root.filters = [crtFilter, dispFilter];
+    root.filters = [dispFilter];
     // Particle burst — 30 dots, random radial velocities.
     for (let i = 0; i < 30; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -217,6 +297,46 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     glitchUntil = performance.now() + 300;
   }
 
+  function triggerShake(intensity: number, durationMs: number) {
+    if (reducedMotionRef.current) return;
+    shakeStart = performance.now();
+    shakeUntil = shakeStart + durationMs;
+    shakePeak = intensity;
+  }
+
+  // Death cascade — explode each body segment into particles falling and fading.
+  // Closes the "abrupt freeze" gap and gives weight to the loss.
+  function triggerDeathCascade(snake: Cell[]) {
+    if (reducedMotionRef.current) return;
+    body.clear(); // hide the snake body; particles take over
+    const cs = opts.cellSize;
+    for (let i = 0; i < snake.length; i++) {
+      const c = snake[i];
+      // 4 particles per segment with random outward velocities + gravity.
+      for (let j = 0; j < 4; j++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 2.5;
+        const p = new Particle({
+          texture: dotTex,
+          x: c.x * cs + cs / 2,
+          y: c.y * cs + cs / 2,
+          scaleX: cs / 6,
+          scaleY: cs / 6,
+          tint: opts.accentHex,
+          alpha: 1,
+        });
+        particles.addParticle(p);
+        liveParticles.push({
+          p,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1, // initial upward kick
+          life: 0,
+          maxLife: 800 + Math.random() * 400,
+        });
+      }
+    }
+  }
+
   function setReducedMotion(on: boolean) {
     reducedMotionRef.current = on;
     const u = on ? CRT_REDUCED_MOTION : CRT_DEFAULTS;
@@ -232,7 +352,15 @@ export async function mount(canvas: HTMLCanvasElement, opts: RendererOpts): Prom
     app.destroy(true, { children: true });
   }
 
-  return { render, triggerShockwave, flashGlitch, setReducedMotion, dispose };
+  return {
+    render,
+    triggerShockwave,
+    flashGlitch,
+    triggerShake,
+    triggerDeathCascade,
+    setReducedMotion,
+    dispose,
+  };
 }
 
 function drawBody(
@@ -246,16 +374,17 @@ function drawBody(
   if (state.snake.length === 0) return;
   const cs = opts.cellSize;
   const half = cs / 2;
-  const points: Cell[] = [...state.snake];
-  // Replace head and tail with their tween-interpolated positions so both ends move fluidly.
-  points[0] = headTween;
-  points[points.length - 1] = tailTween;
 
-  // Walk tail → head, drawing through cell centers.
-  g.moveTo(points[points.length - 1].x * cs + half, points[points.length - 1].y * cs + half);
-  for (let i = points.length - 2; i >= 0; i--) {
-    g.lineTo(points[i].x * cs + half, points[i].y * cs + half);
+  // Path: tailTween (between previous tail and current tail) → walk through every snake
+  // cell from current tail toward the head → headTween (between current second-cell and head).
+  // Replacing snake[length-1] outright would drop the new tail cell from the geometry and
+  // the line would visibly cut across the corner during the tween.
+  g.moveTo(tailTween.x * cs + half, tailTween.y * cs + half);
+  for (let i = state.snake.length - 1; i >= 1; i--) {
+    const c = state.snake[i];
+    g.lineTo(c.x * cs + half, c.y * cs + half);
   }
+  g.lineTo(headTween.x * cs + half, headTween.y * cs + half);
   g.stroke({ width: cs - 2, color: opts.accentHex, alpha: 1, cap: 'round', join: 'round' });
 }
 

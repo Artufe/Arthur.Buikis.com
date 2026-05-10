@@ -45,19 +45,22 @@ export function createInitialState(opts: {
     snake,
     direction: 'right',
     queuedDirection: null,
-    pellet: { cell: { x: 0, y: 0 }, kind: 'plain', glyph: 'def' },
+    pellets: [],
     status: 'playing',
     score: 0,
     best: opts.best ?? 0,
-    tickRate: 8,
-    baseTickRate: 8,
+    tickRate: 6,
+    baseTickRate: 6,
     asyncBoostUntil: 0,
     consoleLines: [],
     nextLineId: 1,
     lastTickAt: opts.now,
     rngSeed: opts.seed,
+    comboCount: 0,
+    bestCombo: 0,
+    maxLength: snake.length,
   };
-  state.pellet = spawnPellet(state);
+  state.pellets = topUpPellets(state, opts.now, []);
   return state;
 }
 
@@ -99,57 +102,69 @@ export function step(state: GameState, now: number): GameState {
   if (next.x < 0 || next.x >= state.gridCount || next.y < 0 || next.y >= state.gridCount) {
     return endGame(state, now);
   }
+
+  // Find which pellet (if any) is at the head's destination cell.
+  const eatenIdx = state.pellets.findIndex((p) => p.cell.x === next.x && p.cell.y === next.y);
+  const willEat = eatenIdx >= 0;
+  const eaten: Pellet | null = willEat ? state.pellets[eatenIdx] : null;
+
   // Self collision (skip tail tip — it'll move out of the way unless we eat)
-  const willEat = next.x === state.pellet.cell.x && next.y === state.pellet.cell.y;
   const bodyToCheck = willEat ? state.snake : state.snake.slice(0, -1);
   if (bodyToCheck.some((c) => c.x === next.x && c.y === next.y)) {
     return endGame(state, now);
   }
 
-  // panic! pellet ends the run on contact
-  if (willEat && state.pellet.kind === 'panic') {
+  // panic! pellet ends the run on contact — but only if the telegraph window has elapsed.
+  // During the pre-arm window the pellet is visible but inert; eating it acts like a plain
+  // pellet (one of the "varied tactics" — players who can race the timer get a free score).
+  if (willEat && eaten!.kind === 'panic' && now >= eaten!.armedAt) {
     return appendPanic(endGame(state, now), state.score);
   }
 
   let newSnake: Cell[];
   let newScore = state.score;
-  let newPellet = state.pellet;
+  let newPellets = state.pellets;
   let newTickRate = state.tickRate;
   let newAsyncBoostUntil = state.asyncBoostUntil;
   let consoleLines = state.consoleLines;
   let nextLineId = state.nextLineId;
+  let comboCount = state.comboCount;
 
   if (willEat) {
     newSnake = [next, ...state.snake];
-    if (state.pellet.kind === 'claude') newScore += 3;
+    const eatenAsPlain = eaten!.kind === 'panic'; // pre-arm panic counts as plain
+    if (eaten!.kind === 'claude') newScore += 3;
     else newScore += 1;
 
     newTickRate = Math.min(state.baseTickRate * Math.pow(1.06, newScore), 14);
 
-    if (state.pellet.kind === 'async') {
+    if (eaten!.kind === 'async') {
       newAsyncBoostUntil = now + 3000;
+      comboCount += 1;
       ({ consoleLines, nextLineId } = pushLine(state, '>>> async run()', 'info'));
-    } else if (state.pellet.kind === 'claude') {
+    } else if (eaten!.kind === 'claude') {
+      comboCount += 1;
       ({ consoleLines, nextLineId } = pushLine(state, '>>> import claude', 'info'));
+    } else if (eatenAsPlain) {
+      // Pre-arm panic eaten — narrow win, fun beat. Doesn't break combo (treated as nothing happened).
+      ({ consoleLines, nextLineId } = pushLine(state, '>>> caught(panic!) // defused', 'info'));
     } else {
-      ({ consoleLines, nextLineId } = pushLine(state, `>>> ${state.pellet.glyph}`, 'info'));
+      comboCount = 0; // plain pellet resets combo
+      ({ consoleLines, nextLineId } = pushLine(state, `>>> ${eaten!.glyph}`, 'info'));
     }
 
-    newPellet = spawnPellet({
-      ...state,
-      snake: newSnake,
-      consoleLines,
-      nextLineId,
-    });
+    // Drop the eaten pellet, then top up the array (always primary; sometimes a backup).
+    const remaining = state.pellets.filter((_, i) => i !== eatenIdx);
+    newPellets = topUpPellets({ ...state, snake: newSnake, score: newScore, consoleLines, nextLineId }, now, remaining);
   } else {
     newSnake = [next, ...state.snake.slice(0, -1)];
   }
 
-  // Boost expiry. The base cap is 14; boost layers ×1.3 on top with its own
-  // ceiling of 18 so `async` still feels like a rush at top base speed.
+  // Boost expiry. Base cap is 14; boost layers ×1.15 on top with a ceiling of 16,
+  // so `async` is a noticeable nudge instead of a panic-inducing surge.
   let effectiveTickRate = newTickRate;
   if (newAsyncBoostUntil > 0) {
-    if (now < newAsyncBoostUntil) effectiveTickRate = Math.min(newTickRate * 1.3, 18);
+    if (now < newAsyncBoostUntil) effectiveTickRate = Math.min(newTickRate * 1.15, 16);
     else newAsyncBoostUntil = 0;
   }
 
@@ -158,13 +173,16 @@ export function step(state: GameState, now: number): GameState {
     snake: newSnake,
     direction,
     queuedDirection: null,
-    pellet: newPellet,
+    pellets: newPellets,
     score: newScore,
     tickRate: effectiveTickRate,
     asyncBoostUntil: newAsyncBoostUntil,
     consoleLines,
     nextLineId,
     lastTickAt: now,
+    comboCount,
+    bestCombo: Math.max(state.bestCombo, comboCount),
+    maxLength: Math.max(state.maxLength, newSnake.length),
   };
 }
 
@@ -193,16 +211,53 @@ function pushLine(
   return { consoleLines: lines, nextLineId: state.nextLineId + 1 };
 }
 
-export function spawnPellet(state: GameState): Pellet {
-  const rand = rng(state.rngSeed + state.score * 1000 + state.snake.length);
-  const occupied = new Set(state.snake.map((c) => `${c.x},${c.y}`));
+// Ensures the board has at least one pellet. Adds a plain backup when the primary is
+// `panic` (so the player has a safe alternative during the telegraph window) or randomly
+// ~25% of the time otherwise. Caps total pellets at 2.
+function topUpPellets(state: GameState, now: number, existing: Pellet[]): Pellet[] {
+  const result = [...existing];
+
+  if (result.length === 0) {
+    result.push(spawnPellet(state, now, []));
+  }
+
+  const primary = result[0];
+  const backupRoll = rng(state.rngSeed + state.score * 19 + 7)();
+  const wantBackup = primary.kind === 'panic' || backupRoll < 0.25;
+  if (wantBackup && result.length < 2) {
+    const backup = spawnPellet(state, now, result.map((p) => p.cell));
+    // Force backup to be plain so it never compounds the panic threat.
+    result.push({ ...backup, kind: 'plain', glyph: pickPlainGlyph(state.rngSeed + state.score * 23 + 5), armedAt: now });
+  }
+
+  return result;
+}
+
+function pickPlainGlyph(seed: number): string {
+  return PLAIN_GLYPHS[Math.floor(rng(seed)() * PLAIN_GLYPHS.length)];
+}
+
+export function spawnPellet(
+  state: GameState,
+  now: number = state.lastTickAt,
+  excludeCells: Cell[] = [],
+): Pellet {
+  const rand = rng(state.rngSeed + state.score * 1000 + state.snake.length + excludeCells.length * 13);
+  const occupied = new Set([
+    ...state.snake.map((c) => `${c.x},${c.y}`),
+    ...excludeCells.map((c) => `${c.x},${c.y}`),
+  ]);
   const candidates: Cell[] = [];
   for (let y = 0; y < state.gridCount; y++) {
     for (let x = 0; x < state.gridCount; x++) {
       if (!occupied.has(`${x},${y}`)) candidates.push({ x, y });
     }
   }
-  if (candidates.length === 0) return state.pellet;
+  if (candidates.length === 0) {
+    // Pathological: board is full. Return a sentinel pellet at (0,0); engine treats this
+    // as effectively unreachable since the snake fills everything.
+    return { cell: { x: 0, y: 0 }, kind: 'plain', glyph: 'def', armedAt: now };
+  }
 
   const cell = candidates[Math.floor(rand() * candidates.length)];
 
@@ -225,7 +280,9 @@ export function spawnPellet(state: GameState): Pellet {
   }
 
   const glyph = kindToGlyph(kind, rand);
-  return { cell, kind, glyph };
+  // panic pellets get a 1.2s telegraph window before they arm; everything else is armed immediately.
+  const armedAt = kind === 'panic' ? now + 1200 : now;
+  return { cell, kind, glyph, armedAt };
 }
 
 function legalNextCells(state: GameState, head: Cell): Cell[] {

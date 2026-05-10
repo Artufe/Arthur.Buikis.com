@@ -63,6 +63,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   const [status, setStatus] = useState<GameState['status']>('idle');
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
+  const [comboCount, setComboCount] = useState(0);
+  const [bestCombo, setBestCombo] = useState(0);
+  const [maxLength, setMaxLength] = useState(0);
 
   const gridCount = variant === 'page' ? 28 : 22;
   const cellSize = variant === 'page' ? 22 : 20;
@@ -105,6 +108,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
       setStatus(initial.status);
       setScore(initial.score);
       setBest(initial.best);
+      setComboCount(initial.comboCount);
+      setBestCombo(initial.bestCombo);
+      setMaxLength(initial.maxLength);
       setMounted(true);
 
       let lastFrame = now;
@@ -114,20 +120,31 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         const t = performance.now();
         const dt = t - lastFrame;
         lastFrame = t;
-        acc += dt;
+        // Only advance the accumulator while playing. Otherwise gameover/paused time would
+        // pile up and on resume the step loop would fire many ticks at once — restart used
+        // to teleport the snake straight into a wall.
+        if (stateRef.current.status === 'playing') acc += dt;
+        else acc = 0;
         const tickInterval = 1000 / stateRef.current.tickRate;
         while (acc >= tickInterval && stateRef.current.status === 'playing') {
           const before = stateRef.current;
           const after = step(before, before.lastTickAt + tickInterval);
           const ate = after.score !== before.score || after.snake.length !== before.snake.length;
-          if (ate && before.pellet.kind === 'claude') {
-            handleRef.current.triggerShockwave(before.pellet.cell);
-          }
-          if (ate && before.pellet.kind === 'async') {
-            handleRef.current.flashGlitch();
+          // The eaten pellet is the one whose cell matches the new head's destination.
+          const newHead = after.snake[0];
+          const eaten = ate ? before.pellets.find((p) => p.cell.x === newHead.x && p.cell.y === newHead.y) : null;
+          if (ate && eaten) {
+            // Light shake on every eat — universal "thump" feedback.
+            // Heavier on claude (the rare big-payoff pellet).
+            const intensity = eaten.kind === 'claude' ? 6 : 3;
+            handleRef.current.triggerShake(intensity, 180);
+            if (eaten.kind === 'claude') handleRef.current.triggerShockwave(eaten.cell);
+            if (eaten.kind === 'async') handleRef.current.flashGlitch();
           }
           if (after.status === 'gameover' && before.status === 'playing') {
             handleRef.current.flashGlitch();
+            handleRef.current.triggerShake(12, 400);
+            handleRef.current.triggerDeathCascade(before.snake);
             if (after.score > readBest()) writeBest(after.score);
           }
           if (after.consoleLines !== before.consoleLines) {
@@ -136,6 +153,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
           if (after.status !== before.status) setStatus(after.status);
           if (after.score !== before.score) setScore(after.score);
           if (after.best !== before.best) setBest(after.best);
+          if (after.comboCount !== before.comboCount) setComboCount(after.comboCount);
+          if (after.bestCombo !== before.bestCombo) setBestCombo(after.bestCombo);
+          if (after.maxLength !== before.maxLength) setMaxLength(after.maxLength);
           // Save the pre-tick tail so we can lerp from it during the next frame.
           // On growth ticks the tail didn't move, so prevTail equals the new tail's cell anyway.
           prevTailRef.current = before.snake[before.snake.length - 1];
@@ -165,7 +185,7 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
             y: tailPrev.y + (tail.y - tailPrev.y) * tweenT,
           };
         }
-        handleRef.current.render(s, headTween, tailTween);
+        handleRef.current.render(s, headTween, tailTween, t);
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -201,6 +221,9 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         setStatus(next.status);
         setScore(next.score);
         setBest(next.best);
+        setComboCount(next.comboCount);
+        setBestCombo(next.bestCombo);
+        setMaxLength(next.maxLength);
         onConsoleChange?.(next.consoleLines);
         return;
       }
@@ -254,7 +277,16 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
   }, []);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div
+      style={{
+        position: 'relative',
+        // Subtle accent-toned frame so the play-area edges read clearly against
+        // the surrounding background. 1px hard line + a soft outer glow ties it
+        // to the rest of the terminal/CRT vibe without re-adding the shader.
+        border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+        boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 0 18px color-mix(in srgb, var(--accent) 12%, transparent)',
+      }}
+    >
       <canvas
         ref={canvasRef}
         style={{
@@ -265,22 +297,46 @@ export function SnakeCanvas({ variant, onConsoleChange }: Props) {
         }}
         data-mounted={mounted ? '1' : '0'}
       />
+      {/* Corner brackets — terminal-style "this is your bounded play area" markers.
+          Quick visual confirmation of the four corners on top of the soft frame. */}
+      {(['top-1 left-1 border-t border-l', 'top-1 right-1 border-t border-r', 'bottom-1 left-1 border-b border-l', 'bottom-1 right-1 border-b border-r'] as const).map(
+        (pos, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className={`absolute ${pos} w-3 h-3 border-[var(--accent)]/70 pointer-events-none`}
+          />
+        ),
+      )}
       <div className="absolute top-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none">
         score {score}
       </div>
       <div className="absolute top-2 right-2 font-mono text-[11px] text-[var(--fg-muted)] pointer-events-none select-none">
         best {best}
       </div>
+      {/* Combo badge — visible only while a streak is active. Bottom-left so it doesn't
+          compete with score (top-left) and pulses to signal momentum. */}
+      {comboCount >= 2 && status === 'playing' && (
+        <div className="absolute bottom-2 left-2 font-mono text-[14px] font-bold text-[var(--accent)] pointer-events-none select-none animate-pulse tracking-wider">
+          ×{comboCount} combo
+        </div>
+      )}
       {status === 'paused' && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[12px] text-[var(--accent)] pointer-events-none">
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[13px] text-[var(--accent)] pointer-events-none">
           // paused
         </div>
       )}
       {status === 'gameover' && (
-        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 font-mono text-[12px] text-[#ff7070] pointer-events-none">
-          <div>panic!: index out of bounds at line {score}</div>
-          <div className="text-[var(--fg-muted)]">best: {best}</div>
-          <div className="text-[var(--accent)]">press r to restart</div>
+        <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center gap-2 font-mono pointer-events-none px-4 text-center">
+          <div className="text-[14px] text-[#ff7070] font-bold">
+            panic! at line {score}
+          </div>
+          <div className="text-[10px] text-[var(--fg-faint)] flex gap-3 mt-1">
+            <span>len <span className="text-[var(--fg-muted)]">{maxLength}</span></span>
+            <span>combo <span className="text-[var(--fg-muted)]">×{bestCombo}</span></span>
+            <span>best <span className="text-[var(--fg-muted)]">{best}</span></span>
+          </div>
+          <div className="text-[11px] text-[var(--accent)] mt-2">press r to restart</div>
         </div>
       )}
     </div>

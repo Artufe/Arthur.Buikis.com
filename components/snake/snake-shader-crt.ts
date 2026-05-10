@@ -71,11 +71,10 @@ void main(void) {
   float vd = dot(vc, vc);
   col *= mix(1.0, 1.0 - vd * 2.0, uVignette);
 
-  // Clip to rendered area
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    finalColor = vec4(0.0);
-    return;
-  }
+  // No hard clip — barrel-distorted UV outside [0,1] would create a visible curved
+  // boundary where the rendered scene meets the canvas backgroundColor. CLAMP_TO_EDGE
+  // sampling at the edges is invisible because everything off-grid is empty (alpha=0)
+  // and the scanline/grain/vignette modulations only matter where alpha>0.
   finalColor = vec4(col, alpha);
 }
 `;
@@ -95,7 +94,7 @@ export const CRT_DEFAULTS: CrtUniforms = {
   uGrain: 0.025,
   uScanlines: 0.10,
   uVignette: 0.35,
-  uBarrel: 0.015,
+  uBarrel: 0, // disabled — barrel + edges produced a visible curved artifact at corners
 };
 
 export const CRT_REDUCED_MOTION: CrtUniforms = {
@@ -104,5 +103,5 @@ export const CRT_REDUCED_MOTION: CrtUniforms = {
   uGrain: 0.0,
   uScanlines: 0.10,
   uVignette: 0.35,
-  uBarrel: 0.015,
+  uBarrel: 0,
 };
