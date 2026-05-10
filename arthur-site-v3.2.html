@@ -12,7 +12,7 @@
   --fg:      oklch(15% 0.02 100);
   --muted:   oklch(40% 0.02 100);
   --border:  oklch(15% 0.02 100);
-  --accent:  oklch(50% 0.14 22);
+  --accent:  oklch(55% 0.14 190);
   --scan:    oklch(0% 0 0 / 0.04);
   --font-display: 'Times New Roman', 'Iowan Old Style', Georgia, serif;
   --font-body:    ui-monospace, 'IBM Plex Mono', 'JetBrains Mono', Menlo, monospace;
@@ -26,11 +26,11 @@
     --fg:      oklch(92% 0.004 100);
     --muted:   oklch(60% 0.006 100);
     --border:  oklch(92% 0.004 100);
-    --accent:  oklch(55% 0.16 25);
+    --accent:  oklch(65% 0.12 190);
     --scan:    oklch(100% 0 0 / 0.025);
   }
 }
-html{font-size:18px}
+html{font-size:16px}
 body{
   font-family:var(--font-body);
   background:var(--bg);color:var(--fg);
@@ -78,7 +78,7 @@ body::after{
 }
 .header .l-wrap{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{
-  font-family:var(--font-display);font-size:30px;font-weight:400;line-height:1;
+  font-family:var(--font-display);font-size:26px;font-weight:400;line-height:1;
   letter-spacing:-0.02em;color:var(--fg);text-decoration:none;
   display:flex;align-items:center;gap:10px;
 }
@@ -102,7 +102,7 @@ body::after{
 
 .nav{display:flex;gap:2px;flex-wrap:wrap}
 .nav a{
-  font-size:13px;text-transform:uppercase;letter-spacing:0.12em;
+  font-size:11.5px;text-transform:uppercase;letter-spacing:0.12em;
   color:var(--muted);text-decoration:none;padding:6px 10px;
   border:1.5px solid transparent;transition:var(--dur) var(--ease);
   position:relative;
@@ -135,9 +135,9 @@ body::after{
 @keyframes mobileNavIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 .mobile-nav.open{display:flex}
 .mobile-nav a{
-  font-family:var(--font-display);font-size:clamp(32px,7vw,52px);
+  font-family:var(--font-display);font-size:clamp(28px,6vw,48px);
   color:var(--muted);text-decoration:none;letter-spacing:-0.03em;
-  padding:10px 0;transition:var(--dur) var(--ease);
+  padding:8px 0;transition:var(--dur) var(--ease);
 }
 .mobile-nav a:hover,.mobile-nav a.active{color:var(--accent)}
 
@@ -169,23 +169,23 @@ body::after{
 /* typography */
 h1{
   font-family:var(--font-display);
-  font-size:clamp(56px,9vw,130px);
+  font-size:clamp(48px,8vw,120px);
   font-weight:400;line-height:0.88;
   letter-spacing:-0.045em;
 }
 h2{
   font-family:var(--font-display);
-  font-size:clamp(36px,5vw,64px);
+  font-size:clamp(30px,4.5vw,56px);
   font-weight:400;line-height:1;
   letter-spacing:-0.035em;
   margin:0 0 20px;
 }
 h3{
   font-family:var(--font-display);
-  font-size:25px;font-weight:400;
+  font-size:22px;font-weight:400;
   letter-spacing:-0.02em;margin:0 0 10px;
 }
-.mono{font-family:var(--font-body);font-size:13px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)}
+.mono{font-family:var(--font-body);font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)}
 .ch{color:var(--accent)}
 .dim{color:var(--muted)}
 .tnum{font-variant-numeric:tabular-nums}
@@ -203,15 +203,15 @@ h3{
   cursor:text;transition:var(--dur) var(--ease);
 }
 .cmd-bar:focus-within{border-color:var(--accent)}
-.cmd-bar .prompt{color:var(--accent);font-size:15px;flex-shrink:0}
-.cmd-bar .typed-text{flex:1;font-size:15px;min-height:1.4em;color:var(--fg)}
-.cmd-bar .hint{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;white-space:nowrap;flex-shrink:0}
+.cmd-bar .prompt{color:var(--accent);font-size:13.5px;flex-shrink:0}
+.cmd-bar .typed-text{flex:1;font-size:13.5px;min-height:1.4em;color:var(--fg)}
+.cmd-bar .hint{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;white-space:nowrap;flex-shrink:0}
 
 /* sections */
 .section{margin-bottom:56px}
 .section-header{display:flex;align-items:baseline;gap:12px;margin-bottom:20px}
 .section-header h2{flex:1;margin:0}
-.section-header .count{font-size:12px;color:var(--muted);font-family:var(--font-body)}
+.section-header .count{font-size:11px;color:var(--muted);font-family:var(--font-body)}
 
 /* cards */
 .card{
@@ -220,13 +220,13 @@ h3{
   transition:var(--dur) var(--ease);
 }
 .card:hover{border-color:var(--accent);transform:translateY(-2px)}
-.card .meta{font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px;font-family:var(--font-body)}
+.card .meta{font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:6px;font-family:var(--font-body)}
 .card h3{margin-bottom:6px}
-.card p{font-size:15px;color:var(--muted);margin-bottom:10px;line-height:1.6}
+.card p{font-size:13.5px;color:var(--muted);margin-bottom:10px;line-height:1.6}
 .card .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
 .card .tag{
-  font-size:11px;text-transform:uppercase;letter-spacing:0.06em;
-  padding:3px 9px;border:1.5px solid var(--border);color:var(--muted);
+  font-size:9.5px;text-transform:uppercase;letter-spacing:0.06em;
+  padding:2px 7px;border:1.5px solid var(--border);color:var(--muted);
   transition:var(--dur) var(--ease);
 }
 .card:hover .tag{border-color:var(--accent);color:var(--accent)}
@@ -245,12 +245,12 @@ h3{
 .stat:hover{background:color-mix(in srgb,var(--accent) 10%,var(--bg))}
 .stat .num{
   font-family:var(--font-display);
-  font-size:clamp(36px,4.5vw,52px);
+  font-size:clamp(30px,3.5vw,44px);
   font-weight:400;letter-spacing:-0.03em;color:var(--accent);line-height:1;
   font-variant-numeric:tabular-nums;
 }
 .stat .num.counted::after{content:'';display:inline-block;width:0}
-.stat .lbl{font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-top:6px}
+.stat .lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-top:5px}
 @media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
 
 /* timeline */
@@ -276,10 +276,10 @@ h3{
   0%{transform:scale(1);opacity:.6}
   100%{transform:scale(1.6);opacity:0}
 }
-.tl-item .years{font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)}
-.tl-item .role{font-family:var(--font-display);font-size:clamp(19px,2.5vw,24px);letter-spacing:-0.02em;margin:2px 0 3px}
-.tl-item .where{font-size:13px;color:var(--muted);margin-bottom:3px}
-.tl-item .note{font-size:14px;color:var(--muted);line-height:1.6}
+.tl-item .years{font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)}
+.tl-item .role{font-family:var(--font-display);font-size:clamp(17px,2.2vw,22px);letter-spacing:-0.02em;margin:2px 0 3px}
+.tl-item .where{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.tl-item .note{font-size:12.5px;color:var(--muted);line-height:1.6}
 
 /* project grid */
 .project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1.5px}
@@ -288,9 +288,9 @@ h3{
 /* stack grid */
 .stack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.5px}
 .stack-group{border:1.5px solid var(--border);padding:14px}
-.stack-group h3{font-size:14px;margin-bottom:6px}
-.stack-group .items{font-size:14px;line-height:1.8}
-.stack-group .note{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.stack-group h3{font-size:13px;margin-bottom:6px}
+.stack-group .items{font-size:12.5px;line-height:1.8}
+.stack-group .note{font-size:10.5px;color:var(--muted);margin-top:6px;font-style:italic}
 
 /* contact */
 .contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5px}
@@ -304,9 +304,9 @@ h3{
 .contact-grid input:focus,.contact-grid textarea:focus{border-color:var(--accent);outline:none}
 .contact-grid textarea{resize:vertical;min-height:110px}
 .contact-grid button{
-  padding:13px 26px;border:1.5px solid var(--fg);
+  padding:11px 22px;border:1.5px solid var(--fg);
   background:var(--fg);color:var(--bg);
-  font:inherit;font-size:14px;text-transform:uppercase;letter-spacing:0.12em;
+  font:inherit;font-size:12px;text-transform:uppercase;letter-spacing:0.12em;
   cursor:pointer;transition:var(--dur) var(--ease);
 }
 .contact-grid button:hover{background:var(--accent);border-color:var(--accent);color:var(--bg)}
@@ -314,9 +314,9 @@ h3{
 /* socials */
 .socials{display:flex;gap:1.5px;margin-top:20px}
 .socials a{
-  flex:1;display:block;padding:12px;text-align:center;
+  flex:1;display:block;padding:10px;text-align:center;
   border:1.5px solid var(--border);text-decoration:none;
-  font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);
+  font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);
   transition:var(--dur) var(--ease);
 }
 .socials a:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent)}
@@ -324,8 +324,8 @@ h3{
 /* belief lists */
 .beliefs,.anti-list{margin-bottom:28px}
 .beliefs li,.anti-list li{
-  list-style:none;position:relative;padding:8px 0 8px 24px;
-  font-size:15px;line-height:1.7;border-bottom:1px solid var(--border);
+  list-style:none;position:relative;padding:7px 0 7px 22px;
+  font-size:13.5px;line-height:1.6;border-bottom:1px solid var(--border);
 }
 .beliefs li::before,.anti-list li::before{content:'→';position:absolute;left:0;color:var(--accent)}
 
@@ -350,15 +350,15 @@ h3{
 .overlay-panel .head .prompt{color:var(--accent)}
 .overlay-panel .head input{
   flex:1;background:none;border:none;outline:none;
-  font:inherit;  font-size:15px;color:var(--fg);
+  font:inherit;font-size:14px;color:var(--fg);
 }
 .overlay-panel .head input::placeholder{color:var(--muted)}
 .overlay-panel .results{max-height:50vh;overflow-y:auto}
-.overlay-panel .results .group-label{padding:9px 18px 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--muted)}
+.overlay-panel .results .group-label{padding:7px 18px 3px;font-size:9px;text-transform:uppercase;letter-spacing:0.2em;color:var(--muted)}
 .overlay-panel .results .item{
   display:flex;align-items:center;gap:10px;
-  padding:9px 18px;cursor:pointer;border-left:2px solid transparent;
-  font-size:14px;color:var(--muted);transition:background 150ms,color 150ms,border-color 150ms;
+  padding:7px 18px;cursor:pointer;border-left:2px solid transparent;
+  font-size:12.5px;color:var(--muted);transition:background 150ms,color 150ms,border-color 150ms;
 }
 .overlay-panel .results .item:hover,.overlay-panel .results .item.sel{
   background:color-mix(in srgb,var(--accent) 10%,transparent);
@@ -366,50 +366,50 @@ h3{
 }
 .overlay-panel .results .item .arrow{width:14px;text-align:center;flex-shrink:0}
 .overlay-panel .results .item .lbl{flex:1}
-.overlay-panel .results .item .hnt{font-size:11px;color:var(--muted);flex-shrink:0}
+.overlay-panel .results .item .hnt{font-size:9.5px;color:var(--muted);flex-shrink:0}
 .overlay-panel .results .item.sel .hnt{color:color-mix(in srgb,var(--accent) 60%,transparent)}
 .overlay-panel .footer{
   display:flex;justify-content:space-between;align-items:center;
-  padding:10px 18px;border-top:1.5px solid var(--border);font-size:11px;color:var(--muted);
+  padding:8px 18px;border-top:1.5px solid var(--border);font-size:9.5px;color:var(--muted);
 }
 .overlay-panel .footer .keys{display:flex;gap:10px}
-.overlay-panel .footer kbd{border:1.5px solid var(--border);padding:2px 6px;font-size:10px;font-family:var(--font-body)}
+.overlay-panel .footer kbd{border:1.5px solid var(--border);padding:1px 4px;font-size:8.5px;font-family:var(--font-body)}
 
 /* inline output */
-.inline-out{padding:16px 20px;background:color-mix(in srgb,var(--accent) 6%,transparent);border-bottom:1.5px solid var(--border);font-size:15px;line-height:1.8}
-.inline-out .prompt{color:var(--muted);font-weight:500;margin-bottom:4px}
-.inline-out .suggest{font-size:12px;color:var(--muted);margin-top:8px}
+.inline-out{padding:14px 18px;background:color-mix(in srgb,var(--accent) 6%,transparent);border-bottom:1.5px solid var(--border);font-size:13px;line-height:1.8}
+.inline-out .prompt{color:var(--muted);font-weight:500;margin-bottom:3px}
+.inline-out .suggest{font-size:10.5px;color:var(--muted);margin-top:6px}
 .inline-out .suggest .ch{color:var(--accent)}
 
 /* snake */
 #snakeCanvas{display:block;margin:0 auto;border:1.5px solid var(--border);background:#000}
 .snake-controls{text-align:center;margin-top:10px}
 .snake-controls button{
-  padding:9px 18px;border:1.5px solid var(--border);background:var(--bg);color:var(--fg);
-  font:inherit;font-size:13px;cursor:pointer;text-transform:uppercase;letter-spacing:0.08em;
+  padding:7px 14px;border:1.5px solid var(--border);background:var(--bg);color:var(--fg);
+  font:inherit;font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:0.08em;
   transition:var(--dur) var(--ease);
 }
 .snake-controls button:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ai items */
-.ai-item{border:1.5px solid var(--border);padding:20px;margin-bottom:12px;transition:var(--dur) var(--ease)}
+.ai-item{border:1.5px solid var(--border);padding:18px;margin-bottom:10px;transition:var(--dur) var(--ease)}
 .ai-item:hover{border-color:var(--accent);transform:translateY(-1px)}
-.ai-item .date{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px}
-.ai-item h3{font-size:20px;margin-bottom:6px}
-.ai-item p{font-size:14px;color:var(--muted);line-height:1.6}
+.ai-item .date{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px}
+.ai-item h3{font-size:17px;margin-bottom:4px}
+.ai-item p{font-size:12.5px;color:var(--muted);line-height:1.6}
 
 /* note subsist */
 .sub-box{border:1.5px solid var(--border);padding:18px;text-align:center;color:var(--muted)}
 .sub-box .mono{margin-bottom:6px}
-.sub-box p{font-size:14px;margin-bottom:10px}
+.sub-box p{font-size:12.5px;margin-bottom:10px}
 .sub-box form{display:flex;gap:1.5px;max-width:380px;margin:0 auto}
 .sub-box input{flex:1;padding:9px 12px;border:1.5px solid var(--border);background:var(--surface);font:inherit;font-size:16px;color:var(--fg)}
-.sub-box button{padding:11px 20px;border:1.5px solid var(--fg);background:var(--fg);color:var(--bg);font:inherit;font-size:13px;cursor:pointer;text-transform:uppercase;letter-spacing:0.08em}
+.sub-box button{padding:9px 18px;border:1.5px solid var(--fg);background:var(--fg);color:var(--bg);font:inherit;font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:0.08em}
 
 /* building status */
 .status-box{border:1.5px solid var(--accent);padding:18px;margin-bottom:22px}
 .status-box .mono{margin-bottom:3px}
-.status-box p{font-size:15px}
+.status-box p{font-size:13.5px}
 
 /* sidebar sticky */
 .side-sticky{position:sticky;top:90px}
@@ -417,8 +417,8 @@ h3{
 
 /* at-a-glance */
 .glance-box{border:1.5px solid var(--border);padding:14px;margin-top:20px}
-.glance-box .mono{font-size:11px;margin-bottom:6px}
-.glance-box .content{font-size:13px;line-height:2}
+.glance-box .mono{font-size:9.5px;margin-bottom:6px}
+.glance-box .content{font-size:11.5px;line-height:2}
 
 /* mobile menu break */
 @media(max-width:768px){
@@ -471,7 +471,7 @@ h3{
     <div class="head">
       <span class="prompt">$</span>
       <input type="text" id="paletteInput" placeholder="type a command…" autofocus spellcheck="false">
-      <span class="dim" style="font-size:12px;letter-spacing:0.08em" id="paletteCount"></span>
+      <span class="dim" style="font-size:10.5px;letter-spacing:0.08em" id="paletteCount"></span>
     </div>
     <div id="paletteResults" class="results"></div>
     <div class="footer">
@@ -480,7 +480,7 @@ h3{
         <span><kbd>↵</kbd> run</span>
         <span><kbd>esc</kbd> close</span>
       </div>
-      <span>v3.1</span>
+      <span>v3</span>
     </div>
   </div>
 </div>
@@ -490,7 +490,7 @@ h3{
     <div class="head">
       <span class="prompt">snake</span>
       <span style="flex:1"></span>
-      <span style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em" id="snakeScore">score: 0</span>
+      <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em" id="snakeScore">score: 0</span>
       <span style="margin-left:10px;cursor:pointer;font-size:16px;line-height:1;opacity:.6;transition:opacity var(--dur)" id="snakeClose2">×</span>
     </div>
     <canvas id="snakeCanvas" width="400" height="400"></canvas>
@@ -670,21 +670,21 @@ function render(){
   closeMobileNav()
 }
 
-function renderHome(){return`<div class="page"><div class="l-asym"><div><h1>Arthur<br>Buikis</h1><p style="font-size:clamp(17px,2vw,22px);color:var(--muted);margin-bottom:6px;line-height:1.4">${SITE.bio.jobTitle} &middot; ${SITE.bio.location.city}, ${SITE.bio.location.country}</p><div class="cmd-bar" onclick="document.getElementById('paletteInput').focus();openPalette()" role="button" tabindex="0"><span class="prompt">$</span><span class="typed-text" id="typedTarget"></span><span class="hint">ctrl+k &middot; /</span></div><div class="stats stagger"><div class="stat"><div class="num tnum">0</div><div class="lbl">years engineering</div></div><div class="stat"><div class="num tnum">0</div><div class="lbl">contracts · 100% JSS</div></div><div class="stat"><div class="num tnum">Py</div><div class="lbl">Python native tongue</div></div><div class="stat"><div class="num tnum">Riga</div><div class="lbl">based · CET/CEST</div></div></div><p style="color:var(--muted);font-size:15px;max-width:520px;line-height:1.7">${SITE.bio.summary}</p></div><div><div class="side-sticky"><div class="mono" style="margin-bottom:14px">featured</div>${SIDETHINGS.slice(0,3).map(s=>`<div class="card" style="padding:14px;margin-bottom:6px"><div class="meta">${s.kind}</div><h3 style="font-size:19px;margin-bottom:3px">${s.title}${s.link?' <span style="font-size:13px;color:var(--accent)">↗</span>':''}</h3><p style="font-size:13px;margin-bottom:0">${s.body.length>70?s.body.slice(0,70)+'…':s.body}</p></div>`).join('')}</div></div></div></div>`}
+function renderHome(){return`<div class="page"><div class="l-asym"><div><h1>Arthur<br>Buikis</h1><p style="font-size:clamp(15px,1.8vw,20px);color:var(--muted);margin-bottom:6px;line-height:1.4">${SITE.bio.jobTitle} &middot; ${SITE.bio.location.city}, ${SITE.bio.location.country}</p><div class="cmd-bar" onclick="document.getElementById('paletteInput').focus();openPalette()" role="button" tabindex="0"><span class="prompt">$</span><span class="typed-text" id="typedTarget"></span><span class="hint">ctrl+k &middot; /</span></div><div class="stats stagger"><div class="stat"><div class="num tnum">0</div><div class="lbl">years engineering</div></div><div class="stat"><div class="num tnum">0</div><div class="lbl">contracts · 100% JSS</div></div><div class="stat"><div class="num tnum">Py</div><div class="lbl">Python native tongue</div></div><div class="stat"><div class="num tnum">Riga</div><div class="lbl">based · CET/CEST</div></div></div><p style="color:var(--muted);font-size:14px;max-width:520px;line-height:1.7">${SITE.bio.summary}</p></div><div><div class="side-sticky"><div class="mono" style="margin-bottom:14px">featured</div>${SIDETHINGS.slice(0,3).map(s=>`<div class="card" style="padding:14px;margin-bottom:6px"><div class="meta">${s.kind}</div><h3 style="font-size:17px;margin-bottom:3px">${s.title}${s.link?' <span style="font-size:11px;color:var(--accent)">↗</span>':''}</h3><p style="font-size:11.5px;margin-bottom:0">${s.body.length>70?s.body.slice(0,70)+'…':s.body}</p></div>`).join('')}</div></div></div></div>`}
 
-function renderAbout(){return`<div class="page"><div class="section-header"><h2>About</h2><div class="count">since 2015</div></div><div class="l-asym"><div><div class="tl">${TIMELINE.map((t,i)=>`<div class="tl-item${t.live?' live':''} reveal"><div class="years">${t.years}</div><div class="role">${t.role}</div><div class="where">${t.where}</div><div class="note">${t.note}</div></div>`).join('')}</div><div style="margin-top:44px"><h3>Beliefs</h3><ul class="beliefs">${BELIEFS.map(b=>`<li class="reveal">${b}</li>`).join('')}</ul></div><div style="margin-top:28px"><h3>Avoid</h3><ul class="anti-list">${ANTILIST.map(a=>`<li class="reveal">${a}</li>`).join('')}</ul></div></div><div><div class="side-sticky"><div class="section-header" style="margin-bottom:10px"><h3 style="font-size:19px">Stack</h3></div><div class="stack-grid" style="grid-template-columns:1fr">${STACK.map(g=>`<div class="stack-group reveal"><h3 style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em">${g.title}</h3><div class="items">${g.items.map(i=>`<span style="display:block">${i}</span>`).join('')}</div><div class="note">${g.note}</div></div>`).join('')}</div><div class="glance-box reveal"><div class="mono">at a glance</div><div class="content">based: Riga, LV<br>languages: LV · EN · RU · DE<br>time: EU (CET/CEST)<br>preference: remote · EU-time team<br>contracts: 12+ · 100% JSS</div></div></div></div></div></div>`}
+function renderAbout(){return`<div class="page"><div class="section-header"><h2>About</h2><div class="count">since 2015</div></div><div class="l-asym"><div><div class="tl">${TIMELINE.map((t,i)=>`<div class="tl-item${t.live?' live':''} reveal"><div class="years">${t.years}</div><div class="role">${t.role}</div><div class="where">${t.where}</div><div class="note">${t.note}</div></div>`).join('')}</div><div style="margin-top:44px"><h3>Beliefs</h3><ul class="beliefs">${BELIEFS.map(b=>`<li class="reveal">${b}</li>`).join('')}</ul></div><div style="margin-top:28px"><h3>Avoid</h3><ul class="anti-list">${ANTILIST.map(a=>`<li class="reveal">${a}</li>`).join('')}</ul></div></div><div><div class="side-sticky"><div class="section-header" style="margin-bottom:10px"><h3 style="font-size:17px">Stack</h3></div><div class="stack-grid" style="grid-template-columns:1fr">${STACK.map(g=>`<div class="stack-group reveal"><h3 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em">${g.title}</h3><div class="items">${g.items.map(i=>`<span style="display:block">${i}</span>`).join('')}</div><div class="note">${g.note}</div></div>`).join('')}</div><div class="glance-box reveal"><div class="mono">at a glance</div><div class="content">based: Riga, LV<br>languages: LV · EN · RU · DE<br>time: EU (CET/CEST)<br>preference: remote · EU-time team<br>contracts: 12+ · 100% JSS</div></div></div></div></div></div>`}
 
-function renderCV(){return`<div class="page"><div class="section-header"><h2>Curriculum Vit&aelig;</h2><div class="count"><a href="#" style="color:var(--accent);text-decoration:underline;font-size:12px" onclick="window.open('cv.pdf','_blank');return false">download pdf ↓</a></div></div><p style="font-size:15px;color:var(--muted);margin-bottom:28px;max-width:620px;line-height:1.7">Senior backend / platform engineer. About twelve years shipping data-heavy Python systems, with a bit of Rust where it earns its keep. Currently owning performance and ML-pipeline integration on a Django + Rust platform.</p>${CV_EXP.map(e=>`<div class="card reveal"><div class="meta">${e.period} &middot; ${e.company}</div><h3>${e.role}</h3><p>${e.blurb}</p>${e.bullets.length?`<ul style="font-size:14px;color:var(--muted);line-height:1.7;padding-left:16px;margin-bottom:10px">${e.bullets.map(b=>`<li style="margin-bottom:3px">${b}</li>`).join('')}</ul>`:''}${e.stack?`<div class="tags">${e.stack.split('·').map(t=>`<span class="tag">${t.trim()}</span>`).join('')}</div>`:''}</div>`).join('')}<div style="margin-top:28px"><h3>Side Projects</h3>${SIDETHINGS.map(s=>`<div class="card reveal"><div class="meta">${s.kind}</div><h3>${s.title}${s.link?' <a href="'+s.link.href+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:13px">↗</a>':''}</h3><p>${s.body}</p><div class="tags">${s.meta.split('·').map(t=>`<span class="tag">${t.trim()}</span>`).join('')}</div></div>`).join('')}</div><div class="glance-box" style="display:inline-block;margin-top:28px"><div class="mono">languages</div><div class="content" style="font-size:14px">Latvian (Native) · English (Fluent) · Russian (Conversational) · German (Conversational)</div></div></div>`}
+function renderCV(){return`<div class="page"><div class="section-header"><h2>Curriculum Vit&aelig;</h2><div class="count"><a href="#" style="color:var(--accent);text-decoration:underline;font-size:11px" onclick="window.open('cv.pdf','_blank');return false">download pdf ↓</a></div></div><p style="font-size:13.5px;color:var(--muted);margin-bottom:28px;max-width:620px;line-height:1.7">Senior backend / platform engineer. About twelve years shipping data-heavy Python systems, with a bit of Rust where it earns its keep. Currently owning performance and ML-pipeline integration on a Django + Rust platform.</p>${CV_EXP.map(e=>`<div class="card reveal"><div class="meta">${e.period} &middot; ${e.company}</div><h3>${e.role}</h3><p>${e.blurb}</p>${e.bullets.length?`<ul style="font-size:12.5px;color:var(--muted);line-height:1.7;padding-left:16px;margin-bottom:10px">${e.bullets.map(b=>`<li style="margin-bottom:3px">${b}</li>`).join('')}</ul>`:''}${e.stack?`<div class="tags">${e.stack.split('·').map(t=>`<span class="tag">${t.trim()}</span>`).join('')}</div>`:''}</div>`).join('')}<div style="margin-top:28px"><h3>Side Projects</h3>${SIDETHINGS.map(s=>`<div class="card reveal"><div class="meta">${s.kind}</div><h3>${s.title}${s.link?' <a href="'+s.link.href+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:13px">↗</a>':''}</h3><p>${s.body}</p><div class="tags">${s.meta.split('·').map(t=>`<span class="tag">${t.trim()}</span>`).join('')}</div></div>`).join('')}</div><div class="glance-box" style="display:inline-block;margin-top:28px"><div class="mono">languages</div><div class="content" style="font-size:12.5px">Latvian (Native) · English (Fluent) · Russian (Conversational) · German (Conversational)</div></div></div>`}
 
 function renderWork(){return`<div class="page"><div class="section-header"><h2>Work</h2><div class="count">selected</div></div><div class="project-grid">${SIDETHINGS.map(s=>`<div class="card" style="display:flex;flex-direction:column"><div class="meta">${s.kind}</div><h3>${s.title}${s.link?' <a href="'+s.link.href+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:13px">↗</a>':''}</h3><p style="flex:1">${s.body}</p><div class="tags">${s.meta.split('·').map(t=>`<span class="tag">${t.trim()}</span>`).join('')}</div></div>`).join('')}<div class="card"><div class="meta">case study · 2022–2024</div><h3>Scraping, ML, and the cost of running quietly</h3><p>Lessons from two years on data infrastructure. Source adapters as contracts, Playwright over Selenium, dedup as pipeline stage. Throughput: 10k→100k records/day.</p><div class="tags"><span class="tag">python</span><span class="tag">playwright</span><span class="tag">postgres</span><span class="tag">ml</span></div></div></div></div>`}
 
-function renderNotes(){return`<div class="page"><div class="section-header"><h2>Notes</h2><div class="count">1 post</div></div><div class="card reveal"><div class="meta">2026-04-28 &middot; meta</div><h3>A new place to write</h3><p>Why /notes exists: AI in production, not in pitches. Short, opinionated notes on AI/ML in production — the unglamorous side: cost, latency, failure modes, what actually works at scale. Not prompt-tip threads, not "agents will replace…" speculation.</p><p style="font-size:14px;color:var(--muted);margin-top:6px">"If you build, ship, and operate things that have to keep running — not just demo well — this is for you."</p></div><div class="sub-box reveal" style="margin-top:28px"><div class="mono">subscribe</div><p>Get every note in your inbox.</p><form action="${SITE.formspree}" method="POST"><input type="email" name="email" placeholder="your@email.com" required><button type="submit">→</button></form></div></div>`}
+function renderNotes(){return`<div class="page"><div class="section-header"><h2>Notes</h2><div class="count">1 post</div></div><div class="card reveal"><div class="meta">2026-04-28 &middot; meta</div><h3>A new place to write</h3><p>Why /notes exists: AI in production, not in pitches. Short, opinionated notes on AI/ML in production — the unglamorous side: cost, latency, failure modes, what actually works at scale. Not prompt-tip threads, not "agents will replace…" speculation.</p><p style="font-size:12.5px;color:var(--muted);margin-top:6px">"If you build, ship, and operate things that have to keep running — not just demo well — this is for you."</p></div><div class="sub-box reveal" style="margin-top:28px"><div class="mono">subscribe</div><p>Get every note in your inbox.</p><form action="${SITE.formspree}" method="POST"><input type="email" name="email" placeholder="your@email.com" required><button type="submit">→</button></form></div></div>`}
 
-function renderBuilding(){return`<div class="page"><div class="section-header"><h2>Building</h2><div class="count">prototype · updated 2026-04</div></div><div class="l-asym"><div><p style="font-size:15px;color:var(--muted);margin-bottom:22px;line-height:1.7">Quietly building a product platform. Details are intentionally thin while it's still in prototype, but the short version is this: a tool for operators who want what I want, in a space where most options still feel clumsy.</p><div class="status-box reveal"><div class="mono">status</div><p><strong>Prototype.</strong> It works for me. It's not ready for external hands yet. Growing it quietly, without the launch-day hype cycle.</p></div><h3>Why</h3><p style="font-size:15px;color:var(--muted);margin-bottom:22px;line-height:1.7">Over the last decade, I've watched the same problems get solved again and again inside different walled gardens. The goal here is to ship something small enough to move quickly, focused enough to be genuinely useful, and honest enough that people can always take their data with them.</p><h3>What's next</h3><ul class="beliefs"><li class="reveal">Make the core workflow bulletproof.</li><li class="reveal">Bring in a small set of early users I trust to give direct, practical feedback.</li><li class="reveal">Open it up publicly when the experience is boring in the best way.</li></ul></div><div><div class="side-sticky"><div class="card" style="padding:16px"><div class="mono" style="margin-bottom:10px">follow</div><p style="font-size:14px;color:var(--muted);margin-bottom:14px">No newsletter. If you want to hear when it opens up, email me and I'll add you to a small list.</p><a href="mailto:${SITE.email}" style="display:block;padding:9px;border:1.5px solid var(--fg);text-align:center;text-decoration:none;color:var(--fg);font-size:13px;text-transform:uppercase;letter-spacing:0.08em">${SITE.email}</a></div></div></div></div></div>`}
+function renderBuilding(){return`<div class="page"><div class="section-header"><h2>Building</h2><div class="count">prototype · updated 2026-04</div></div><div class="l-asym"><div><p style="font-size:13.5px;color:var(--muted);margin-bottom:22px;line-height:1.7">Quietly building a product platform. Details are intentionally thin while it's still in prototype, but the short version is this: a tool for operators who want what I want, in a space where most options still feel clumsy.</p><div class="status-box reveal"><div class="mono">status</div><p><strong>Prototype.</strong> It works for me. It's not ready for external hands yet. Growing it quietly, without the launch-day hype cycle.</p></div><h3>Why</h3><p style="font-size:13.5px;color:var(--muted);margin-bottom:22px;line-height:1.7">Over the last decade, I've watched the same problems get solved again and again inside different walled gardens. The goal here is to ship something small enough to move quickly, focused enough to be genuinely useful, and honest enough that people can always take their data with them.</p><h3>What's next</h3><ul class="beliefs"><li class="reveal">Make the core workflow bulletproof.</li><li class="reveal">Bring in a small set of early users I trust to give direct, practical feedback.</li><li class="reveal">Open it up publicly when the experience is boring in the best way.</li></ul></div><div><div class="side-sticky"><div class="card" style="padding:16px"><div class="mono" style="margin-bottom:10px">follow</div><p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">No newsletter. If you want to hear when it opens up, email me and I'll add you to a small list.</p><a href="mailto:${SITE.email}" style="display:block;padding:9px;border:1.5px solid var(--fg);text-align:center;text-decoration:none;color:var(--fg);font-size:12px;text-transform:uppercase;letter-spacing:0.08em">${SITE.email}</a></div></div></div></div></div>`}
 
-function renderContact(){return`<div class="page"><div class="section-header"><h2>Contact</h2><div class="count">say hi</div></div><div class="l-asym"><div><form action="${SITE.formspree}" method="POST" class="contact-grid"><input type="text" name="name" placeholder="name" required><input type="email" name="email" placeholder="email" required><div style="grid-column:1/-1"><textarea name="message" placeholder="message" required></textarea></div><div style="grid-column:1/-1"><button type="submit">Send →</button></div></form><div class="socials">${SITE.socials.map(s=>`<a href="${s.href}" target="_blank" rel="noopener">${s.label} ↗</a>`).join('')}</div></div><div><div class="side-sticky"><div class="card" style="padding:16px"><div class="mono" style="margin-bottom:6px">direct</div><p style="font-size:14px;margin-bottom:3px">${SITE.email}</p><p style="font-size:12px;color:var(--muted)">response within 24h</p><div style="margin-top:14px;padding-top:14px;border-top:1.5px solid var(--border)"><div class="mono" style="margin-bottom:6px">also</div><div style="font-size:13px;line-height:2">Upwork: 100% Job Success<br>LinkedIn: arthur-buikis<br>GitHub: Artufe</div></div></div></div></div></div></div>`}
+function renderContact(){return`<div class="page"><div class="section-header"><h2>Contact</h2><div class="count">say hi</div></div><div class="l-asym"><div><form action="${SITE.formspree}" method="POST" class="contact-grid"><input type="text" name="name" placeholder="name" required><input type="email" name="email" placeholder="email" required><div style="grid-column:1/-1"><textarea name="message" placeholder="message" required></textarea></div><div style="grid-column:1/-1"><button type="submit">Send →</button></div></form><div class="socials">${SITE.socials.map(s=>`<a href="${s.href}" target="_blank" rel="noopener">${s.label} ↗</a>`).join('')}</div></div><div><div class="side-sticky"><div class="card" style="padding:16px"><div class="mono" style="margin-bottom:6px">direct</div><p style="font-size:13px;margin-bottom:3px">${SITE.email}</p><p style="font-size:10.5px;color:var(--muted)">response within 24h</p><div style="margin-top:14px;padding-top:14px;border-top:1.5px solid var(--border)"><div class="mono" style="margin-bottom:6px">also</div><div style="font-size:12px;line-height:2">Upwork: 100% Job Success<br>LinkedIn: arthur-buikis<br>GitHub: Artufe</div></div></div></div></div></div></div>`}
 
-function renderAINews(){return`<div class="page"><div class="section-header"><h2>AI &middot; ML in production</h2><div class="count">perspective</div></div><div class="l-asym"><div><p style="font-size:15px;color:var(--muted);margin-bottom:28px;line-height:1.7">Short, opinionated notes on AI/ML in production — the unglamorous side: cost, latency, failure modes, what actually works at scale. Not prompt-tip threads, not "agents will replace…" speculation. The senior engineer's read.</p><div class="ai-item reveal"><div class="date">2026-04-28</div><h3>Why most AI demos don't ship</h3><p>The gap between a Jupyter notebook and a production pipeline isn't engineering — it's cost, latency, and the ten systems around the model that need to never break. I've been on both sides.</p></div><div class="ai-item reveal"><div class="date">coming</div><h3>ML pipeline integration patterns</h3><p>Shadow deploys, safe rollouts, feature flags for models. What I've learned integrating 12+ ML clients into a single production pipeline.</p></div><div class="ai-item reveal"><div class="date">coming</div><h3>PyO3 in production ML</h3><p>When Rust earns its keep in a Python ML stack. Graph reads, ETA engine, and releasing the GIL — the patterns that work and the ones that don't.</p></div></div><div><div class="side-sticky"><div class="card" style="padding:16px;margin-bottom:12px"><div class="mono" style="margin-bottom:6px;font-size:11px">currently</div><p style="font-size:13px">Integrating ML processing clients into production: pano enhancement, sky replacement, monodepth, POI detection, and more.</p></div><div class="card" style="padding:16px"><div class="mono" style="margin-bottom:6px;font-size:11px">stack</div><p style="font-size:13px;line-height:1.8">Triton Inference Server · Shadow deploys<br>Postgres · ClickHouse<br>Kubernetes · Kueue</p></div></div></div></div></div>`}
+function renderAINews(){return`<div class="page"><div class="section-header"><h2>AI &middot; ML in production</h2><div class="count">perspective</div></div><div class="l-asym"><div><p style="font-size:13.5px;color:var(--muted);margin-bottom:28px;line-height:1.7">Short, opinionated notes on AI/ML in production — the unglamorous side: cost, latency, failure modes, what actually works at scale. Not prompt-tip threads, not "agents will replace…" speculation. The senior engineer's read.</p><div class="ai-item reveal"><div class="date">2026-04-28</div><h3>Why most AI demos don't ship</h3><p>The gap between a Jupyter notebook and a production pipeline isn't engineering — it's cost, latency, and the ten systems around the model that need to never break. I've been on both sides.</p></div><div class="ai-item reveal"><div class="date">coming</div><h3>ML pipeline integration patterns</h3><p>Shadow deploys, safe rollouts, feature flags for models. What I've learned integrating 12+ ML clients into a single production pipeline.</p></div><div class="ai-item reveal"><div class="date">coming</div><h3>PyO3 in production ML</h3><p>When Rust earns its keep in a Python ML stack. Graph reads, ETA engine, and releasing the GIL — the patterns that work and the ones that don't.</p></div></div><div><div class="side-sticky"><div class="card" style="padding:14px;margin-bottom:10px"><div class="mono" style="margin-bottom:4px;font-size:9.5px">currently</div><p style="font-size:12px">Integrating ML processing clients into production: pano enhancement, sky replacement, monodepth, POI detection, and more.</p></div><div class="card" style="padding:14px"><div class="mono" style="margin-bottom:4px;font-size:9.5px">stack</div><p style="font-size:12px;line-height:1.8">Triton Inference Server · Shadow deploys<br>Postgres · ClickHouse<br>Kubernetes · Kueue</p></div></div></div></div></div>`}
 
 // ======================== COMMAND PALETTE ========================
 let paletteOpen=false,paletteSel=0
@@ -715,7 +715,7 @@ function filterPalette(){
   })
   document.getElementById('paletteCount').textContent=q?results.length+' result'+(results.length!==1?'s':''):''
   const container=document.getElementById('paletteResults')
-  if(!results.length){container.innerHTML='<div style="padding:28px 18px;text-align:center;font-size:14px;color:var(--muted)">no matches</div>';return}
+  if(!results.length){container.innerHTML='<div style="padding:28px 18px;text-align:center;font-size:12.5px;color:var(--muted)">no matches</div>';return}
   let html=''
   COMMAND_GROUPS.forEach(grp=>{
     const items=results.filter(r=>r.group===grp)
@@ -839,10 +839,10 @@ function drawSnake(ate){
   }
   // snake
   s.snake.forEach((p,i)=>{
-    ctx.fillStyle=i===0?'#8a4a30':'oklch(55% 0.14 190 / 0.4)'
+    ctx.fillStyle=i===0?'#2a9d8f':'oklch(55% 0.14 190 / 0.4)'
     ctx.fillRect(p.x*s.cell+1,p.y*s.cell+1,s.cell-2,s.cell-2)
     if(i===0&&!s.gameOver){
-      ctx.shadowColor='#8a4a30';ctx.shadowBlur=6
+      ctx.shadowColor='#2a9d8f';ctx.shadowBlur=6
       ctx.fillRect(p.x*s.cell+1,p.y*s.cell+1,s.cell-2,s.cell-2)
       ctx.shadowBlur=0
     }
@@ -851,7 +851,7 @@ function drawSnake(ate){
   ctx.fillStyle='#fff';ctx.fillRect(s.food.x*s.cell+4,s.food.y*s.cell+4,s.cell-8,s.cell-8)
   if(s.gameOver){
     ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,size/2-18,size,36)
-    ctx.fillStyle='#8a4a30';ctx.font='15px monospace';ctx.textAlign='center'
+    ctx.fillStyle='#2a9d8f';ctx.font='15px monospace';ctx.textAlign='center'
     ctx.fillText('game over — '+(snakeState?s.score:'0'),size/2,size/2+5)
   }
   document.getElementById('snakeScore').textContent='score: '+s.score
