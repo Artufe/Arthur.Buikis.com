@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Input } from '@/components/ui/input';
 import { site } from '@/content/site';
 import { cn } from '@/lib/utils';
@@ -16,9 +16,18 @@ const COPY = {
   comingSoon: 'Email signup is wiring up. Bookmark /notes/ for now, or use /contact to nudge me.',
 };
 
+// Reject submissions faster than this — humans don't fill and submit in <800ms,
+// bots do. Belt-and-braces with the off-screen `_gotcha` honeypot below.
+const MIN_DWELL_MS = 800;
+
 export function SubscribeForm({ variant = 'panel', className }: { variant?: Variant; className?: string }) {
   const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const mountedAt = useRef<number>(0);
+
+  useEffect(() => {
+    mountedAt.current = Date.now();
+  }, []);
 
   const endpoint = site.subscribeEndpoint;
   const live = !!endpoint;
@@ -27,14 +36,44 @@ export function SubscribeForm({ variant = 'panel', className }: { variant?: Vari
     e.preventDefault();
     if (!endpoint) return;
     const form = e.currentTarget;
+    const data = new FormData(form);
+
+    // Honeypot: real users can't see or tab into this; bots fill every field.
+    // Pretend we succeeded so they don't retry.
+    if ((data.get('_gotcha') as string | null)?.length) {
+      setStatus('success');
+      form.reset();
+      return;
+    }
+
+    // Timing trap: bots POST instantly after page load.
+    if (mountedAt.current && Date.now() - mountedAt.current < MIN_DWELL_MS) {
+      setStatus('success');
+      form.reset();
+      return;
+    }
+
     setStatus('sending');
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { Accept: 'application/json' },
-        body: new FormData(form),
+        body: data,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Formspree returns { errors: [{ message }] } on validation errors;
+        // other providers may return plain text. Fall back to status code.
+        const payload: unknown = await res.json().catch(() => null);
+        const message =
+          typeof payload === 'object' &&
+          payload !== null &&
+          'errors' in payload &&
+          Array.isArray((payload as { errors: unknown }).errors) &&
+          (payload as { errors: Array<{ message?: string }> }).errors[0]?.message
+            ? (payload as { errors: Array<{ message?: string }> }).errors[0].message!
+            : `HTTP ${res.status}`;
+        throw new Error(message);
+      }
       setStatus('success');
       form.reset();
     } catch (err) {
