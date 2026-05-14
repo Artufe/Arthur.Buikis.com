@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Nav } from '@/components/nav';
@@ -17,6 +17,15 @@ export const metadata: Metadata = {
   authors: [{ name: site.name, url: site.url }],
   creator: site.name,
   alternates: { canonical: '/' },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
+      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  manifest: '/site.webmanifest',
   openGraph: {
     title: site.name,
     description: site.description,
@@ -30,6 +39,10 @@ export const metadata: Metadata = {
     title: site.name,
     description: site.description,
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0F0F0F',
 };
 
 const personLd = {
