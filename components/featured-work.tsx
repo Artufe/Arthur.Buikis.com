@@ -143,13 +143,12 @@ export function FeaturedWork() {
           <div>
             <p className="mono" style={{ marginBottom: 12 }}>Selected work</p>
             <h2 className="font-display text-[30px] leading-[1.12] tracking-tight" style={{ margin: 0 }}>
-              Cases —<br />
-              still writing<br />
+              Cases — <br />
+              still writing <br />
               them.
             </h2>
             <p className="mt-5 font-mono text-[10px] dim leading-[1.6]">
-              Three shown.
-              <br />
+              Three shown. <br />
               More as I write them up.
             </p>
           </div>

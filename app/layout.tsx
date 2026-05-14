@@ -14,6 +14,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(site.url),
   title: { default: site.name, template: `%s · ${site.name}` },
   description: site.description,
+  authors: [{ name: site.name, url: site.url }],
+  creator: site.name,
   alternates: { canonical: '/' },
   openGraph: {
     title: site.name,
@@ -35,8 +37,10 @@ const personLd = {
   '@type': 'Person',
   '@id': `${site.url}/#person`,
   name: site.name,
+  alternateName: 'Artūrs Buiķis',
   url: site.url,
   email: `mailto:${site.email}`,
+  image: `${site.url}/opengraph-image.png`,
   jobTitle: site.bio.jobTitle,
   description: site.bio.summary,
   address: {
@@ -44,7 +48,33 @@ const personLd = {
     addressLocality: site.bio.location.city,
     addressCountry: site.bio.location.country,
   },
+  knowsLanguage: ['Latvian', 'English', 'Russian', 'German'],
   knowsAbout: site.bio.knowsAbout,
+  hasOccupation: {
+    '@type': 'Occupation',
+    name: site.bio.jobTitle,
+    occupationLocation: {
+      '@type': 'City',
+      name: `${site.bio.location.city}, Latvia`,
+    },
+    skills:
+      'Python, Rust, PyO3, Django, Celery, Kubernetes, PostgreSQL, ClickHouse, performance optimization, ML pipeline integration',
+  },
+  worksFor: [
+    {
+      '@type': 'Organization',
+      name: 'MarkFlow',
+      url: 'https://markflow.eu/',
+      description: 'Solo-built social-analytics SaaS integrated with Meta and Google ad APIs.',
+    },
+  ],
+  alumniOf: [
+    {
+      '@type': 'Organization',
+      name: 'Strange Logic',
+      url: 'https://strangelogic.com/',
+    },
+  ],
   sameAs: site.socials.map((s) => s.href),
 };
 

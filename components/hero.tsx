@@ -19,7 +19,7 @@ export function Hero() {
             <span className="text-[var(--accent)] mr-2">$</span>whoami --verbose
           </div>
           <h1 className="mt-5">
-            Arthur<br />Buikis
+            Arthur <br />Buikis
           </h1>
           <p className="text-[clamp(15px,1.8vw,20px)] text-[var(--muted)] mb-2 leading-[1.4]">
             {site.bio.jobTitle} &middot; {site.bio.location.city}, {site.bio.location.country}

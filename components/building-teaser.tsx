@@ -12,7 +12,7 @@ export function BuildingTeaser() {
           <div>
             <p className="mono" style={{ marginBottom: 12 }}>Currently</p>
             <h2 className="font-display text-[28px] leading-[1.12] tracking-tight" style={{ margin: 0 }}>
-              Building something<br />on the side.
+              Building something <br />on the side.
             </h2>
           </div>
           <div>
