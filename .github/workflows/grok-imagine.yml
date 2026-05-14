@@ -1,0 +1,66 @@
+name: Grok Imagine
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: grok-imagine-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  imagine:
+    if: >-
+      github.event.issue.pull_request != null
+      && github.event.comment.user.login == github.repository_owner
+      && startsWith(github.event.comment.body, '@grok-imagine ')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          data=$(gh api "/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}")
+          ref=$(echo "$data" | jq -r '.head.ref')
+          sha=$(echo "$data" | jq -r '.head.sha')
+          fork=$(echo "$data" | jq -r '.head.repo.fork')
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "fork=$fork" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Run grok-imagine
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GROK_IMAGE_MODEL: grok-2-image-1212
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REF: ${{ steps.pr.outputs.ref }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFileSync } from 'node:fs';
+          import { run } from './.github/scripts/grok-imagine.mjs';
+          const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          await run({ event, env: process.env, repoRoot: process.cwd() });
+          EOF
