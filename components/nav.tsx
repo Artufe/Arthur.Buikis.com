@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { site } from '@/content/site';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -13,15 +13,33 @@ export function Nav() {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const scrolledRef = useRef(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
+    let raf: number | null = null;
+    const onScroll = () => {
+      if (raf !== null) return;
+      raf = requestAnimationFrame(() => {
+        const next = window.scrollY > 8;
+        if (next !== scrolledRef.current) {
+          scrolledRef.current = next;
+          setScrolled(next);
+        }
+        raf = null;
+      });
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
   }, []);
 
   useEffect(() => { setOpen(false); }, [pathname]);
+
+  const isActive = (href: string) =>
+    pathname === href || (href !== '/' && pathname !== null && pathname.startsWith(href));
 
   return (
     <nav
@@ -34,18 +52,20 @@ export function Nav() {
         <Link
           href="/"
           className="brand"
+          aria-label="Arthur Buikis — home"
         >
-          <span className="signal"><span /><span /><span /></span>
+          <span className="signal" aria-hidden="true"><span /><span /><span /></span>
           a<span className="accent">b</span>.
         </Link>
-        <nav className="nav-desktop" id="mainNav">
+        <nav className="nav-desktop" id="mainNav" aria-label="Primary">
           {site.nav.map((item) => {
-            const active = pathname === item.href || (item.href !== '/' && pathname !== null && pathname.startsWith(item.href));
+            const active = isActive(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn('nav-link', active ? 'active' : '')}
+                aria-current={active ? 'page' : undefined}
               >
                 {item.label.toLowerCase()}
               </Link>
@@ -57,29 +77,7 @@ export function Nav() {
           <button
             type="button"
             aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            aria-controls="mobileNav"
             onClick={() => setOpen(!open)}
-            className="hamburger-btn md:hidden"
-          >
-            {open ? <X size={18} strokeWidth={1.5} /> : <Menu size={18} strokeWidth={1.5} />}
-          </button>
-        </div>
-      </div>
-      {open && (
-        <div className="mobile-nav open">
-          {site.nav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                pathname === item.href || (item.href !== '/' && pathname !== null && pathname.startsWith(item.href))
-                  ? 'active' : ''
-              )}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-      )}
-    </nav>
-  );
-}
+            className="hamburger-btn md:h
