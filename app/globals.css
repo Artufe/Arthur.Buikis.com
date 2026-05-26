@@ -229,6 +229,30 @@ h3 {
   .l-asym { grid-template-columns: 1fr; gap: 24px; }
 }
 
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  padding: 8px 12px;
+  background: var(--fg);
+  color: var(--bg);
+  font-family: var(--font-body);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  transform: translateY(-150%);
+  transition: transform var(--dur) var(--ease);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Header / Nav */
 .header {
   position: sticky;
@@ -238,7 +262,12 @@ h3 {
   backdrop-filter: blur(8px);
   border-bottom: 2px solid var(--border);
   padding: 14px 0;
-  transition: background var(--dur) var(--ease);
+  transition: background var(--dur) var(--ease), padding var(--dur) var(--ease);
+}
+
+.header.scrolled {
+  background: var(--bg);
+  padding: 10px 0;
 }
 
 .header .l-wrap {
@@ -298,6 +327,12 @@ h3 {
 }
 
 .nav-desktop a:hover { color: var(--fg); }
+
+.nav-desktop a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--fg);
+}
 
 .nav-desktop a.active {
   background: var(--fg);
@@ -905,31 +940,4 @@ h3 {
 
 @keyframes page-in {
   from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes page-out {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-8px); }
-}
-
-.page-enter { animation: page-in 400ms var(--ease) both; }
-.page-enter-out { animation: page-out 250ms var(--ease) both; }
-
-/* Snake canvas */
-#snakeCanvas {
-  display: block;
-  margin: 0 auto;
-  border: 2px solid var(--border);
-  background: #000;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 200ms !important;
-  }
-  .reveal { opacity: 1; transform: none; }
-  .stagger > * { animation: none; opacity: 1; transform: none; }
-}
+  to { opacity: 1; transform: translateY(0);

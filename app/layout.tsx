@@ -117,13 +117,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ThemeProvider>
           <HeroShader />
           <ScanLine />
+          <a href="#main" className="skip-link">Skip to content</a>
           <Nav />
-          <main className="relative z-10 pt-16">{children}</main>
+          <main id="main" className="relative z-10 pt-16">{children}</main>
           <Footer />
           <SnakeWindowHost />
-          <CommandPaletteLazy />
-        </ThemeProvider>
-      </body>
-    </html>
-  );
-}
+          <Command
