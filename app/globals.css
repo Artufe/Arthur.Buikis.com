@@ -940,4 +940,31 @@ h3 {
 
 @keyframes page-in {
   from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0);
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes page-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
+}
+
+.page-enter { animation: page-in 400ms var(--ease) both; }
+.page-enter-out { animation: page-out 250ms var(--ease) both; }
+
+/* Snake canvas */
+#snakeCanvas {
+  display: block;
+  margin: 0 auto;
+  border: 2px solid var(--border);
+  background: #000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 200ms !important;
+  }
+  .reveal { opacity: 1; transform: none; }
+  .stagger > * { animation: none; opacity: 1; transform: none; }
+}
