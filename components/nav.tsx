@@ -80,4 +80,29 @@ export function Nav() {
             aria-expanded={open}
             aria-controls="mobileNav"
             onClick={() => setOpen(!open)}
-            className="hamburger-btn md:h
+            className="hamburger-btn md:hidden"
+          >
+            {open ? <X size={18} strokeWidth={1.5} /> : <Menu size={18} strokeWidth={1.5} />}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div id="mobileNav" className="mobile-nav open">
+          {site.nav.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(active ? 'active' : '')}
+                aria-current={active ? 'page' : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </nav>
+  );
+}
