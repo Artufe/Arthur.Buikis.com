@@ -122,4 +122,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main" className="relative z-10 pt-16">{children}</main>
           <Footer />
           <SnakeWindowHost />
-          <Command
+          <CommandPaletteLazy />
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
