@@ -35,7 +35,18 @@ Generated in this PR via `@grok-imagine` — see PR comments.
 
 ## Decision
 
-TBD after viewing the mood images. The implemented direction will be recorded here once chosen.
+**B — Blueprint / topo flow.** It's the only direction that fits the existing hard-edged, terminal-with-scanlines aesthetic; it lets us keep the warm amber accent as a recognizable continuity signal; and it's the most composed when fully static, which is the explicit complaint in the issue. A goes too soft; C is too loud and organic; D is minimal but generic.
+
+## Implementation
+
+Single-file shader rewrite — palette plumbing in `components/hero-shader.tsx` and the fragment shader in `public/hero-shader.js`. Behavior:
+
+- **Contour field** — two octaves of value-noise FBM, slightly domain-warped, evolved by `uTime`. Render contours via `fract(field * BANDS)` with `fwidth`-based AA so lines stay crisp at any DPR.
+- **Grid underlay** — 64px engineering grid; just bright enough to read on dark mode, suppressed almost entirely in light mode (`gridIntensity` token).
+- **Accent crests** — narrow exponential falloff where `field` peaks, painted in `uAccent` (kept warm amber so we don't throw away brand continuity).
+- **Mouse interaction** — warps the noise locally toward the cursor; click drops a transient ring centered on the click point. Both use the same uniforms the old shader exposed, so no JS surgery beyond renaming.
+- **Reduced motion** — `uSpeed = 0` already paints a single static frame; with the new shader that frame is a composed grid + contour map (not a muddy gradient).
+- **Plasma bus / theme** — `calm` halves accent + contour intensity; light mode swaps to near-white deep, cool-grey mid, low-saturation amber accent, lower overall intensity.
 
 ## Out of scope
 

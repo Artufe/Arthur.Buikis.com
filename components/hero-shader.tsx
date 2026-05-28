@@ -17,6 +17,7 @@ type ShaderOpts = Partial<{
   deep: Vec3;
   mid: Vec3;
   accent: Vec3;
+  gridIntensity: number;
 }>;
 type HeroShaderHandle = { set(opts: ShaderOpts): void; stop(): void };
 
@@ -26,18 +27,23 @@ declare global {
   }
 }
 
+// Blueprint / topo palette: cool teal contour lines + grid on near-black, warm
+// amber crests preserve the brand accent. Light mode pulls saturation and
+// intensity way down so the lines read as graphite-on-paper rather than tron.
 const PALETTES = {
   dark: {
-    deep:      [0.059, 0.059, 0.059] as Vec3, // #0F0F0F
-    mid:       [0.102, 0.122, 0.180] as Vec3, // #1A1F2E
-    accent:    [1.000, 0.722, 0.302] as Vec3, // #FFB84D
-    intensity: 0.30,
+    deep:          [0.039, 0.043, 0.055] as Vec3, // #0A0B0E
+    mid:           [0.282, 0.616, 0.741] as Vec3, // #489DBD
+    accent:        [1.000, 0.722, 0.302] as Vec3, // #FFB84D
+    intensity:     0.55,
+    gridIntensity: 0.40,
   },
   light: {
-    deep:      [0.969, 0.961, 0.945] as Vec3, // #F7F5F1
-    mid:       [0.922, 0.898, 0.871] as Vec3, // #EBE5DE
-    accent:    [0.698, 0.361, 0.051] as Vec3, // #B25C0D
-    intensity: 0.18,
+    deep:          [0.969, 0.961, 0.945] as Vec3, // #F7F5F1
+    mid:           [0.451, 0.529, 0.580] as Vec3, // #738794
+    accent:        [0.698, 0.361, 0.051] as Vec3, // #B25C0D
+    intensity:     0.30,
+    gridIntensity: 0.22,
   },
 } as const;
 
@@ -54,10 +60,11 @@ function applyState(handle: HeroShaderHandle, theme: string | undefined, mode: P
     mid: palette.mid,
     accent: palette.accent,
     intensity: palette.intensity * factor,
+    gridIntensity: palette.gridIntensity * factor,
   });
   // Reduced-motion override runs LAST so it always wins, regardless of theme/plasma changes.
   if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-    handle.set({ speed: 0, intensity: 0.18 });
+    handle.set({ speed: 0, intensity: palette.intensity * 0.7, gridIntensity: palette.gridIntensity * 0.7 });
   }
 }
 

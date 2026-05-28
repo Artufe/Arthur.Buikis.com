@@ -1,10 +1,11 @@
 /**
  * hero-shader.js — drop-in interactive shader background.
  *
- * Single fragment-shader plasma effect: orbiting wave sources interfere on a
- * dark warm-neutral palette; the cursor is its own wave emitter; clicks drop
- * transient pulses. Tuned for the artufe.github.io hero: minimal intensity,
- * slow drift, almost no grain.
+ * Single fragment-shader effect: domain-warped value-noise FBM rendered as
+ * topographic contour bands over a faint engineering grid, with amber crests
+ * along ridges. The cursor warps the noise locally; clicks drop a transient
+ * ring ripple. Tuned for the artufe.github.io hero: composed even when
+ * static, sharp lines, no soft halos.
  *
  * Usage:
  *   <canvas id="hero-bg" style="position:fixed;inset:0;width:100%;height:100%;z-index:-1"></canvas>
@@ -13,14 +14,14 @@
  *
  * Or with options:
  *   HeroShader.mount(canvas, {
- *     intensity: 0.55, speed: 0.35, grain: 0.012,
- *     seed: 0,                          // per-mount phase offset
- *     deep:   [0.02, 0.025, 0.035],     // background / vignette color
- *     mid:    [0.06, 0.09, 0.14],       // midtone
- *     accent: [0.95, 0.72, 0.35],       // bright color in highlights
+ *     intensity: 0.55, speed: 0.35, grain: 0.012, gridIntensity: 0.4,
+ *     seed: 0,
+ *     deep:   [0.02, 0.025, 0.035],
+ *     mid:    [0.30, 0.62, 0.74],
+ *     accent: [1.00, 0.72, 0.30],
  *   });
  *
- * No deps. ~3KB minified. Auto-pauses when offscreen / tab hidden.
+ * No deps. Auto-pauses when offscreen / tab hidden.
  */
 (function (root) {
   const VERT = `
@@ -42,44 +43,86 @@
     uniform vec3  uDeep;
     uniform vec3  uMid;
     uniform vec3  uAccent;
+    uniform float uGridIntensity;
 
     #define PI 3.14159265359
+    #define BANDS 7.0
+    #define GRID_PX 64.0
 
-    float hash21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+    float hash21(vec2 p){
+      p = fract(p*vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+
+    float vnoise(vec2 p){
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      vec2 u = f*f*(3.0 - 2.0*f);
+      float a = hash21(i);
+      float b = hash21(i + vec2(1.0, 0.0));
+      float c = hash21(i + vec2(0.0, 1.0));
+      float d = hash21(i + vec2(1.0, 1.0));
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+
+    float fbm(vec2 p){
+      return vnoise(p) * 0.6 + vnoise(p * 2.13 + 17.0) * 0.4;
+    }
 
     void main(){
       vec2 uv = gl_FragCoord.xy / uRes.xy;
+      float aspect = uRes.x / uRes.y;
       vec2 p = (uv - 0.5);
-      p.x *= uRes.x/uRes.y;
+      p.x *= aspect;
 
-      float t = uTime * 0.35 * uSpeed;
+      float t = uTime * 0.18 * uSpeed;
 
-      float v = 0.0;
-      for(int i=0;i<4;i++){
-        float fi = float(i);
-        vec2 s = vec2(cos(t*0.4 + fi*1.7 + uSeed), sin(t*0.5 + fi*2.3 + uSeed*1.3)) * 0.35;
-        v += sin(length(p - s)*10.0 - t*1.2 + fi);
-      }
+      vec2 m;
+      m.x = (uMouse.x - 0.5) * aspect;
+      m.y = uMouse.y - 0.5;
+      float mdist = length(p - m);
+      vec2 mPull = (p - m) * exp(-mdist*mdist*5.0) * 0.22;
 
-      vec2 m = uMouse;
-      m.x = (m.x - 0.5) * (uRes.x/uRes.y);
-      m.y -= 0.5;
-      v += sin(length(p - m)*16.0 - t*1.4) * 0.45;
+      vec2 cp;
+      cp.x = (uClickPos.x - 0.5) * aspect;
+      cp.y = uClickPos.y - 0.5;
+      float cdist = length(p - cp);
 
-      vec2 cp = vec2((uClickPos.x-0.5)*uRes.x/uRes.y, uClickPos.y-0.5);
-      v += sin(length(p - cp)*24.0 - uTime*4.0) * uClick * 0.7;
+      vec2 q = p * 1.4 + vec2(uSeed * 0.3, uSeed * 0.5);
+      q += 0.18 * vec2(
+        sin(q.y * 1.3 + t * 1.0),
+        cos(q.x * 1.1 - t * 0.7)
+      );
+      q -= mPull;
 
-      v /= 6.0;
+      float field = fbm(q + vec2(t * 0.05, t * 0.07));
+      field += sin(cdist * 22.0 - uTime * 4.0) * uClick * 0.06;
 
-      float a = 0.5 + 0.5*sin(v*PI*2.0 + t);
-      float b = 0.5 + 0.5*cos(v*PI*2.0 - t*0.7);
+      float bands = field * BANDS;
+      float d = abs(fract(bands) - 0.5) * 2.0;
+      // Resolution-aware AA width — keeps lines ~2px at any DPR without needing
+      // OES_standard_derivatives. Tuned by eye against the blueprint mood ref.
+      float aaBand = clamp(220.0 / min(uRes.x, uRes.y), 0.012, 0.08);
+      float line = 1.0 - smoothstep(0.0, aaBand, d);
 
-      vec3 col = mix(uDeep, uMid, a);
-      col = mix(col, uAccent, pow(b, 4.0) * 0.55 * uIntensity);
-      col += exp(-length(p-m)*length(p-m)*14.0) * uAccent * 0.08 * uIntensity;
+      float crest = smoothstep(0.78, 0.95, field);
 
-      vec2 q = uv - 0.5;
-      col = mix(uDeep, col, smoothstep(0.95, 0.25, dot(q,q)));
+      vec2 gridPos = gl_FragCoord.xy / GRID_PX;
+      vec2 gd = abs(fract(gridPos) - 0.5);
+      float gridMax = max(gd.x, gd.y);
+      float gridLine = 1.0 - smoothstep(0.46, 0.5, gridMax);
+      float gridDot  = smoothstep(0.92, 1.0, 1.0 - gridMax * 2.0);
+
+      vec3 col = uDeep;
+      col += uMid    * gridLine * uGridIntensity * 0.35;
+      col += uMid    * line     * uIntensity     * 0.85;
+      col += uAccent * crest    * uIntensity     * 0.55;
+      col += uAccent * gridDot  * uGridIntensity * 0.15;
+      col += exp(-mdist*mdist*18.0) * uAccent * 0.08 * uIntensity;
+
+      vec2 vg = uv - 0.5;
+      col = mix(uDeep, col, smoothstep(0.95, 0.20, dot(vg, vg)));
 
       float n = hash21(uv*uRes + uTime*60.0) - 0.5;
       col += n * uGrain;
@@ -112,19 +155,18 @@
     const aPos = gl.getAttribLocation(prog, 'aPos');
 
     const u = {};
-    ['uRes','uTime','uMouse','uClick','uClickPos','uIntensity','uGrain','uSpeed','uSeed','uDeep','uMid','uAccent']
+    ['uRes','uTime','uMouse','uClick','uClickPos','uIntensity','uGrain','uSpeed','uSeed','uDeep','uMid','uAccent','uGridIntensity']
       .forEach(k => u[k] = gl.getUniformLocation(prog, k));
 
-    // Defaults — tuned for hero use: lowest intensity, slow speed, almost no
-    // grain. Palette defaults to the prior hardcoded amber-on-near-black.
     const state = {
-      intensity: opts.intensity ?? 0.55,
-      speed:     opts.speed     ?? 0.35,
-      grain:     opts.grain     ?? 0.012,
-      seed:      opts.seed      ?? 0,
-      deep:   opts.deep   ?? [0.02, 0.025, 0.035],
-      mid:    opts.mid    ?? [0.06, 0.09, 0.14],
-      accent: opts.accent ?? [0.95, 0.72, 0.35],
+      intensity:     opts.intensity     ?? 0.55,
+      speed:         opts.speed         ?? 0.35,
+      grain:         opts.grain         ?? 0.012,
+      seed:          opts.seed          ?? 0,
+      gridIntensity: opts.gridIntensity ?? 0.4,
+      deep:   opts.deep   ?? [0.04, 0.05, 0.07],
+      mid:    opts.mid    ?? [0.30, 0.62, 0.74],
+      accent: opts.accent ?? [1.00, 0.72, 0.30],
       mouse: [0.5, 0.5],
       click: 0,
       clickPos: [0.5, 0.5],
@@ -149,9 +191,6 @@
     const onMove = (e) => setMouseAt(e.clientX, e.clientY);
     const onDown = (e) => setClickAt(e.clientX, e.clientY);
 
-    // Mobile: touchstart drops a pulse and seeds the mouse position so the
-    // emitter doesn't snap from a stale desktop coordinate. touchmove tracks
-    // drags. Both are passive so page scroll stays smooth.
     const onTouchStart = (e) => {
       const t = e.touches[0];
       if(!t) return;
@@ -189,6 +228,7 @@
       gl.uniform3fv(u.uDeep, state.deep);
       gl.uniform3fv(u.uMid, state.mid);
       gl.uniform3fv(u.uAccent, state.accent);
+      gl.uniform1f(u.uGridIntensity, state.gridIntensity);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -202,7 +242,6 @@
       raf = requestAnimationFrame(frame);
     }
 
-    // Render a single static frame (used in reduced-motion mode and on resize).
     function renderStatic(){
       resize();
       state.click = 0;

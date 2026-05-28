@@ -4,16 +4,18 @@ A drop-in interactive shader background tuned for the hero of artufe.github.io. 
 
 ## What it is
 
-Plasma interference shader: four wave sources orbit slowly, interfering with each other; the cursor is a fifth emitter; clicks drop transient ringed pulses that decay. Palette is two deep cool tones plus the site's amber accent (`#e8a13a`-ish), rendered with a subtle vignette and almost-imperceptible film grain.
+Blueprint / topo shader: a domain-warped value-noise field is rendered as topographic contour bands over a faint 64px engineering grid, with warm amber crests painted along ridges. The cursor warps the field locally; clicks drop a transient ring ripple that decays. Tuned to be composed even when fully static.
 
 Defaults baked into the file match the inline-comment spec:
 
-| param       | default | range       | notes                                  |
-| ----------- | ------- | ----------- | -------------------------------------- |
-| `intensity` | `0.55`  | `0..1.6`    | lowest legible; raise for more accent  |
-| `speed`     | `0.35`  | `0..2.5`    | slow drift                             |
-| `grain`     | `0.012` | `0..0.20`   | almost nothing                         |
-| `hue`       | `18`    | `-180..180` | mid shift toward the amber accent      |
+| param           | default | range     | notes                                              |
+| --------------- | ------- | --------- | -------------------------------------------------- |
+| `intensity`     | `0.55`  | `0..1.2`  | scales contour lines + amber crests                |
+| `speed`         | `0.35`  | `0..2.5`  | slow drift                                         |
+| `grain`         | `0.012` | `0..0.20` | almost nothing                                     |
+| `gridIntensity` | `0.4`   | `0..1`    | 64px engineering grid + integer-intersection dots  |
+
+Palette uniforms — `deep` (background), `mid` (contour + grid line colour), `accent` (ridge crests + integer-grid dots). See `components/hero-shader.tsx` for the per-theme tokens.
 
 ## Drop-in (vanilla)
 
@@ -59,7 +61,7 @@ If you prefer ESM, swap the IIFE wrapper in `hero-shader.js` for `export functio
 HeroShader.mount(canvas, options?) → { set(partial), stop() }
 ```
 
-- `options` — any subset of `{ intensity, speed, grain, hue, eventTarget }`.
+- `options` — any subset of `{ intensity, speed, grain, gridIntensity, seed, deep, mid, accent }`.
 - `eventTarget` — defaults to `window` so the shader reacts even when the cursor is over hero text. Pass the canvas itself if you want it scoped tighter.
 - `.set({ intensity: 0.8 })` — runtime tweak (handy for a "calm / vivid" toggle in your CV theme switcher).
 - `.stop()` — tears down RAF + listeners. Built-in `IntersectionObserver` already pauses rendering when offscreen and on `visibilitychange`.
@@ -74,13 +76,8 @@ HeroShader.mount(canvas, options?) → { set(partial), stop() }
 ## Accessibility
 
 - `aria-hidden` on the canvas — assistive tech ignores it.
-- For `prefers-reduced-motion`, drop in:
-  ```js
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    handle.set({ speed: 0, intensity: 0.35 });
-  }
-  ```
-- Color contrast: with `intensity ≤ 0.6`, the brightest pixel stays under ~`oklch(0.7 0.12 70)`, leaving headroom for `#f4ece1` body text at AAA.
+- For `prefers-reduced-motion`, the shader renders a single composed frame (grid + contour map at lower intensity) — no motion. The handle exposes `set({ speed: 0, intensity, gridIntensity })` if you want to override per-theme.
+- Color contrast: with `intensity ≤ 0.6`, the brightest pixel stays under ~`oklch(0.78 0.12 70)`, leaving headroom for body text on top.
 
 ## Where to put it in `Arts-site`
 
@@ -99,12 +96,6 @@ handoff/
   HANDOFF.md         ← this file
 ```
 
-## Pulling the other four presets later
+## Swapping the look
 
-The full source for all five wallpapers (aurora, field, lattice, plasma, caustics) is in `shaders.js` in this project. Each preset is a standalone fragment shader that consumes the same uniform set as `hero-shader.js`. To add e.g. caustics as an alt theme:
-
-1. Copy the `CAUSTICS` constant from `shaders.js` into `hero-shader.js` as a new `FRAG_CAUSTICS`.
-2. Add a second program compile path in `mount()` and switch between them with `state.preset`.
-3. Wire to your existing dark/light toggle in the top bar.
-
-Happy to expand this if useful — just ask.
+To replace the topo+grid look with a different fragment shader, edit `FRAG` in `public/hero-shader.js`. The uniform contract (`uDeep`, `uMid`, `uAccent`, `uIntensity`, `uGridIntensity`, `uMouse`, `uClick`, `uClickPos`, `uSpeed`, `uSeed`, `uGrain`) is the public surface — keep those and the `components/hero-shader.tsx` palette plumbing keeps working.
