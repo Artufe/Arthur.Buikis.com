@@ -37,8 +37,9 @@ export default function BuildingPage() {
             Quietly building a product platform. Details are intentionally thin while it&apos;s still in prototype, but the short version is this: a tool for operators who want what I want, in a space where most options still feel clumsy.
           </p>
 
-          <div className="status-box reveal">
-            <div className="mono">status</div>
+          <div className="status-box status-box--accent reveal">
+            <span className="status-box__badge" aria-label="prototype">PROTOTYPE</span>
+            <div className="mono status-box__label">status</div>
             <p><strong>Prototype.</strong> It works for me. It&apos;s not ready for external hands yet. Growing it quietly, without the launch-day hype cycle.</p>
           </div>
 
@@ -48,13 +49,22 @@ export default function BuildingPage() {
           </p>
 
           <h3>What&apos;s next</h3>
-          <ul className="beliefs">
-            <li className="reveal">Make the core workflow bulletproof.</li>
-            <li className="reveal">Bring in a small set of early users I trust to give direct, practical feedback.</li>
-            <li className="reveal">Open it up publicly when the experience is boring in the best way.</li>
+          <ul className="checklist">
+            <li className="checklist__item checklist__item--current reveal">
+              <span className="checklist__glyph" aria-hidden="true">▣</span>
+              <span>Make the core workflow bulletproof.</span>
+            </li>
+            <li className="checklist__item reveal">
+              <span className="checklist__glyph" aria-hidden="true">▢</span>
+              <span>Bring in a small set of early users I trust to give direct, practical feedback.</span>
+            </li>
+            <li className="checklist__item reveal">
+              <span className="checklist__glyph" aria-hidden="true">▢</span>
+              <span>Open it up publicly when the experience is boring in the best way.</span>
+            </li>
           </ul>
 
-          <div style={{ marginTop: 32 }}>
+          <div className="mdx-prose" style={{ marginTop: 32 }}>
             <Content />
           </div>
         </div>
