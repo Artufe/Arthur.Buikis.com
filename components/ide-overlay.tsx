@@ -324,21 +324,7 @@ export function IdeOverlay() {
   const [activePath, setActivePath] = useState<string>(FILES[0].path);
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const [openTabs, setOpenTabs] = useState<string[]>([FILES[0].path]);
-  const [clock, setClock] = useState('');
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const tick = () => {
-      const d = new Date();
-      const cetOffsetH = 1;
-      const local = new Date(d.getTime() + (cetOffsetH * 60 + d.getTimezoneOffset()) * 60 * 1000);
-      setClock(local.toTimeString().slice(0, 8));
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [open]);
 
   useEffect(() => {
     const offOpen = onIdeOpen(() => {
@@ -440,8 +426,16 @@ export function IdeOverlay() {
             <span className="ide-title-path">{activePath}</span>
           </div>
           <div className="ide-titlebar-meta">
-            <span className="ide-pulse" />
-            <span>{clock || '··:··:··'} CET</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="ide-cta ide-cta--exit"
+              aria-label="Return to the rendered site"
+            >
+              <span className="ide-cta__dot" aria-hidden />
+              <span className="ide-cta__icon" aria-hidden>{'«/'}</span>
+              <span className="ide-cta__label">return to html</span>
+            </button>
           </div>
         </div>
 
@@ -607,13 +601,10 @@ const ideCss = `
 .ide-shell {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.78);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: #0a0c11;
   z-index: 9999;
-  display: grid;
-  place-items: center;
-  padding: 28px;
+  display: block;
+  padding: 0;
   --ide-bg:         #14171f;
   --ide-panel:     #181c25;
   --ide-panel-hi:  #1d2230;
@@ -634,15 +625,15 @@ const ideCss = `
   --ide-display:   'Iowan Old Style', 'Times New Roman', Georgia, serif;
 }
 .ide-window {
-  width: min(1400px, calc(100vw - 56px));
-  height: min(900px, calc(100vh - 56px));
+  width: 100vw;
+  height: 100vh;
   background: var(--ide-bg);
   color: var(--ide-fg);
   font-family: var(--ide-mono);
   display: grid;
-  grid-template-rows: 36px 1fr;
-  border: 1px solid var(--ide-line);
-  box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+  grid-template-rows: 38px 1fr;
+  border: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 .ide-titlebar {
@@ -666,6 +657,9 @@ const ideCss = `
 .ide-title-sep { color: var(--ide-line-strong); margin: 0 8px; }
 .ide-title-path { color: var(--ide-fg); }
 .ide-titlebar-meta { display: inline-flex; gap: 8px; align-items: center; color: var(--ide-fg-muted); font-size: 10.5px; letter-spacing: 0.06em; }
+/* Force the .ide-cta exit button visible inside the overlay regardless of
+   viewport — the IDE is full-screen, the user must always have a way out. */
+.ide-shell .ide-cta { display: inline-flex; }
 .ide-pulse { width: 7px; height: 7px; border-radius: 999px !important; background: var(--ide-green); animation: ide-pulse 1.6s ease-in-out infinite; }
 @keyframes ide-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .ide-pulse, .ide-shell * { animation: none !important; } }
