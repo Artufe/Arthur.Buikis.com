@@ -52,7 +52,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          GROK_IMAGE_MODEL: grok-2-image-1212
+          GROK_IMAGE_MODEL: grok-imagine-image
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_HEAD_REF: ${{ steps.pr.outputs.ref }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.sha }}
