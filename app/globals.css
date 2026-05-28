@@ -986,3 +986,116 @@ h3 {
   color: var(--accent);
   outline: none;
 }
+
+/* Header "Open in Zed" button — modern, animated, dark-always.
+   - Always-on subtle accent-tinted pulse halo (3s loop).
+   - Hover: diagonal sheen sweep + 1px lift + arrow nudge.
+   - Stays IDE-themed regardless of the site's light/dark mode, so it
+     reads as an "external tool" affordance, not a regular nav link.
+   - Reduced-motion strips every animation/transform. */
+.open-in-zed {
+  position: relative;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 12px;
+  background: #14171f;
+  color: #d3d8e2;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 0 0 0 transparent;
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms var(--ease),
+    color 220ms var(--ease),
+    box-shadow 220ms var(--ease);
+  animation: open-in-zed-pulse 3.2s ease-in-out infinite;
+}
+
+@media (min-width: 768px) {
+  .open-in-zed { display: inline-flex; }
+}
+
+.open-in-zed__icon {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.open-in-zed__label { display: inline-block; }
+
+.open-in-zed__arrow {
+  display: inline-block;
+  margin-left: 2px;
+  color: #79b8ff;
+  font-size: 12px;
+  transition: transform 220ms var(--ease), color 220ms var(--ease);
+}
+
+.open-in-zed__sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    color-mix(in srgb, var(--accent) 55%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-110%);
+  transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.open-in-zed:hover,
+.open-in-zed:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  color: #ffffff;
+  outline: none;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.open-in-zed:hover .open-in-zed__sheen,
+.open-in-zed:focus-visible .open-in-zed__sheen {
+  transform: translateX(110%);
+}
+
+.open-in-zed:hover .open-in-zed__arrow,
+.open-in-zed:focus-visible .open-in-zed__arrow {
+  transform: translate(2px, -2px);
+  color: var(--accent);
+}
+
+.open-in-zed:active {
+  transform: translateY(0);
+}
+
+@keyframes open-in-zed-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 14px 0 color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .open-in-zed { animation: none; }
+  .open-in-zed:hover,
+  .open-in-zed:focus-visible { transform: none; box-shadow: none; }
+  .open-in-zed__sheen,
+  .open-in-zed:hover .open-in-zed__sheen,
+  .open-in-zed:focus-visible .open-in-zed__sheen { transform: translateX(-110%); }
+  .open-in-zed:hover .open-in-zed__arrow,
+  .open-in-zed:focus-visible .open-in-zed__arrow { transform: none; }
+}

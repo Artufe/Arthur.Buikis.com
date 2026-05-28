@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { site } from '@/content/site';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { OpenInZedButton } from '@/components/open-in-zed-button';
 import { cn } from '@/lib/utils';
 import { openPalette } from '@/lib/palette-bus';
 
@@ -73,6 +74,7 @@ export function Nav() {
           })}
         </nav>
         <div className="nav-actions">
+          <OpenInZedButton />
           <ThemeToggle />
           <button
             type="button"
