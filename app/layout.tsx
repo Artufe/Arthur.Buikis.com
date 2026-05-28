@@ -7,6 +7,7 @@ import { ScanLine } from '@/components/scan-line';
 import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
 import { SnakeWindowHost } from '@/components/snake/snake-window-host';
+import { IdeOverlay } from '@/components/ide-overlay';
 import { site } from '@/content/site';
 import './globals.css';
 
@@ -123,6 +124,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Footer />
           <SnakeWindowHost />
           <CommandPaletteLazy />
+          <IdeOverlay />
         </ThemeProvider>
       </body>
     </html>
