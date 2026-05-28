@@ -16,32 +16,50 @@ concurrency:
 jobs:
   imagine:
     if: >-
-      github.event.issue.pull_request != null
-      && github.event.comment.user.login == github.repository_owner
-      && startsWith(github.event.comment.body, '@grok-imagine ')
+      startsWith(github.event.comment.body, '@grok-imagine ')
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+
     runs-on: ubuntu-latest
+
     steps:
-      - name: Resolve PR head
-        id: pr
+      - name: Determine context
+        id: ctx
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           set -euo pipefail
-          data=$(gh api "/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}")
-          ref=$(echo "$data" | jq -r '.head.ref')
-          sha=$(echo "$data" | jq -r '.head.sha')
-          fork=$(echo "$data" | jq -r '.head.repo.fork')
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "fork=$fork" >> "$GITHUB_OUTPUT"
+          is_pr='${{ github.event.issue.pull_request != null }}'
+          echo "is_pr=$is_pr" >> "$GITHUB_OUTPUT"
+
+          if [ "$is_pr" = "true" ]; then
+            data=$(gh api "/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}")
+            fork=$(echo "$data" | jq -r '.head.repo.fork')
+
+            if [ "$fork" = "true" ]; then
+              echo "::error::Fork PRs are not supported (writing to a fork branch would require the fork's token, and running fork code with our secrets is unsafe)."
+              exit 1
+            fi
+
+            echo "ref=$(echo "$data" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+            echo "sha=$(echo "$data" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout PR head
+        if: steps.ctx.outputs.is_pr == 'true'
         uses: actions/checkout@v5
         with:
-          ref: ${{ steps.pr.outputs.ref }}
+          ref: ${{ steps.ctx.outputs.ref }}
           fetch-depth: 0
           persist-credentials: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Checkout default (issue context)
+        if: steps.ctx.outputs.is_pr != 'true'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -50,17 +68,19 @@ jobs:
 
       - name: Run grok-imagine
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           GROK_IMAGE_MODEL: grok-imagine-image
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_HEAD_REF: ${{ steps.pr.outputs.ref }}
-          PR_HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          PR_HEAD_REF: ${{ steps.ctx.outputs.ref }}
+          PR_HEAD_SHA: ${{ steps.ctx.outputs.sha }}
+          ISSUE_IS_PR: ${{ steps.ctx.outputs.is_pr }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
           node --input-type=module <<'EOF'
           import { readFileSync } from 'node:fs';
           import { run } from './.github/scripts/grok-imagine.mjs';
+
           const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
           await run({ event, env: process.env, repoRoot: process.cwd() });
           EOF
