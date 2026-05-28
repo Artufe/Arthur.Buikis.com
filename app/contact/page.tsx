@@ -39,9 +39,13 @@ export default function ContactPage() {
       <div className="l-asym" style={{ padding: '0 28px', maxWidth: 1200, margin: '0 auto' }}>
         <div>
           <form action={site.formspreeEndpoint} method="POST" className="contact-grid">
-            <input type="text" name="name" placeholder="name" required />
-            <input type="email" name="email" placeholder="email" required />
-            <div style={{ gridColumn: '1 / -1' }}>
+            <div className="field">
+              <input type="text" name="name" placeholder="name" required />
+            </div>
+            <div className="field">
+              <input type="email" name="email" placeholder="email" required />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <textarea name="message" placeholder="message" required />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
@@ -58,18 +62,22 @@ export default function ContactPage() {
         </div>
         <div>
           <div className="side-sticky">
-            <div className="card" style={{ padding: 16 }}>
-              <div className="mono" style={{ marginBottom: 6 }}>direct</div>
-              <p style={{ fontSize: 13, marginBottom: 3 }}>{site.email}</p>
-              <p style={{ fontSize: '10.5px', color: 'var(--muted)' }}>response within 24h</p>
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '2px solid var(--border)' }}>
-                <div className="mono" style={{ marginBottom: 6 }}>also</div>
-                <div style={{ fontSize: 12, lineHeight: 2 }}>
-                  Upwork: 100% Job Success<br />
-                  LinkedIn: arthur-buikis<br />
-                  GitHub: Artufe
-                </div>
-              </div>
+            <div className="card direct-card">
+              <div className="mono direct-card__label">direct</div>
+              <a className="direct-card__email" href={`mailto:${site.email}`}>
+                {site.email}
+              </a>
+              <p className="direct-card__meta">response within 24h</p>
+              <div className="direct-card__divider" aria-hidden="true" />
+              <div className="mono direct-card__label">also</div>
+              <dl className="direct-card__also">
+                <dt>Upwork</dt>
+                <dd>100% Job Success</dd>
+                <dt>LinkedIn</dt>
+                <dd>arthur-buikis</dd>
+                <dt>GitHub</dt>
+                <dd>Artufe</dd>
+              </dl>
             </div>
           </div>
         </div>
