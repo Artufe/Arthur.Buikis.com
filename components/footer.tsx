@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { site } from '@/content/site';
+import { IdeTrigger } from '@/components/ide-trigger';
 
 export function Footer() {
   return (
@@ -48,7 +49,11 @@ export function Footer() {
           <p className="mono">
             © {new Date().getFullYear()} {site.name}
           </p>
-          <p className="mono">built by hand · no trackers</p>
+          <p className="mono">
+            <IdeTrigger />
+            <span aria-hidden> · </span>
+            built by hand · no trackers
+          </p>
         </div>
       </div>
     </footer>

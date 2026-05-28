@@ -9,7 +9,8 @@ export type CommandAction =
   | { type: 'whoami' }
   | { type: 'help' }
   | { type: 'plasma'; value: 'calm' | 'vivid' }
-  | { type: 'snake' };
+  | { type: 'snake' }
+  | { type: 'ide' };
 
 export type CommandGroup = 'Navigate' | 'Meta' | 'Theme';
 
@@ -40,6 +41,7 @@ export const commands: Command[] = [
   { id: 'whoami', label: 'whoami', group: 'Meta', arrow: '?', hint: 'inline', action: { type: 'whoami' } },
   { id: 'help', label: 'help', group: 'Meta', arrow: '?', hint: 'shortcut keys', action: { type: 'help' } },
   { id: 'play-snake', label: 'play snake', group: 'Meta', arrow: '▶', hint: 'easter egg', action: { type: 'snake' }, keywords: ['game', 'easter egg', 'snake'] },
+  { id: 'open-in-ide', label: 'open in zed', group: 'Meta', arrow: '⌨', hint: 'preview / source', action: { type: 'ide' }, keywords: ['ide', 'editor', 'code', 'source', 'view source', 'zed', 'easter egg'] },
   { id: 'plasma-calm',  label: 'plasma calm',  group: 'Meta', arrow: '◌', hint: 'low intensity',     action: { type: 'plasma', value: 'calm'  }, keywords: ['shader', 'background'] },
   { id: 'plasma-vivid', label: 'plasma vivid', group: 'Meta', arrow: '●', hint: 'default intensity', action: { type: 'plasma', value: 'vivid' }, keywords: ['shader', 'background'] },
 

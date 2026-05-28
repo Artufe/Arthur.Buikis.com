@@ -968,3 +968,21 @@ h3 {
   .reveal { opacity: 1; transform: none; }
   .stagger > * { animation: none; opacity: 1; transform: none; }
 }
+
+/* IDE easter-egg trigger in the footer */
+.footer-ide-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: none;
+  letter-spacing: 0.06em;
+  transition: color var(--dur) var(--ease);
+}
+.footer-ide-link:hover,
+.footer-ide-link:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
