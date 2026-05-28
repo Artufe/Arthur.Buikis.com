@@ -10,8 +10,22 @@ export function AboutSnippet() {
   return (
     <section className="mx-auto max-w-[1600px] px-6 py-20 lg:px-16 lg:py-28" style={{ borderTop: '2px solid var(--border)' }}>
       <ScrollReveal>
-        <div className="font-mono text-[12px] text-[var(--muted)] mb-10">
+        <div className="font-mono text-[12px] text-[var(--muted)] mb-6">
           <span className="ch mr-2">$</span>cat about.md
+        </div>
+        <div className="about-meta mb-10">
+          <span className="about-meta__row">
+            <span className="about-meta__lead">{'//'}</span>
+            <span>arthur</span>
+            <span className="about-meta__dot" aria-hidden>·</span>
+            <span>backend / platform engineer</span>
+          </span>
+          <span className="about-meta__row about-meta__row--end">
+            <span className="about-meta__lead">{'//'}</span>
+            <span>now</span>
+            <span className="about-meta__dot" aria-hidden>·</span>
+            <span>giraffe360</span>
+          </span>
         </div>
         <div className="grid gap-16 lg:grid-cols-[1.5fr_1fr]">
           <div>

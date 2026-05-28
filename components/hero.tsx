@@ -1,5 +1,6 @@
 import { TypewriterBar } from '@/components/typewriter-bar';
 import { AnimatedStats } from '@/components/animated-stats';
+import { HeroClock } from '@/components/hero-clock';
 import { site } from '@/content/site';
 import { sideThings } from '@/content/about';
 
@@ -15,8 +16,14 @@ export function Hero() {
     <section data-hero-region className="relative mx-auto max-w-[1600px] px-6 pt-20 pb-16 lg:px-16 lg:pt-28 lg:pb-24">
       <div className="grid gap-12 lg:grid-cols-[3fr_1fr] lg:gap-14">
         <div>
-          <div className="font-mono text-[12px] text-[var(--muted)] tracking-wide" aria-hidden>
-            <span className="text-[var(--accent)] mr-2">$</span>whoami --verbose
+          <div
+            className="font-mono text-[12px] text-[var(--muted)] tracking-wide flex items-baseline justify-between gap-4"
+            aria-hidden
+          >
+            <span>
+              <span className="text-[var(--accent)] mr-2">$</span>whoami --verbose
+            </span>
+            <HeroClock />
           </div>
           <h1 className="mt-5">
             Arthur <br />Buikis
@@ -34,11 +41,16 @@ export function Hero() {
           <div className="side-sticky">
             <div className="mono" style={{ marginBottom: 14 }}>featured</div>
             {sideThings.slice(0, 3).map((s) => (
-              <div key={s.title} className="card" style={{ padding: 14, marginBottom: 6 }}>
+              <div
+                key={s.title}
+                className="card featured-card"
+                style={{ padding: 14, marginBottom: 6 }}
+              >
+                <span className="featured-card__edge" aria-hidden />
                 <div className="meta">{s.kind}</div>
                 <h3 style={{ fontSize: 17, marginBottom: 3 }}>
                   {s.title}
-                  {s.link ? ' ↗' : ''}
+                  {s.link ? <span className="featured-card__arrow"> ↗</span> : ''}
                 </h3>
                 <p style={{ fontSize: '11.5px', marginBottom: 0 }}>
                   {s.body.length > 70 ? s.body.slice(0, 70) + '…' : s.body}

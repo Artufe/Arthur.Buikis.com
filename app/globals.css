@@ -968,3 +968,195 @@ h3 {
   .reveal { opacity: 1; transform: none; }
   .stagger > * { animation: none; opacity: 1; transform: none; }
 }
+
+/* === home polish (PR feat/home-polish-5x) === */
+
+/* Featured cards: accent top-edge wipe + arrow nudge on hover.
+   Hero-side cards reuse .card; .featured-card layers a top edge that
+   wipes left → right on hover. No transform on the card itself. */
+.featured-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.featured-card .featured-card__edge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 200ms var(--ease);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.featured-card:hover .featured-card__edge,
+.featured-card:focus-within .featured-card__edge {
+  transform: scaleX(1);
+}
+
+.featured-card__arrow {
+  display: inline-block;
+  transition: transform 200ms var(--ease), color 200ms var(--ease);
+  color: var(--muted);
+  will-change: transform;
+}
+
+.featured-card:hover .featured-card__arrow,
+.featured-card:focus-within .featured-card__arrow {
+  transform: translateX(2px);
+  color: var(--accent);
+}
+
+/* AnimatedStats: 1px accent vertical rule that grows from bottom to
+   full height when the tile scrolls into view. */
+.stat {
+  position: relative;
+}
+
+.stat .stat__rule {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: bottom center;
+  transition: transform 600ms var(--ease);
+  pointer-events: none;
+}
+
+.stat.stat--in .stat__rule {
+  transform: scaleY(1);
+}
+
+/* AboutSnippet meta header: two-column key/value rail. */
+.about-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-meta__row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.about-meta__row--end {
+  margin-left: auto;
+}
+
+.about-meta__lead {
+  color: var(--accent);
+  letter-spacing: 0;
+}
+
+.about-meta__dot {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+@media (max-width: 600px) {
+  .about-meta { font-size: 10.5px; gap: 4px 12px; }
+  .about-meta__row { gap: 6px; }
+  .about-meta__row--end { margin-left: 0; }
+}
+
+/* BuildingTeaser updates: status pill + accent left-border slide-in on hover. */
+.building-updates {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.building-update {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 6px 12px;
+}
+
+.building-update__edge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: top center;
+  transition: transform 180ms var(--ease);
+  pointer-events: none;
+}
+
+.building-update:hover .building-update__edge,
+.building-update:focus-within .building-update__edge {
+  transform: scaleY(1);
+}
+
+.building-update__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  font-family: var(--font-body);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: var(--dur) var(--ease);
+}
+
+.building-update__pill--live {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.building-update__pill--wip {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.building-update__pill--draft {
+  color: var(--muted);
+  border-color: var(--border);
+  border-style: dashed;
+}
+
+.building-update__date {
+  flex-shrink: 0;
+}
+
+.building-update__body {
+  color: var(--muted);
+}
+
+.building-update:hover .building-update__body,
+.building-update:focus-within .building-update__body {
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat .stat__rule { transform: scaleY(1); }
+  .featured-card .featured-card__edge { transition: none; }
+  .building-update__edge { transition: none; }
+}

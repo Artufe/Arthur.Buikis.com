@@ -1,6 +1,27 @@
 import Link from 'next/link';
 import { ScrollReveal } from '@/components/scroll-reveal';
 
+type UpdateStatus = 'LIVE' | 'DRAFT' | 'WIP';
+
+type BuildingUpdate = {
+  date: string;
+  body: string;
+  status: UpdateStatus;
+};
+
+const UPDATES: BuildingUpdate[] = [
+  {
+    date: '2026-04-14',
+    body: 'first-run workflow survives a cold boot',
+    status: 'LIVE',
+  },
+  {
+    date: '2026-03-28',
+    body: 'pulled redis pub/sub, put a durable queue in its place',
+    status: 'WIP',
+  },
+];
+
 export function BuildingTeaser() {
   return (
     <section
@@ -39,9 +60,19 @@ export function BuildingTeaser() {
 
             <div className="mt-6 pt-5 max-w-[58ch]" style={{ borderTop: '2px solid var(--border)' }}>
               <p className="mono" style={{ marginBottom: 8 }}>Recent updates</p>
-              <ul className="font-mono text-[11px] dim leading-[1.8] space-y-0.5">
-                <li>2026-04-14 · first-run workflow survives a cold boot</li>
-                <li>2026-03-28 · pulled redis pub/sub, put a durable queue in its place</li>
+              <ul className="building-updates font-mono text-[11px] leading-[1.6]">
+                {UPDATES.map((u) => (
+                  <li key={u.date} className="building-update">
+                    <span className="building-update__edge" aria-hidden />
+                    <span
+                      className={`building-update__pill building-update__pill--${u.status.toLowerCase()}`}
+                    >
+                      {u.status}
+                    </span>
+                    <span className="building-update__date dim">{u.date}</span>
+                    <span className="building-update__body">{u.body}</span>
+                  </li>
+                ))}
               </ul>
             </div>
 

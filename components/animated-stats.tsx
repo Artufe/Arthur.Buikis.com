@@ -15,26 +15,34 @@ function isNumeric(v: string) {
 function StatCell({ item }: { item: StatItem }) {
   const [display, setDisplay] = useState(item.value);
   const [counted, setCounted] = useState(true);
+  const [inView, setInView] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isNumeric(item.value)) return;
-
     const el = ref.current;
     if (!el) return;
 
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      setInView(true);
+    }
 
-    const target = parseInt(item.value, 10);
-    if (isNaN(target)) return;
+    const numeric = isNumeric(item.value);
+    const target = numeric ? parseInt(item.value, 10) : NaN;
 
-    setDisplay('0');
-    setCounted(false);
+    if (numeric && !reduced) {
+      setDisplay('0');
+      setCounted(false);
+    }
 
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting) return;
         obs.disconnect();
+        setInView(true);
+
+        if (!numeric || reduced || isNaN(target)) return;
+
         let current = 0;
         const step = () => {
           current++;
@@ -55,7 +63,8 @@ function StatCell({ item }: { item: StatItem }) {
   }, [item.value]);
 
   return (
-    <div ref={ref} className="stat">
+    <div ref={ref} className={cn('stat', inView && 'stat--in')}>
+      <span className="stat__rule" aria-hidden />
       <div className={cn('num tnum', counted && 'counted')} data-target={item.value}>
         {display}
       </div>
