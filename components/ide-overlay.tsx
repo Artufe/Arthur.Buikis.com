@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { onIdeClose, onIdeOpen } from '@/lib/ide-bus';
 import {
   antiList,
@@ -14,19 +16,31 @@ import { site } from '@/content/site';
 
 type FileKind = 'md' | 'json';
 
+// `raw` is the source of truth for both modes:
+//   - preview tab: routed through MarkdownPreview (react-markdown + remark-gfm)
+//   - source tab: raw text with line-level syntax highlighting
+// For non-markdown files (currently just stack.json) `preview` is an
+// explicit JSX renderer — JSON isn't markdown so we hand-render it.
 type IdeFile = {
-  path: string;       // unique key + display path
-  label: string;      // tab label
+  path: string;
+  label: string;
   kind: FileKind;
   raw: string;
-  preview: () => React.ReactElement;
+  preview?: () => React.ReactElement;
 };
 
 // === file definitions ============================================
-// Each file gets:
-//   raw     — what shows in source mode (markdown / JSON text)
-//   preview — what renders in preview mode (nice typography)
-// `path` is also the unique key + label in the file tree.
+// The markdown strings are written to render well via react-markdown:
+//   * GFM tables for key/value lists
+//   * `> blockquote` for ledes and pull quotes
+//   * Standard ordered/unordered lists
+//   * Real autolinks where they matter (email, socials)
+
+const aboutGlanceTable = [
+  '| key | value |',
+  '|-----|-------|',
+  ...atAGlance.map((row) => `| ${row.k} | ${row.v} |`),
+].join('\n');
 
 const FILES: IdeFile[] = [
   {
@@ -41,61 +55,18 @@ Backend & platform engineer. Python with a Rust accent.
 Currently shipping a media-processing platform in Riga.
 Twelve-ish years writing software you don't notice.
 
-## now
-- ${site.bio.jobTitle.toLowerCase()} · since 2024
-- python + rust + kubernetes
+## Now
 
-## contact
-- email: ${site.email}
-- github · linkedin · upwork
+- **${site.bio.jobTitle.toLowerCase()}** · since 2024
+- python · rust · kubernetes
 
-> "The best engineers I've worked with are boring to watch.
->  They delete more than they add."`,
-    preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>Arthur Buikis</h1>
-        <p style={previewLede}>
-          Senior software engineer · Riga, LV · since 2015
-        </p>
-        <p style={{ marginBottom: 18 }}>
-          Backend &amp; platform engineer. Python with a Rust accent. Currently
-          shipping a media-processing platform in Riga. Twelve-ish years writing
-          software you don&apos;t notice.
-        </p>
+## Contact
 
-        <h2 style={previewH2}>Now</h2>
-        <ul style={previewList}>
-          <li>
-            <span style={previewBullet}>›</span>
-            <span style={{ color: 'var(--ide-green)' }}>●</span>{' '}
-            {site.bio.jobTitle.toLowerCase()} · since 2024
-          </li>
-          <li>
-            <span style={previewBullet}>›</span>
-            python · rust · kubernetes
-          </li>
-        </ul>
+- email: <${site.email}>
+${site.socials.map((s) => `- [${s.label.toLowerCase()} ↗](${s.href})`).join('\n')}
 
-        <h2 style={previewH2}>Contact</h2>
-        <ul style={previewList}>
-          <li>
-            <span style={previewBullet}>›</span>
-            <span style={{ color: 'var(--ide-blue)' }}>{site.email}</span>
-          </li>
-          {site.socials.map((s) => (
-            <li key={s.href}>
-              <span style={previewBullet}>›</span>
-              {s.label.toLowerCase()} ↗
-            </li>
-          ))}
-        </ul>
-
-        <blockquote style={previewQuote}>
-          &ldquo;The best engineers I&apos;ve worked with are boring to watch. They
-          delete more than they add.&rdquo;
-        </blockquote>
-      </article>
-    ),
+> "The best engineers I've worked with are boring to watch. They delete more than they add."
+`,
   },
 
   {
@@ -106,127 +77,55 @@ Twelve-ish years writing software you don't notice.
 
 > Backend & platform engineer · Riga · twelve-ish years in
 
-It began on Upwork in 2015. The first jobs were small —
-scrapers, automation, the kind of thing people pay for when
-their spreadsheet has finally lost the argument.
+It began on Upwork in 2015. The first jobs were small — scrapers,
+automation, the kind of thing people pay for when their spreadsheet
+has finally lost the argument.
 
-Three years in came strange-logic — a US domain-intelligence
-shop. By the second stint in 2021, the work had grown legs:
-a PHP-to-Python rewrite, ClickHouse brought in, and the
-Expired Domain Search pipeline that eventually crawled ~700M
-domains and stored 43 TB across twelve servers.
+Three years in came **strange-logic** — a US domain-intelligence shop.
+By the second stint in 2021, the work had grown legs: a
+PHP-to-Python rewrite, ClickHouse brought in, and the Expired Domain
+Search pipeline that eventually crawled ~700M domains and stored
+43 TB across twelve servers.
 
-Side products in parallel. MyProxy (2020–22) brought
-cost-per-GB down ~20× over its run. MarkFlow remains live.
+Side products in parallel. **MyProxy** (2020–22) brought
+cost-per-GB down ~20× over its run. **MarkFlow** remains live.
 
 Since 2024 — Riga media-processing platform.
 Python + Rust now, virtual tours, Kubernetes plumbing.
 
-Remote-friendly to EU-time teams. Available for the right
-next thing only when the current role naturally winds.`,
-    preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>About</h1>
-        <p style={previewLede}>
-          Backend &amp; platform engineer · Riga · twelve-ish years in
-        </p>
+Remote-friendly to EU-time teams. Available for the right next
+thing only when the current role naturally winds.
 
-        <p style={{ marginBottom: 14 }}>
-          It began on Upwork in 2015. The first jobs were small — scrapers,
-          automation, the kind of thing people pay for when their spreadsheet
-          has finally lost the argument.
-        </p>
+---
 
-        <p style={{ marginBottom: 14 }}>
-          Three years in came{' '}
-          <span style={{ color: 'var(--ide-blue)' }}>strange-logic</span> — a US
-          domain-intelligence shop. By the second stint in 2021, the work had
-          grown legs: a PHP-to-Python rewrite, ClickHouse brought in, and the
-          Expired Domain Search pipeline that eventually crawled ~700M domains
-          and stored 43 TB across twelve servers.
-        </p>
+## At a glance
 
-        <p style={{ marginBottom: 14 }}>
-          Side products in parallel.{' '}
-          <span style={{ color: 'var(--ide-blue)' }}>MyProxy</span> (2020–22)
-          brought cost-per-GB down ~20× over its run.{' '}
-          <span style={{ color: 'var(--ide-blue)' }}>MarkFlow</span> remains{' '}
-          <span style={{ color: 'var(--ide-green)' }}>live</span>.
-        </p>
-
-        <p style={{ marginBottom: 14 }}>
-          Since 2024 — Riga media-processing platform. Python + Rust now,
-          virtual tours, Kubernetes plumbing.
-        </p>
-
-        <p>
-          Remote-friendly to EU-time teams. Available for the right next thing
-          only when the current role naturally winds.
-        </p>
-
-        <hr style={previewRule} />
-
-        <h2 style={previewH2}>At a glance</h2>
-        <dl style={previewKVList}>
-          {atAGlance.map((row) => (
-            <div key={row.k} style={previewKVRow}>
-              <dt style={previewKVKey}>{row.k}</dt>
-              <dd style={previewKVValue}>{row.v}</dd>
-            </div>
-          ))}
-        </dl>
-      </article>
-    ),
+${aboutGlanceTable}
+`,
   },
 
   {
     path: 'about/beliefs.md',
     label: 'beliefs.md',
     kind: 'md',
-    raw: `# beliefs
+    raw: `# Beliefs
 
 About software, mostly.
 
-${beliefs.map((b, i) => `${String(i + 1).padStart(2, '0')}. ${b}`).join('\n')}`,
-    preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>Beliefs</h1>
-        <p style={previewLede}>About software, mostly.</p>
-        <ol style={previewOl}>
-          {beliefs.map((b, i) => (
-            <li key={i} style={previewOlItem}>
-              <span style={previewOlNum}>{String(i + 1).padStart(2, '0')}</span>
-              <span>{b}</span>
-            </li>
-          ))}
-        </ol>
-      </article>
-    ),
+${beliefs.map((b, i) => `${i + 1}. ${b}`).join('\n')}
+`,
   },
 
   {
     path: 'about/anti-list.md',
     label: 'anti-list.md',
     kind: 'md',
-    raw: `# avoid
+    raw: `# Avoid
 
 In this order.
 
-${antiList.map((a, i) => `${String(i + 1).padStart(2, '0')}. ${a}`).join('\n')}`,
-    preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>Avoid</h1>
-        <p style={previewLede}>In this order.</p>
-        <ol style={previewOl}>
-          {antiList.map((a, i) => (
-            <li key={i} style={previewOlItem}>
-              <span style={{ ...previewOlNum, color: 'var(--ide-red)' }}>×</span>
-              <span>{a}</span>
-            </li>
-          ))}
-        </ol>
-      </article>
-    ),
+${antiList.map((a, i) => `${i + 1}. ${a}`).join('\n')}
+`,
   },
 
   {
@@ -244,21 +143,21 @@ ${antiList.map((a, i) => `${String(i + 1).padStart(2, '0')}. ${a}`).join('\n')}`
       2,
     ),
     preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>Stack</h1>
-        <p style={previewLede}>On the keyboard this month.</p>
-        <div style={{ display: 'grid', gap: 14 }}>
+      <article className="ide-md-prose">
+        <h1 className="ide-md-h1">Stack</h1>
+        <p className="ide-md-lede">On the keyboard this month.</p>
+        <div className="ide-stack-cards">
           {stackGroups.map((g) => (
-            <div key={g.title} style={previewStackCard}>
-              <div style={previewStackTitle}>{g.title}</div>
-              <div style={previewStackItems}>
+            <div key={g.title} className="ide-stack-card">
+              <div className="ide-stack-card-title">{g.title}</div>
+              <div className="ide-stack-card-items">
                 {g.items.map((item) => (
-                  <span key={item} style={previewStackChip}>
+                  <span key={item} className="ide-stack-chip">
                     {item}
                   </span>
                 ))}
               </div>
-              <div style={previewStackNote}>{g.note}</div>
+              <div className="ide-stack-card-note">{g.note}</div>
             </div>
           ))}
         </div>
@@ -270,65 +169,80 @@ ${antiList.map((a, i) => `${String(i + 1).padStart(2, '0')}. ${a}`).join('\n')}`
     path: 'about/now.md',
     label: 'now.md',
     kind: 'md',
-    raw: `# now
+    raw: `# Now
 
-> Live · Riga · since 2024
+> ● Live · Riga · since 2024
 
-${timeline[0].role} at ${timeline[0].where}.
+**${timeline[0].role}** — ${timeline[0].where}.
+
 ${timeline[0].note}
 
-## throughline (constant since ${throughline.since.split(' · ')[0]})
+## Throughline
+
+Constant since ${throughline.since.split(' · ')[0]}.
+
 - ${throughline.delivered}
-- ${throughline.role}`,
-    preview: () => (
-      <article style={previewProse}>
-        <h1 style={previewH1}>Now</h1>
-        <p style={previewLede}>
-          <span style={previewPulse} /> Live · Riga · since 2024
-        </p>
-
-        <div style={previewNowCard}>
-          <div style={previewNowTitle}>{timeline[0].role}</div>
-          <div style={previewNowWhere}>{timeline[0].where}</div>
-          <p style={{ marginTop: 8 }}>{timeline[0].note}</p>
-        </div>
-
-        <h2 style={previewH2}>Throughline</h2>
-        <p style={{ color: 'var(--ide-fg-muted)', marginBottom: 8 }}>
-          Constant since {throughline.since.split(' · ')[0]}.
-        </p>
-        <ul style={previewList}>
-          <li>
-            <span style={previewBullet}>›</span>
-            {throughline.delivered}
-          </li>
-          <li>
-            <span style={previewBullet}>›</span>
-            {throughline.role}
-          </li>
-        </ul>
-      </article>
-    ),
+- ${throughline.role}
+`,
   },
 ];
 
-// === markdown / JSON syntax highlighting =========================
-// Lightweight: line-by-line for markdown, char-class spans for JSON.
+// === markdown preview ============================================
+// One component handles every .md file. Custom component overrides
+// keep typography consistent with the rest of the site (serif h1/h2,
+// mono micro-type, accent-coloured numerals, etc.) and let GFM tables
+// + autolinks render natively.
+
+const mdComponents: Components = {
+  h1: ({ children }) => <h1 className="ide-md-h1">{children}</h1>,
+  h2: ({ children }) => <h2 className="ide-md-h2">{children}</h2>,
+  h3: ({ children }) => <h3 className="ide-md-h3">{children}</h3>,
+  p: ({ children }) => <p className="ide-md-p">{children}</p>,
+  blockquote: ({ children }) => <blockquote className="ide-md-quote">{children}</blockquote>,
+  ul: ({ children }) => <ul className="ide-md-ul">{children}</ul>,
+  ol: ({ children }) => <ol className="ide-md-ol">{children}</ol>,
+  li: ({ children }) => <li className="ide-md-li">{children}</li>,
+  a: ({ href, children }) => (
+    <a
+      className="ide-md-link"
+      href={href}
+      target={href?.startsWith('http') ? '_blank' : undefined}
+      rel={href?.startsWith('http') ? 'noopener noreferrer' : undefined}
+    >
+      {children}
+    </a>
+  ),
+  strong: ({ children }) => <strong className="ide-md-strong">{children}</strong>,
+  em: ({ children }) => <em className="ide-md-em">{children}</em>,
+  code: ({ children }) => <code className="ide-md-code">{children}</code>,
+  pre: ({ children }) => <pre className="ide-md-pre">{children}</pre>,
+  hr: () => <hr className="ide-md-hr" />,
+  table: ({ children }) => <table className="ide-md-table">{children}</table>,
+  thead: ({ children }) => <thead>{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr>{children}</tr>,
+  th: ({ children }) => <th className="ide-md-th">{children}</th>,
+  td: ({ children }) => <td className="ide-md-td">{children}</td>,
+};
+
+function MarkdownPreview({ source }: { source: string }) {
+  return (
+    <article className="ide-md-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+        {source}
+      </ReactMarkdown>
+    </article>
+  );
+}
+
+// === source-mode syntax highlighting =============================
 
 function highlightMarkdownLine(line: string, key: number): React.ReactElement {
   if (/^#{1,3}\s/.test(line)) {
-    return (
-      <span key={key} style={{ color: 'var(--ide-magenta)' }}>
-        {line}
-      </span>
-    );
+    return <span key={key} style={{ color: 'var(--ide-magenta)' }}>{line}</span>;
   }
   if (line.startsWith('> ')) {
-    return (
-      <span key={key} style={{ color: 'var(--ide-comment)', fontStyle: 'italic' }}>
-        {line}
-      </span>
-    );
+    return <span key={key} style={{ color: 'var(--ide-comment)', fontStyle: 'italic' }}>{line}</span>;
   }
   if (/^\d+\.\s/.test(line)) {
     const m = line.match(/^(\d+\.\s)(.*)$/)!;
@@ -347,12 +261,15 @@ function highlightMarkdownLine(line: string, key: number): React.ReactElement {
       </span>
     );
   }
+  if (line.startsWith('|') && line.endsWith('|')) {
+    return <span key={key} style={{ color: 'var(--ide-blue)' }}>{line}</span>;
+  }
   return <span key={key}>{line}</span>;
 }
 
 function highlightJson(src: string): React.ReactElement[] {
-  // tokens: strings, keys, numbers, true/false/null, punctuation, whitespace
-  const tokens: { value: string; type: 'string' | 'key' | 'num' | 'const' | 'punct' | 'space' }[] = [];
+  type Tok = { value: string; type: 'string' | 'key' | 'num' | 'const' | 'punct' | 'space' };
+  const tokens: Tok[] = [];
   let i = 0;
   while (i < src.length) {
     const ch = src[i];
@@ -368,7 +285,6 @@ function highlightJson(src: string): React.ReactElement[] {
         else j++;
       }
       j = Math.min(j + 1, src.length);
-      // Look ahead to see if this is a key (followed by colon)
       let k = j;
       while (k < src.length && /\s/.test(src[k])) k++;
       const isKey = src[k] === ':';
@@ -411,12 +327,11 @@ export function IdeOverlay() {
   const [clock, setClock] = useState('');
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Tick clock
   useEffect(() => {
     if (!open) return;
     const tick = () => {
       const d = new Date();
-      const cetOffsetH = 1; // assumes CET (UTC+1) for display; close enough for an easter egg
+      const cetOffsetH = 1;
       const local = new Date(d.getTime() + (cetOffsetH * 60 + d.getTimezoneOffset()) * 60 * 1000);
       setClock(local.toTimeString().slice(0, 8));
     };
@@ -425,11 +340,9 @@ export function IdeOverlay() {
     return () => clearInterval(id);
   }, [open]);
 
-  // Subscribe to bus
   useEffect(() => {
     const offOpen = onIdeOpen(() => {
       setOpen(true);
-      // ensure README is in the tabs
       setOpenTabs((t) => (t.includes('README.md') ? t : ['README.md', ...t]));
       setActivePath('README.md');
     });
@@ -437,7 +350,6 @@ export function IdeOverlay() {
     return () => { offOpen(); offClose(); };
   }, []);
 
-  // Esc + Cmd/Ctrl+W close
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -446,7 +358,6 @@ export function IdeOverlay() {
         setOpen(false);
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w' && !e.shiftKey) {
         e.preventDefault();
-        // close active tab if more than one; otherwise close overlay
         setOpenTabs((tabs) => {
           if (tabs.length <= 1) {
             setOpen(false);
@@ -464,7 +375,6 @@ export function IdeOverlay() {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, activePath]);
 
-  // Lock body scroll while open
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -512,7 +422,6 @@ export function IdeOverlay() {
     >
       <style dangerouslySetInnerHTML={{ __html: ideCss }} />
       <div className="ide-window" onMouseDown={(e) => e.stopPropagation()}>
-        {/* Title bar */}
         <div className="ide-titlebar">
           <button
             type="button"
@@ -537,7 +446,6 @@ export function IdeOverlay() {
         </div>
 
         <div className="ide-body">
-          {/* File tree */}
           <aside className="ide-sidebar">
             <div className="ide-sidebar-head">PROJECT</div>
             <div className="ide-tree">
@@ -566,15 +474,9 @@ export function IdeOverlay() {
             </div>
             <div className="ide-sidebar-foot">
               <div>OUTLINE</div>
-              <div className="ide-outline">
-                <span>▾</span> identity
-              </div>
-              <div className="ide-outline">
-                <span>▾</span> now
-              </div>
-              <div className="ide-outline">
-                <span>▾</span> contact
-              </div>
+              <div className="ide-outline"><span>▾</span> identity</div>
+              <div className="ide-outline"><span>▾</span> now</div>
+              <div className="ide-outline"><span>▾</span> contact</div>
             </div>
           </aside>
 
@@ -626,7 +528,13 @@ export function IdeOverlay() {
 
             <div className="ide-editor">
               {activeMode === 'preview' ? (
-                <div className="ide-preview">{activeFile.preview()}</div>
+                <div className="ide-preview">
+                  {activeFile.kind === 'md' ? (
+                    <MarkdownPreview source={activeFile.raw} />
+                  ) : (
+                    activeFile.preview?.()
+                  )}
+                </div>
               ) : (
                 <SourceView file={activeFile} />
               )}
@@ -637,7 +545,7 @@ export function IdeOverlay() {
               <span className="ide-status-sep">·</span>
               <span>UTF-8</span>
               <span className="ide-status-sep">·</span>
-              <span>{activeFile.kind === 'md' ? 'Markdown' : 'JSON'}</span>
+              <span>{activeFile.kind === 'md' ? 'Markdown · GFM' : 'JSON'}</span>
               <span className="ide-status-sep">·</span>
               <span>{activeMode === 'preview' ? 'PREVIEW' : 'SOURCE'}</span>
               <span className="ide-status-spacer" />
@@ -690,91 +598,10 @@ function SourceView({ file }: { file: IdeFile }) {
   );
 }
 
-// === inline preview styles (kept as objects so we don't fight the
-// global `* { border-radius: 0 !important }` rule via CSS class overrides
-// where possible — anything that truly needs rounding goes through the
-// scoped <style> block below with !important)
-// ================================================================
-
-const previewProse: CSSProperties = {
-  fontFamily: 'var(--ide-display)',
-  fontSize: 15,
-  lineHeight: 1.65,
-  color: 'var(--ide-fg)',
-  padding: '32px 48px',
-  maxWidth: 760,
-};
-const previewH1: CSSProperties = {
-  fontFamily: 'var(--ide-display)',
-  fontSize: 48,
-  lineHeight: 1,
-  letterSpacing: '-0.03em',
-  fontWeight: 400,
-  marginBottom: 6,
-  color: 'var(--ide-fg)',
-};
-const previewLede: CSSProperties = {
-  fontFamily: 'var(--ide-mono)',
-  fontSize: 12,
-  textTransform: 'uppercase',
-  letterSpacing: '0.12em',
-  color: 'var(--ide-fg-muted)',
-  marginBottom: 22,
-};
-const previewH2: CSSProperties = {
-  fontFamily: 'var(--ide-display)',
-  fontSize: 22,
-  letterSpacing: '-0.01em',
-  fontWeight: 400,
-  margin: '20px 0 8px',
-  color: 'var(--ide-fg)',
-};
-const previewList: CSSProperties = {
-  listStyle: 'none',
-  padding: 0,
-  margin: '0 0 18px',
-  display: 'grid',
-  gap: 4,
-};
-const previewBullet: CSSProperties = {
-  color: 'var(--ide-accent)',
-  marginRight: 8,
-  fontFamily: 'var(--ide-mono)',
-};
-const previewQuote: CSSProperties = {
-  borderLeft: '2px solid var(--ide-accent)',
-  padding: '8px 16px',
-  margin: '24px 0',
-  fontStyle: 'italic',
-  color: 'var(--ide-fg-muted)',
-  fontSize: 17,
-  lineHeight: 1.4,
-};
-const previewRule: CSSProperties = {
-  border: 'none',
-  borderTop: '1px solid var(--ide-line)',
-  margin: '28px 0 22px',
-};
-const previewKVList: CSSProperties = { display: 'grid', gap: 4, margin: 0 };
-const previewKVRow: CSSProperties = { display: 'grid', gridTemplateColumns: '160px 1fr', alignItems: 'baseline' };
-const previewKVKey: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ide-fg-muted)' };
-const previewKVValue: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 13, color: 'var(--ide-fg)', margin: 0 };
-const previewOl: CSSProperties = { listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 };
-const previewOlItem: CSSProperties = { display: 'grid', gridTemplateColumns: '34px 1fr', gap: 12, alignItems: 'baseline' };
-const previewOlNum: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 12, color: 'var(--ide-accent)', letterSpacing: '0.06em' };
-const previewStackCard: CSSProperties = { padding: '14px 16px', background: 'var(--ide-panel-hi)', border: '1px solid var(--ide-line)' };
-const previewStackTitle: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'var(--ide-accent)', marginBottom: 8 };
-const previewStackItems: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 };
-const previewStackChip: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 11.5, padding: '2px 8px', border: '1px solid var(--ide-line-strong)', color: 'var(--ide-fg)' };
-const previewStackNote: CSSProperties = { fontFamily: 'var(--ide-display)', fontStyle: 'italic', fontSize: 13, color: 'var(--ide-fg-muted)' };
-const previewPulse: CSSProperties = { display: 'inline-block', width: 8, height: 8, background: 'var(--ide-green)', marginRight: 8, animation: 'ide-pulse 1.6s ease-in-out infinite', verticalAlign: 'middle' };
-const previewNowCard: CSSProperties = { padding: 16, background: 'var(--ide-panel-hi)', borderLeft: '3px solid var(--ide-accent)', margin: '16px 0' };
-const previewNowTitle: CSSProperties = { fontFamily: 'var(--ide-display)', fontSize: 20, marginBottom: 2 };
-const previewNowWhere: CSSProperties = { fontFamily: 'var(--ide-mono)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ide-fg-muted)' };
-
 // === IDE chrome CSS (scoped under `.ide-shell`) ==================
-// Kept as a string so we can override the global border-radius:0 rule
-// on the few elements that actually need rounding (the traffic lights).
+// Extends the original chrome with markdown-prose typography rules so
+// the react-markdown output uses the same tokens as the rest of the IDE
+// (serif headings, mono micro-type, accent-coloured numerals).
 
 const ideCss = `
 .ide-shell {
@@ -914,6 +741,98 @@ const ideCss = `
 .ide-status-sep { color: var(--ide-line-strong); }
 .ide-status-spacer { flex: 1; }
 
+/* ---- markdown prose ----------------------------------------- */
+.ide-md-prose { padding: 32px 48px 64px; max-width: 760px; font-family: var(--ide-display); font-size: 15px; line-height: 1.65; color: var(--ide-fg); }
+.ide-md-h1 { font-family: var(--ide-display); font-size: 48px; line-height: 1; letter-spacing: -0.03em; font-weight: 400; margin: 0 0 6px; }
+.ide-md-h2 { font-family: var(--ide-display); font-size: 24px; letter-spacing: -0.01em; font-weight: 400; margin: 28px 0 10px; }
+.ide-md-h3 { font-family: var(--ide-display); font-size: 18px; letter-spacing: -0.005em; font-weight: 400; margin: 20px 0 6px; }
+.ide-md-lede {
+  font-family: var(--ide-mono); font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--ide-fg-muted); margin-bottom: 22px;
+}
+.ide-md-p { margin: 0 0 14px; }
+.ide-md-p:last-child { margin-bottom: 0; }
+.ide-md-quote {
+  border-left: 2px solid var(--ide-accent);
+  padding: 6px 16px;
+  margin: 18px 0;
+  font-family: var(--ide-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ide-fg-muted);
+}
+.ide-md-quote .ide-md-p { margin: 0; font: inherit; color: inherit; }
+.ide-md-ul, .ide-md-ol { padding-left: 0; margin: 4px 0 18px; list-style: none; }
+.ide-md-li { padding-left: 22px; position: relative; margin: 4px 0; }
+.ide-md-ul .ide-md-li::before {
+  content: '›'; position: absolute; left: 0; top: 0;
+  color: var(--ide-accent);
+  font-family: var(--ide-mono);
+}
+.ide-md-ol { counter-reset: ide-ol; }
+.ide-md-ol .ide-md-li { padding-left: 36px; counter-increment: ide-ol; }
+.ide-md-ol .ide-md-li::before {
+  content: counter(ide-ol, decimal-leading-zero);
+  position: absolute; left: 0; top: 1px;
+  font-family: var(--ide-mono); font-size: 12px;
+  color: var(--ide-accent); letter-spacing: 0.06em;
+}
+.ide-md-link { color: var(--ide-blue); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--ide-blue) 35%, transparent); }
+.ide-md-link:hover { color: var(--ide-accent); border-bottom-color: var(--ide-accent); }
+.ide-md-strong { font-family: var(--ide-display); font-weight: 600; color: var(--ide-fg); }
+.ide-md-em { font-style: italic; color: var(--ide-fg-muted); }
+.ide-md-code {
+  font-family: var(--ide-mono); font-size: 12.5px;
+  padding: 1px 6px;
+  background: var(--ide-panel-hi);
+  border: 1px solid var(--ide-line);
+  color: var(--ide-string);
+}
+.ide-md-pre {
+  font-family: var(--ide-mono); font-size: 12.5px;
+  padding: 12px 14px;
+  background: var(--ide-panel);
+  border: 1px solid var(--ide-line);
+  border-left: 2px solid var(--ide-accent);
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.ide-md-pre code { background: transparent; border: 0; padding: 0; color: var(--ide-fg); }
+.ide-md-hr { border: 0; border-top: 1px solid var(--ide-line); margin: 28px 0 22px; }
+.ide-md-table {
+  border-collapse: collapse;
+  margin: 4px 0 18px;
+  font-family: var(--ide-mono); font-size: 12.5px;
+  width: 100%;
+}
+.ide-md-th, .ide-md-td {
+  padding: 7px 12px;
+  border: 1px solid var(--ide-line);
+  text-align: left;
+  vertical-align: top;
+}
+.ide-md-th {
+  background: var(--ide-panel);
+  color: var(--ide-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* the "lede" used to be a paragraph immediately after h1; on .md preview we
+   instead render quote-as-lede above. but the stack.json hand-render still uses
+   .ide-md-lede so keep the class above + the variant below for chip groups */
+
+.ide-stack-cards { display: grid; gap: 14px; }
+.ide-stack-card { padding: 14px 16px; background: var(--ide-panel-hi); border: 1px solid var(--ide-line); }
+.ide-stack-card-title { font-family: var(--ide-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ide-accent); margin-bottom: 8px; }
+.ide-stack-card-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ide-stack-chip { font-family: var(--ide-mono); font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--ide-line-strong); color: var(--ide-fg); }
+.ide-stack-card-note { font-family: var(--ide-display); font-style: italic; font-size: 13px; color: var(--ide-fg-muted); }
+
 @media (max-width: 720px) {
   .ide-shell { padding: 0; }
   .ide-window { width: 100vw; height: 100vh; border: none; }
@@ -923,7 +842,7 @@ const ideCss = `
   .ide-folder { font-size: 0; }
   .ide-folder::after { content: '▾'; font-size: 14px; color: inherit; }
   .ide-sidebar-foot { display: none; }
-  .ide-preview > * { padding-inline: 18px !important; }
+  .ide-md-prose { padding: 24px 18px 48px; }
   .ide-tab { padding: 0 10px; }
 }
 `;
