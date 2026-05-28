@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BadCommand,
   UnsafePath,
+  UpstreamError,
   parseCommand,
   resolveOutputPath,
+  resolveBranch,
+  issueBranchName,
   slugify,
 } from './grok-imagine.mjs';
 
@@ -102,5 +105,40 @@ describe('slugify', () => {
 
   it('strips diacritics', () => {
     expect(slugify('Café résumé')).toBe('cafe-resume');
+  });
+});
+
+describe('resolveBranch', () => {
+  it('uses PR_HEAD_REF when ISSUE_IS_PR is true', () => {
+    const out = resolveBranch({
+      env: { ISSUE_IS_PR: 'true', PR_HEAD_REF: 'feature/foo' },
+      issueNumber: 42,
+    });
+    expect(out).toEqual({ branch: 'feature/foo', isIssue: false });
+  });
+
+  it('falls back to grok-imagine/issue-<n> when ISSUE_IS_PR is false', () => {
+    const out = resolveBranch({
+      env: { ISSUE_IS_PR: 'false', PR_HEAD_REF: '' },
+      issueNumber: 25,
+    });
+    expect(out).toEqual({ branch: 'grok-imagine/issue-25', isIssue: true });
+  });
+
+  it('treats a missing ISSUE_IS_PR as issue context', () => {
+    const out = resolveBranch({ env: {}, issueNumber: 7 });
+    expect(out).toEqual({ branch: 'grok-imagine/issue-7', isIssue: true });
+  });
+
+  it('throws when PR context is claimed but the ref is empty', () => {
+    expect(() =>
+      resolveBranch({ env: { ISSUE_IS_PR: 'true', PR_HEAD_REF: '' }, issueNumber: 1 }),
+    ).toThrow(UpstreamError);
+  });
+});
+
+describe('issueBranchName', () => {
+  it('namespaces under grok-imagine/', () => {
+    expect(issueBranchName(25)).toBe('grok-imagine/issue-25');
   });
 });
