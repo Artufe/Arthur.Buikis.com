@@ -7,7 +7,7 @@ import {
   antiList,
   beliefs,
 } from '@/content/about';
-import { site } from '@/content/site';
+import { StackGroupItems } from '@/components/stack-group-items';
 
 const title = 'About';
 const description = 'Backend & platform engineer · Riga · twelve-ish years in.';
@@ -43,8 +43,13 @@ export default function AboutPage() {
           {/* Timeline */}
           <div className="tl">
             {timeline.map((t) => (
-              <div key={t.years} className={`tl-item${t.dot === 'live' ? ' live' : ''} reveal`}>
-                <div className="years">{t.years}</div>
+              <div key={t.years} className={`tl-item${t.dot === 'live' ? ' live' : ''}`}>
+                <div className="years">
+                  {t.dot === 'live' && (
+                    <span className="live-dot" aria-label="active" />
+                  )}
+                  {t.years}
+                </div>
                 <div className="role">{t.role}</div>
                 <div className="where">{t.where}</div>
                 <div className="note">{t.note}</div>
@@ -63,9 +68,9 @@ export default function AboutPage() {
           {/* Beliefs */}
           <div style={{ marginTop: 44 }}>
             <h3>Beliefs</h3>
-            <ul className="beliefs">
+            <ul className="beliefs beliefs-staggered">
               {beliefs.map((b, i) => (
-                <li key={i} className="reveal">{b}</li>
+                <li key={i} style={{ animationDelay: `${i * 60}ms` }}>{b}</li>
               ))}
             </ul>
           </div>
@@ -74,9 +79,16 @@ export default function AboutPage() {
           <div style={{ marginTop: 28 }}>
             <h3>Avoid</h3>
             <ul className="anti-list">
-              {antiList.map((a, i) => (
-                <li key={i} className="reveal">{a}</li>
-              ))}
+              {antiList.map((a, i) => {
+                const head = a.slice(0, 2);
+                const rest = a.slice(2);
+                return (
+                  <li key={i}>
+                    <span className="anti-strike">{head}</span>
+                    {rest}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
@@ -87,14 +99,12 @@ export default function AboutPage() {
             <h3 style={{ fontSize: 17, marginBottom: 16 }}>Stack</h3>
             <div className="stack-grid" style={{ gridTemplateColumns: '1fr' }}>
               {stackGroups.map((g) => (
-                <div key={g.title} className="stack-group reveal">
+                <div key={g.title} className="stack-group">
                   <h3 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     {g.title}
                   </h3>
                   <div className="items">
-                    {g.items.map((i) => (
-                      <span key={i} style={{ display: 'block' }}>{i}</span>
-                    ))}
+                    <StackGroupItems items={g.items} />
                   </div>
                   <div className="note">{g.note}</div>
                 </div>
@@ -102,16 +112,16 @@ export default function AboutPage() {
             </div>
 
             {/* At a glance */}
-            <div className="glance-box reveal">
-              <div className="mono">at a glance</div>
-              <div className="content">
+            <div className="glance-box glance-table">
+              <div className="mono glance-title">at a glance</div>
+              <dl className="glance-rows">
                 {atAGlance.map((row) => (
-                  <div key={row.k}>
-                    <span style={{ color: 'var(--muted)' }}>{row.k}: </span>
-                    {row.v}
+                  <div key={row.k} className="glance-row">
+                    <dt className="glance-k">{row.k}</dt>
+                    <dd className="glance-v">{row.v}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             </div>
           </div>
         </div>
