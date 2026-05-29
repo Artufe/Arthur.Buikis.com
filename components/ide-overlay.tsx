@@ -12,6 +12,7 @@ import {
   timeline,
   throughline,
 } from '@/content/about';
+import { cvExperience, cvProjects } from '@/content/cv';
 import { site } from '@/content/site';
 
 type FileKind = 'md' | 'json';
@@ -183,6 +184,179 @@ Constant since ${throughline.since.split(' · ')[0]}.
 
 - ${throughline.delivered}
 - ${throughline.role}
+`,
+  },
+
+  // === work/ ====================================================
+  {
+    path: 'work/giraffe360.md',
+    label: 'giraffe360.md',
+    kind: 'md',
+    raw: `# Giraffe360 · Media platform
+
+> ● Live · ${cvExperience[0].period.toLowerCase()} · Riga
+
+**${cvExperience[0].role}** — ${cvExperience[0].company}.
+
+${cvExperience[0].blurb}
+
+## Shipped
+
+${cvExperience[0].bullets.map((b) => `- ${b}`).join('\n')}
+
+## Stack
+
+\`${cvExperience[0].stack}\`
+`,
+  },
+
+  {
+    path: 'work/markflow.md',
+    label: 'markflow.md',
+    kind: 'md',
+    raw: `# MarkFlow
+
+> ● Live · 2023 → now · solo product
+
+${cvProjects[0].body}
+
+## Stack
+
+\`${cvProjects[0].meta}\`
+
+## Links
+
+- [${cvProjects[0].link!.label} ↗](${cvProjects[0].link!.href})
+`,
+  },
+
+  {
+    path: 'work/myproxy.md',
+    label: 'myproxy.md',
+    kind: 'md',
+    raw: `# MyProxy
+
+> ○ Sunset · 2020 – 2022 · solo product
+
+${cvProjects[1].body}
+
+## Stack
+
+\`${cvProjects[1].meta}\`
+
+## Notes
+
+A mobile-phone-as-proxy service for B2B customers. Multi-device
+rotation, a monitoring dashboard, paying accounts. The economic story
+was the headline win — cost per GB came down by roughly 20× over
+the run.
+`,
+  },
+
+  {
+    path: 'work/expired-domain-search.md',
+    label: 'expired-domain-search.md',
+    kind: 'md',
+    raw: `# Expired Domain Search
+
+> ▸ Shipped · ${cvExperience[2].period.toLowerCase()} · ${cvExperience[2].company.split(' · ')[0]}
+
+${cvProjects[2].body}
+
+## Stack
+
+\`${cvProjects[2].meta}\`
+
+## Engagement notes
+
+${cvExperience[2].blurb}
+`,
+  },
+
+  {
+    path: 'work/lethub.md',
+    label: 'lethub.md',
+    kind: 'md',
+    raw: `# Lethub · scraping pipeline
+
+> ▸ Shipped · ${cvExperience[3].period.toLowerCase()} · ${cvExperience[3].company.split(' · ')[0]}
+
+**${cvExperience[3].role}** — ${cvExperience[3].company}.
+
+${cvExperience[3].blurb}
+
+## Stack
+
+\`${cvExperience[3].stack}\`
+`,
+  },
+
+  // === root ====================================================
+  {
+    path: 'contact.md',
+    label: 'contact.md',
+    kind: 'md',
+    raw: `# Contact
+
+> Direct · response within 24h
+
+- **email**: <${site.email}>
+${site.socials.map((s) => `- **${s.label.toLowerCase()}**: [${s.href.replace(/^https?:\/\//, '')} ↗](${s.href})`).join('\n')}
+
+## Best to email about
+
+- Backend / platform work with real production constraints.
+- Performance regressions on data-heavy Python systems.
+- Anything involving a mature codebase that needs a careful hand.
+
+## Less useful to email about
+
+- Crypto. Anything adjacent.
+- "Hop on a quick call" before there's a problem statement.
+- Estimates for systems I haven't read yet.
+`,
+  },
+
+  {
+    path: 'building.md',
+    label: 'building.md',
+    kind: 'md',
+    raw: `# Currently building
+
+> ◐ Prototype · updated 2026-04 · quiet mode
+
+## What it is
+
+I'm quietly building a product platform. Details are intentionally
+thin while it's still in prototype, but the short version is this:
+a tool for operators who want what I want, in a space where most
+options still feel clumsy.
+
+## Why
+
+Over the last decade I've watched the same problems get solved
+again and again inside different walled gardens. The goal here is
+to ship something small enough to move quickly, focused enough to
+be genuinely useful, and honest enough that people can always take
+their data with them.
+
+## Where it's at now
+
+**Status: prototype.** It works for me. It's not ready for
+external hands yet. Growing it quietly, without the launch-day
+hype cycle.
+
+## What's next
+
+- Make the core workflow bulletproof.
+- Bring in a small set of early users I trust to give direct,
+  practical feedback.
+- Open it up publicly when the experience is boring in the best way.
+
+## How to follow
+
+No newsletter. If you want to hear when it opens up,
+[email me](mailto:${site.email}) and I'll add you to a small list.
 `,
   },
 ];
@@ -456,6 +630,17 @@ export function IdeOverlay() {
                 <div className="ide-folder ide-folder-nested">▾ about</div>
                 <div className="ide-tree-children ide-tree-nested-children">
                   {FILES.filter((f) => f.path.startsWith('about/')).map((f) => (
+                    <FileTreeItem
+                      key={f.path}
+                      file={f}
+                      active={f.path === activePath}
+                      onClick={() => openFile(f.path)}
+                    />
+                  ))}
+                </div>
+                <div className="ide-folder ide-folder-nested">▾ work</div>
+                <div className="ide-tree-children ide-tree-nested-children">
+                  {FILES.filter((f) => f.path.startsWith('work/')).map((f) => (
                     <FileTreeItem
                       key={f.path}
                       file={f}
