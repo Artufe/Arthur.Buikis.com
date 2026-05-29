@@ -12,6 +12,7 @@ import {
   timeline,
   throughline,
 } from '@/content/about';
+import { cvExperience, cvProjects } from '@/content/cv';
 import { site } from '@/content/site';
 
 type FileKind = 'md' | 'json';
@@ -185,6 +186,179 @@ Constant since ${throughline.since.split(' · ')[0]}.
 - ${throughline.role}
 `,
   },
+
+  // === work/ ====================================================
+  {
+    path: 'work/giraffe360.md',
+    label: 'giraffe360.md',
+    kind: 'md',
+    raw: `# Giraffe360 · Media platform
+
+> ● Live · ${cvExperience[0].period.toLowerCase()} · Riga
+
+**${cvExperience[0].role}** — ${cvExperience[0].company}.
+
+${cvExperience[0].blurb}
+
+## Shipped
+
+${cvExperience[0].bullets.map((b) => `- ${b}`).join('\n')}
+
+## Stack
+
+\`${cvExperience[0].stack}\`
+`,
+  },
+
+  {
+    path: 'work/markflow.md',
+    label: 'markflow.md',
+    kind: 'md',
+    raw: `# MarkFlow
+
+> ● Live · 2023 → now · solo product
+
+${cvProjects[0].body}
+
+## Stack
+
+\`${cvProjects[0].meta}\`
+
+## Links
+
+- [${cvProjects[0].link!.label} ↗](${cvProjects[0].link!.href})
+`,
+  },
+
+  {
+    path: 'work/myproxy.md',
+    label: 'myproxy.md',
+    kind: 'md',
+    raw: `# MyProxy
+
+> ○ Sunset · 2020 – 2022 · solo product
+
+${cvProjects[1].body}
+
+## Stack
+
+\`${cvProjects[1].meta}\`
+
+## Notes
+
+A mobile-phone-as-proxy service for B2B customers. Multi-device
+rotation, a monitoring dashboard, paying accounts. The economic story
+was the headline win — cost per GB came down by roughly 20× over
+the run.
+`,
+  },
+
+  {
+    path: 'work/expired-domain-search.md',
+    label: 'expired-domain-search.md',
+    kind: 'md',
+    raw: `# Expired Domain Search
+
+> ▸ Shipped · ${cvExperience[2].period.toLowerCase()} · ${cvExperience[2].company.split(' · ')[0]}
+
+${cvProjects[2].body}
+
+## Stack
+
+\`${cvProjects[2].meta}\`
+
+## Engagement notes
+
+${cvExperience[2].blurb}
+`,
+  },
+
+  {
+    path: 'work/lethub.md',
+    label: 'lethub.md',
+    kind: 'md',
+    raw: `# Lethub · scraping pipeline
+
+> ▸ Shipped · ${cvExperience[3].period.toLowerCase()} · ${cvExperience[3].company.split(' · ')[0]}
+
+**${cvExperience[3].role}** — ${cvExperience[3].company}.
+
+${cvExperience[3].blurb}
+
+## Stack
+
+\`${cvExperience[3].stack}\`
+`,
+  },
+
+  // === root ====================================================
+  {
+    path: 'contact.md',
+    label: 'contact.md',
+    kind: 'md',
+    raw: `# Contact
+
+> Direct · response within 24h
+
+- **email**: <${site.email}>
+${site.socials.map((s) => `- **${s.label.toLowerCase()}**: [${s.href.replace(/^https?:\/\//, '')} ↗](${s.href})`).join('\n')}
+
+## Best to email about
+
+- Backend / platform work with real production constraints.
+- Performance regressions on data-heavy Python systems.
+- Anything involving a mature codebase that needs a careful hand.
+
+## Less useful to email about
+
+- Crypto. Anything adjacent.
+- "Hop on a quick call" before there's a problem statement.
+- Estimates for systems I haven't read yet.
+`,
+  },
+
+  {
+    path: 'building.md',
+    label: 'building.md',
+    kind: 'md',
+    raw: `# Currently building
+
+> ◐ Prototype · updated 2026-04 · quiet mode
+
+## What it is
+
+I'm quietly building a product platform. Details are intentionally
+thin while it's still in prototype, but the short version is this:
+a tool for operators who want what I want, in a space where most
+options still feel clumsy.
+
+## Why
+
+Over the last decade I've watched the same problems get solved
+again and again inside different walled gardens. The goal here is
+to ship something small enough to move quickly, focused enough to
+be genuinely useful, and honest enough that people can always take
+their data with them.
+
+## Where it's at now
+
+**Status: prototype.** It works for me. It's not ready for
+external hands yet. Growing it quietly, without the launch-day
+hype cycle.
+
+## What's next
+
+- Make the core workflow bulletproof.
+- Bring in a small set of early users I trust to give direct,
+  practical feedback.
+- Open it up publicly when the experience is boring in the best way.
+
+## How to follow
+
+No newsletter. If you want to hear when it opens up,
+[email me](mailto:${site.email}) and I'll add you to a small list.
+`,
+  },
 ];
 
 // === markdown preview ============================================
@@ -324,21 +498,7 @@ export function IdeOverlay() {
   const [activePath, setActivePath] = useState<string>(FILES[0].path);
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const [openTabs, setOpenTabs] = useState<string[]>([FILES[0].path]);
-  const [clock, setClock] = useState('');
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const tick = () => {
-      const d = new Date();
-      const cetOffsetH = 1;
-      const local = new Date(d.getTime() + (cetOffsetH * 60 + d.getTimezoneOffset()) * 60 * 1000);
-      setClock(local.toTimeString().slice(0, 8));
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [open]);
 
   useEffect(() => {
     const offOpen = onIdeOpen(() => {
@@ -440,8 +600,16 @@ export function IdeOverlay() {
             <span className="ide-title-path">{activePath}</span>
           </div>
           <div className="ide-titlebar-meta">
-            <span className="ide-pulse" />
-            <span>{clock || '··:··:··'} CET</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="ide-cta ide-cta--exit"
+              aria-label="Return to the rendered site"
+            >
+              <span className="ide-cta__dot" aria-hidden />
+              <span className="ide-cta__icon" aria-hidden>{'«/'}</span>
+              <span className="ide-cta__label">return to html</span>
+            </button>
           </div>
         </div>
 
@@ -462,6 +630,17 @@ export function IdeOverlay() {
                 <div className="ide-folder ide-folder-nested">▾ about</div>
                 <div className="ide-tree-children ide-tree-nested-children">
                   {FILES.filter((f) => f.path.startsWith('about/')).map((f) => (
+                    <FileTreeItem
+                      key={f.path}
+                      file={f}
+                      active={f.path === activePath}
+                      onClick={() => openFile(f.path)}
+                    />
+                  ))}
+                </div>
+                <div className="ide-folder ide-folder-nested">▾ work</div>
+                <div className="ide-tree-children ide-tree-nested-children">
+                  {FILES.filter((f) => f.path.startsWith('work/')).map((f) => (
                     <FileTreeItem
                       key={f.path}
                       file={f}
@@ -607,13 +786,10 @@ const ideCss = `
 .ide-shell {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.78);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: #0a0c11;
   z-index: 9999;
-  display: grid;
-  place-items: center;
-  padding: 28px;
+  display: block;
+  padding: 0;
   --ide-bg:         #14171f;
   --ide-panel:     #181c25;
   --ide-panel-hi:  #1d2230;
@@ -634,15 +810,15 @@ const ideCss = `
   --ide-display:   'Iowan Old Style', 'Times New Roman', Georgia, serif;
 }
 .ide-window {
-  width: min(1400px, calc(100vw - 56px));
-  height: min(900px, calc(100vh - 56px));
+  width: 100vw;
+  height: 100vh;
   background: var(--ide-bg);
   color: var(--ide-fg);
   font-family: var(--ide-mono);
   display: grid;
-  grid-template-rows: 36px 1fr;
-  border: 1px solid var(--ide-line);
-  box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+  grid-template-rows: 38px 1fr;
+  border: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 .ide-titlebar {
@@ -666,6 +842,9 @@ const ideCss = `
 .ide-title-sep { color: var(--ide-line-strong); margin: 0 8px; }
 .ide-title-path { color: var(--ide-fg); }
 .ide-titlebar-meta { display: inline-flex; gap: 8px; align-items: center; color: var(--ide-fg-muted); font-size: 10.5px; letter-spacing: 0.06em; }
+/* Force the .ide-cta exit button visible inside the overlay regardless of
+   viewport — the IDE is full-screen, the user must always have a way out. */
+.ide-shell .ide-cta { display: inline-flex; }
 .ide-pulse { width: 7px; height: 7px; border-radius: 999px !important; background: var(--ide-green); animation: ide-pulse 1.6s ease-in-out infinite; }
 @keyframes ide-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .ide-pulse, .ide-shell * { animation: none !important; } }

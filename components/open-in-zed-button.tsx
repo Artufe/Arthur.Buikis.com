@@ -7,13 +7,12 @@ export function OpenInZedButton() {
     <button
       type="button"
       onClick={() => openIde()}
-      className="open-in-zed"
+      className="ide-cta ide-cta--enter"
       aria-label="Open this page in Zed (preview + source)"
     >
-      <span className="open-in-zed__sheen" aria-hidden />
-      <span className="open-in-zed__icon" aria-hidden>{'</>'}</span>
-      <span className="open-in-zed__label">open in zed</span>
-      <span className="open-in-zed__arrow" aria-hidden>↗</span>
+      <span className="ide-cta__dot" aria-hidden />
+      <span className="ide-cta__icon" aria-hidden>{'</>'}</span>
+      <span className="ide-cta__label">open in zed</span>
     </button>
   );
 }
