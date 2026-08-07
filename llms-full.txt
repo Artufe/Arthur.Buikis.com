@@ -80,20 +80,3 @@ not after the second 3 AM page.
 Throughput went from ~10k records/day to ~100k/day. Error rate stayed under 1%. The
 most important metric — unscheduled engineer-intervention events per week — dropped to
 under one, which is roughly what "production grade" means for a team of our size.
-
----
-
-# Notes
-
-## A new place to write
-https://arthur.buikis.com/notes/welcome/ — 2026-04-28T10:00:00+02:00
-
-Why /notes exists: AI in production, not in pitches.
-
-This is the placeholder while the engine settles. The real content starts next week.
-
-The short version: there are too many AI takes from people who haven't shipped. I've been building backend systems for ~12 years, doing data infra and ML systems for a chunk of the last two. There's a gap between the hype and what production actually feels like. These notes try to close it.
-
-If you build, ship, and operate things that have to keep running — not just demo well — this is for you.
-
-— Arthur
