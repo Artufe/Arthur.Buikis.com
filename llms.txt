@@ -1,0 +1,39 @@
+# Arthur Buikis
+
+> Backend and platform engineer based in Riga. Around twelve years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.
+
+This site is a portfolio plus an ongoing notes section on AI in production. Prose is the canonical source — JSON-LD on each page mirrors the same facts.
+
+## Pages
+- [Home](https://arthur.buikis.com/): summary, featured work, current focus
+- [Notes](https://arthur.buikis.com/notes/): AI in production, not in pitches — short, opinionated takes from the senior-engineer side of AI/ML
+- [Subscribe](https://arthur.buikis.com/subscribe/): get notes in your inbox when they ship
+- [About](https://arthur.buikis.com/about/): background, working style
+- [Building](https://arthur.buikis.com/building/): what I'm currently shipping
+- [CV](https://arthur.buikis.com/cv/): full resume
+- [Contact](https://arthur.buikis.com/contact/): how to get in touch
+
+## Recent notes
+- [A new place to write](https://arthur.buikis.com/notes/welcome/): Why /notes exists: AI in production, not in pitches.
+
+## Case studies
+- [Scraping, ML, and the cost of running quietly](https://arthur.buikis.com/work/lethub-scraping-ml/): two-year real-estate data platform — scraping at scale, deduplication, ML enrichment, reliability
+
+## Skills
+- Python
+- Rust
+- PyO3
+- Celery
+- Kubernetes
+- Postgres
+- Backend engineering
+- Platform engineering
+- Performance engineering
+- Data infrastructure
+- Web scraping
+- Machine learning systems
+
+## Find me
+- GitHub: https://github.com/Artufe
+- LinkedIn: https://www.linkedin.com/in/arthur-buikis-002145151/
+- Email: arthur@buikis.com
