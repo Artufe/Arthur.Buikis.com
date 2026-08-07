@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
 import { ScanLine } from '@/components/scan-line';
+import { RevealObserver } from '@/components/reveal-observer';
 import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
 import { SnakeWindowHost } from '@/components/snake/snake-window-host';
@@ -118,6 +119,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ThemeProvider>
           <HeroShader />
           <ScanLine />
+          <RevealObserver />
           <a href="#main" className="skip-link">Skip to content</a>
           <Nav />
           <main id="main" className="relative z-10 pt-16">{children}</main>
