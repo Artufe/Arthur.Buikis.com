@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { site } from '@/content/site';
-import { getNotesIndex } from '@/lib/notes';
 
 export const dynamic = 'force-static';
 
@@ -15,10 +14,6 @@ async function readMdxProse(file: string) {
 
 async function readWorkProse(slug: string) {
   return readMdxProse(path.join(process.cwd(), 'content', 'work', `${slug}.mdx`));
-}
-
-async function readNoteProse(slug: string) {
-  return readMdxProse(path.join(process.cwd(), 'content', 'notes', `${slug}.mdx`));
 }
 
 export async function GET() {
@@ -59,19 +54,7 @@ export async function GET() {
     }),
   );
 
-  const notes = await getNotesIndex();
-  const noteSections = await Promise.all(
-    notes.map(async ({ slug, meta }) => {
-      const prose = await readNoteProse(slug);
-      return `## ${meta.title}\n${base}/notes/${slug}/ — ${meta.datePublished}\n\n${meta.description}\n\n${prose}\n`;
-    }),
-  );
-
-  const notesHeader = notes.length
-    ? '\n---\n\n# Notes\n\n' + noteSections.join('\n---\n\n')
-    : '';
-
-  return new Response(header + cases.join('\n---\n\n') + notesHeader, {
+  return new Response(header + cases.join('\n---\n\n'), {
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });
 }

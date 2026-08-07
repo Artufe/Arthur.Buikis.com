@@ -19,7 +19,6 @@ export const site = {
   subscribeEndpoint: '',
   nav: [
     { label: 'Work', href: '/#work' },
-    { label: 'Notes', href: '/notes' },
     { label: 'Building', href: '/building' },
     { label: 'About', href: '/about' },
     { label: 'CV', href: '/cv' },
