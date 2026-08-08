@@ -7,7 +7,7 @@ Location: Riga, LV (Europe/Riga)
 Email: arthur@buikis.com
 
 ## Skills
-Python, Rust, PyO3, Celery, Kubernetes, Postgres, Backend engineering, Platform engineering, Performance engineering, Data infrastructure, Web scraping, Machine learning systems
+Python, Django, Rust, PyO3, Celery, Kubernetes, Postgres, Backend engineering, Platform engineering, Performance engineering, Data infrastructure, Web scraping, Machine learning systems
 
 ## Find me
 - GitHub: https://github.com/Artufe

@@ -16,6 +16,7 @@ This site is a portfolio. Prose is the canonical source — JSON-LD on each page
 
 ## Skills
 - Python
+- Django
 - Rust
 - PyO3
 - Celery
