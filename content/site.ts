@@ -35,6 +35,7 @@ export const site = {
       'Backend and platform engineer based in Riga. Around twelve years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.',
     knowsAbout: [
       'Python',
+      'Django',
       'Rust',
       'PyO3',
       'Celery',

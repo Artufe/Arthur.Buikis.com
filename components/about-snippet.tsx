@@ -19,7 +19,9 @@ export function AboutSnippet() {
               <span className="float-left font-display text-[72px] leading-[0.82] mr-3 mt-1">E</span>
               ight-ish years of Python backend, lately with a bit of Rust. I&apos;m at a
               media-processing platform right now, mostly working on performance and how the
-              pipeline handles load. Before that: <em className="not-italic font-mono text-[13px] ch">strange-logic</em> (a SaaS called TDN — a lot
+              pipeline handles load — most recently walking the stack from Django 3.2 / Python 3.9
+              up to Django 5.2 / Python 3.13, one deliberate step at a time, with production none
+              the wiser. Before that: <em className="not-italic font-mono text-[13px] ch">strange-logic</em> (a SaaS called TDN — a lot
               of crawling, and a PHP-to-Python migration I pushed through), <em className="not-italic font-mono text-[13px] ch">lethub</em> (a scraping
               pipeline), and Upwork contracts on and off the whole time.
             </p>

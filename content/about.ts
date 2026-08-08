@@ -11,7 +11,7 @@ export const timeline: {
     years: '2024 → now',
     role: 'Software Developer',
     where: 'media-processing platform · riga',
-    note: 'Python + Rust platform behind virtual tours. Performance, ML pipeline integration, Kubernetes plumbing.',
+    note: 'Python + Rust platform behind virtual tours. Performance, ML pipeline integration, Kubernetes plumbing. Lately: a stepwise Django 3.2 → 5.2 / Python 3.9 → 3.13 migration, shipped with zero incidents — nobody noticed, which was the point.',
     dot: 'live',
   },
   {
