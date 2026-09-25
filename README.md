@@ -4,7 +4,7 @@ Personal website — engineering portfolio, case studies, CV, and what I'm curre
 
 ## Stack
 
-- **Next.js 15** (App Router, fully static export)
+- **Next.js 16** (App Router, Turbopack, fully static export)
 - **React 19**, TypeScript strict
 - **Tailwind CSS v4** + CSS custom-property design tokens (`app/globals.css`)
 - **MDX** for case studies (`content/work/*.mdx`) and the building page
