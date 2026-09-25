@@ -55,7 +55,7 @@ export const whoamiLines = {
   prompt: 'arthur@buikis:~',
   lines: [
     'backend engineer · python + some rust',
-    'twelve-ish years writing software · self-taught · riga',
+    'ten-ish years writing software · self-taught · riga',
     'best worked with when the system is real and the stakes are boring',
   ],
   hintSuggestions: ['help', 'goto work', 'theme auto'],

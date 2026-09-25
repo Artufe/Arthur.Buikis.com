@@ -28,8 +28,3 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
 
   return { score, indices };
 }
-
-export function highlightMatch(text: string, indices: number[]): { char: string; hit: boolean }[] {
-  const set = new Set(indices);
-  return [...text].map((ch, i) => ({ char: ch, hit: set.has(i) }));
-}

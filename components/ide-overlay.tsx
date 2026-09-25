@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { onIdeClose, onIdeOpen } from '@/lib/ide-bus';
@@ -54,7 +54,7 @@ const FILES: IdeFile[] = [
 
 Backend & platform engineer. Python with a Rust accent.
 Currently shipping a media-processing platform in Riga.
-Twelve-ish years writing software you don't notice.
+Ten-ish years writing software you don't notice.
 
 ## Now
 
@@ -76,7 +76,7 @@ ${site.socials.map((s) => `- [${s.label.toLowerCase()} ↗](${s.href})`).join('\
     kind: 'md',
     raw: `# About
 
-> Backend & platform engineer · Riga · twelve-ish years in
+> Backend & platform engineer · Riga · ten-ish years in
 
 It began on Upwork in 2015. The first jobs were small — scrapers,
 automation, the kind of thing people pay for when their spreadsheet
@@ -498,7 +498,6 @@ export function IdeOverlay() {
   const [activePath, setActivePath] = useState<string>(FILES[0].path);
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const [openTabs, setOpenTabs] = useState<string[]>([FILES[0].path]);
-  const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const offOpen = onIdeOpen(() => {
@@ -571,10 +570,9 @@ export function IdeOverlay() {
 
   return (
     <div
-      ref={overlayRef}
       className="ide-shell"
       role="dialog"
-      aria-label="Open Design IDE"
+      aria-label="Site source (IDE view)"
       aria-modal="true"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
@@ -778,8 +776,8 @@ function SourceView({ file }: { file: IdeFile }) {
 }
 
 // === IDE chrome CSS (scoped under `.ide-shell`) ==================
-// Extends the original chrome with markdown-prose typography rules so
-// the react-markdown output uses the same tokens as the rest of the IDE
+// Window chrome plus markdown-prose typography rules so the
+// react-markdown output uses the same tokens as the rest of the IDE
 // (serif headings, mono micro-type, accent-coloured numerals).
 
 const ideCss = `
@@ -845,9 +843,7 @@ const ideCss = `
 /* Force the .ide-cta exit button visible inside the overlay regardless of
    viewport — the IDE is full-screen, the user must always have a way out. */
 .ide-shell .ide-cta { display: inline-flex; }
-.ide-pulse { width: 7px; height: 7px; border-radius: 999px !important; background: var(--ide-green); animation: ide-pulse 1.6s ease-in-out infinite; }
-@keyframes ide-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-@media (prefers-reduced-motion: reduce) { .ide-pulse, .ide-shell * { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .ide-shell * { animation: none !important; } }
 
 .ide-body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
 .ide-sidebar { background: var(--ide-panel); border-right: 1px solid var(--ide-line); overflow-y: auto; display: flex; flex-direction: column; }
@@ -1001,10 +997,7 @@ const ideCss = `
   font-weight: 400;
 }
 
-/* the "lede" used to be a paragraph immediately after h1; on .md preview we
-   instead render quote-as-lede above. but the stack.json hand-render still uses
-   .ide-md-lede so keep the class above + the variant below for chip groups */
-
+/* ---- stack.json hand-rendered preview (also uses .ide-md-lede) --- */
 .ide-stack-cards { display: grid; gap: 14px; }
 .ide-stack-card { padding: 14px 16px; background: var(--ide-panel-hi); border: 1px solid var(--ide-line); }
 .ide-stack-card-title { font-family: var(--ide-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--ide-accent); margin-bottom: 8px; }

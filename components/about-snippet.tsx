@@ -16,8 +16,8 @@ export function AboutSnippet() {
         <div className="grid gap-16 lg:grid-cols-[1.5fr_1fr]">
           <div>
             <p className="text-[15px] leading-[1.85] max-w-[58ch]" style={{ color: 'var(--fg)' }}>
-              <span className="float-left font-display text-[72px] leading-[0.82] mr-3 mt-1">E</span>
-              ight-ish years of Python backend, lately with a bit of Rust. I&apos;m at a
+              <span className="float-left font-display text-[72px] leading-[0.82] mr-3 mt-1">T</span>
+              en-ish years of Python backend, lately with a bit of Rust. I&apos;m at a
               media-processing platform right now, mostly working on performance and how the
               pipeline handles load — most recently walking the stack from Django 3.2 / Python 3.9
               up to Django 5.2 / Python 3.13, one deliberate step at a time, with production none

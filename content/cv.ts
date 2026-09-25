@@ -21,7 +21,7 @@ export interface CVLanguage {
 }
 
 export const cvHeadline =
-  'Senior backend / platform engineer. About twelve years shipping data-heavy Python systems, with a bit of Rust where it earns its keep. Currently owning performance and ML-pipeline integration on a Django + Rust platform — translating research prototypes into services the production pipeline can safely run.';
+  'Senior backend / platform engineer. About ten years shipping data-heavy Python systems, with a bit of Rust where it earns its keep. Currently owning performance and ML-pipeline integration on a Django + Rust platform — translating research prototypes into services the production pipeline can safely run.';
 
 export const cvExperience: CVExperience[] = [
   {

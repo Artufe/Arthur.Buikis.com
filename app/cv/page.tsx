@@ -58,7 +58,7 @@ export default function CVPage() {
       >
         <span><span className="dim">Email: </span><a href={`mailto:${site.email}`} className="ch underline underline-offset-4">{site.email}</a></span>
         <span><span className="dim">Based: </span>Riga, LV · Remote · EU-time</span>
-        {site.socials.map((s, i) => (
+        {site.socials.map((s) => (
           <span key={s.href}>
             <a href={s.href} target="_blank" rel="noreferrer" className="ch underline underline-offset-4">{s.label}</a>
           </span>

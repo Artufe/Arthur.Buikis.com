@@ -13,7 +13,7 @@ const COPY = {
   eyebrow: 'Subscribe',
   title: 'AI in production, in your inbox.',
   body: 'New notes when they ship. No tracking pixels, no drip funnels — just the post.',
-  comingSoon: 'Email signup is wiring up. Bookmark /notes/ for now, or use /contact to nudge me.',
+  comingSoon: 'Email signup is wiring up. Use /contact to nudge me in the meantime.',
 };
 
 // Reject submissions faster than this — humans don't fill and submit in <800ms,

@@ -82,7 +82,7 @@ function TagPill({ tag, tone }: { tag: string; tone?: Case['tagTone'] }) {
   return <span className="px-2.5 py-0.5 border-2 font-mono text-[10px] tracking-wide dim border-[var(--border)]">{tag}</span>;
 }
 
-function CaseItem({ c, first }: { c: Case; first: boolean }) {
+function CaseItem({ c }: { c: Case }) {
   const body = (
     <>
       <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono dim">
@@ -111,8 +111,7 @@ function CaseItem({ c, first }: { c: Case; first: boolean }) {
     </>
   );
 
-  const borderCls = first ? 'border-t-2 border-[var(--border)]' : 'border-t-2 border-[var(--border)]';
-  const className = `group block py-7 ${borderCls}`;
+  const className = 'group block py-7 border-t-2 border-[var(--border)]';
 
   if (c.href && c.external) {
     return (
@@ -153,14 +152,14 @@ export function FeaturedWork() {
             </p>
           </div>
           <div className="flex flex-col">
-            {CASES.map((c, i) => (
-              <CaseItem key={c.title} c={c} first={i === 0} />
+            {CASES.map((c) => (
+              <CaseItem key={c.title} c={c} />
             ))}
             <Link
-              href="/work/lethub-scraping-ml"
+              href="/work/lethub-scraping-ml/"
               className="mt-1 block py-5 font-mono text-[11px] dim border-t-2 border-dashed border-[var(--border)] hover:text-[var(--accent)] transition-colors duration-[var(--dur)]"
             >
-              [ next case · lethub scraping pipeline — writing it up ]
+              [ case study · lethub — scraping, ML, and the cost of running quietly → ]
             </Link>
           </div>
         </div>

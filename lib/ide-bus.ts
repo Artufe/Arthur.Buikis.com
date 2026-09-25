@@ -1,6 +1,7 @@
-// Open Design's IDE-mode easter egg.
-// The CommandPalette and the footer link both fire `openIde()`; the overlay
-// component (mounted in layout) subscribes via `onIdeOpen` / `onIdeClose`.
+// Event bus for the Zed-style IDE overlay easter egg.
+// The command palette, the header "open in zed" button, and the footer
+// `$EDITOR` link all fire `openIde()`; the overlay (mounted in the root
+// layout) subscribes via `onIdeOpen` / `onIdeClose`.
 
 const OPEN_EVENT = 'ide:open';
 const CLOSE_EVENT = 'ide:close';
