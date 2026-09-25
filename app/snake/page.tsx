@@ -1,9 +1,6 @@
 'use client';
 
-import { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { SnakeConsole } from '@/components/snake/snake-console';
-import type { ConsoleLine } from '@/components/snake/snake-types';
 
 const SnakeCanvas = dynamic(
   () => import('@/components/snake/snake-canvas').then((m) => ({ default: m.SnakeCanvas })),
@@ -11,15 +8,10 @@ const SnakeCanvas = dynamic(
 );
 
 export default function SnakePage() {
-  const [lines, setLines] = useState<ConsoleLine[]>([]);
   return (
-    <div className="min-h-[80vh] flex items-center justify-center bg-[#0a0a0a]">
-      <div className="flex">
-        <div className="flex items-center justify-center">
-          <SnakeCanvas variant="page" onConsoleChange={setLines} />
-        </div>
-        <SnakeConsole lines={lines} />
-      </div>
+    // The sticky nav (66px) is in flow, so cancel main's pt-16 and fill the rest of the viewport.
+    <div className="relative -mt-16 h-[calc(100svh-66px)] min-h-[420px] w-full">
+      <SnakeCanvas variant="page" />
     </div>
   );
 }

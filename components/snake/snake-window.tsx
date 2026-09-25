@@ -32,8 +32,10 @@ function clamp(p: Pos, w: number, h: number): Pos {
   return { x: Math.min(maxX, Math.max(0, p.x)), y: Math.min(maxY, Math.max(0, p.y)) };
 }
 
+// Docked toward the right, clear of the home page headline, when there is room.
 function defaultPos(w: number, h: number): Pos {
-  return clamp({ x: (window.innerWidth - w) / 2, y: (window.innerHeight - h) / 2 }, w, h);
+  const x = window.innerWidth >= w * 2 ? window.innerWidth - w - 48 : (window.innerWidth - w) / 2;
+  return clamp({ x, y: (window.innerHeight - h) / 2 }, w, h);
 }
 
 export function SnakeWindow({
@@ -123,10 +125,17 @@ export function SnakeWindow({
 
   return (
     <div
-      style={{ ...baseStyle, background: 'var(--surface)', border: '2px solid var(--border)' }}
+      style={{
+        ...baseStyle,
+        background: 'var(--surface)',
+        border: '2px solid var(--border)',
+        // Reads as a layer above the page rather than a hole cut into it.
+        // The faint warm glow lifts it off the near-black page in the dark theme.
+        boxShadow: isMobile ? undefined : '0 24px 60px -12px rgba(0, 0, 0, 0.45), 0 0 48px rgba(255, 184, 77, 0.07)',
+      }}
       className="flex flex-col font-mono"
       role="dialog"
-      aria-label="snake.py"
+      aria-label="snake"
     >
       <div
         onPointerDown={onPointerDown}
@@ -138,7 +147,7 @@ export function SnakeWindow({
         }`}
         style={{ borderBottom: '2px solid var(--border)' }}
       >
-        <span className="text-[12px]">&gt; snake.py</span>
+        <span className="text-[12px] tracking-[0.2em]">snake</span>
         <div className="flex items-center gap-1" data-no-drag>
           <button
             type="button"
