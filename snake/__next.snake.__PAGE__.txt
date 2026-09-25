@@ -1,0 +1,24 @@
+1:"$Sreact.fragment"
+2:I[20957,["/_next/static/chunks/10s6orvqq07n3.js"],"ClientPageRoot"]
+3:I[2234,["/_next/static/chunks/2cr3f6agso_u2.js","/_next/static/chunks/34jpdb2xjm-x7.js","/_next/static/chunks/0y6g6udx-wls8.js","/_next/static/chunks/3z2y6x_v-7fjr.js","/_next/static/chunks/1-ex4tfvf0od1.js"],"default"]
+6:I[1662,["/_next/static/chunks/10s6orvqq07n3.js"],"OutletBoundary"]
+7:"$Sreact.suspense"
+b:I[1662,["/_next/static/chunks/10s6orvqq07n3.js"],"ViewportBoundary"]
+c:I[1662,["/_next/static/chunks/10s6orvqq07n3.js"],"MetadataBoundary"]
+d:I[71762,["/_next/static/chunks/10s6orvqq07n3.js"],"IconMark"]
+f:I[3032,["/_next/static/chunks/10s6orvqq07n3.js"],"default"]
+10:I[63751,["/_next/static/chunks/10s6orvqq07n3.js"],"default"]
+a:X
+12:X
+12:C
+0:{"buildId":"paSIF-zxUHwL19KKTtkR_","data":[{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],[["$","script","script-0",{"src":"/_next/static/chunks/1-ex4tfvf0od1.js","async":true}]],["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"isPartial":"$@9","staleTime":"$a","varyParams":null},{"rsc":["$","$1","h",{"children":[null,["$","$Lb",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","meta","2",{"name":"theme-color","content":"#0F0F0F"}]]}],["$","div",null,{"hidden":true,"children":["$","$Lc",null,{"children":["$","$7",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"Arthur Buikis"}],["$","meta","1",{"name":"description","content":"Senior full-stack engineer. Ships systems that hold up."}],["$","link","2",{"rel":"author","href":"https://arthur.buikis.com"}],["$","meta","3",{"name":"author","content":"Arthur Buikis"}],["$","link","4",{"rel":"manifest","href":"/site.webmanifest"}],["$","meta","5",{"name":"creator","content":"Arthur Buikis"}],["$","link","6",{"rel":"canonical","href":"https://arthur.buikis.com/"}],["$","meta","7",{"property":"og:title","content":"Arthur Buikis"}],["$","meta","8",{"property":"og:description","content":"Senior full-stack engineer. Ships systems that hold up."}],["$","meta","9",{"property":"og:url","content":"https://arthur.buikis.com/"}],["$","meta","10",{"property":"og:site_name","content":"Arthur Buikis"}],["$","meta","11",{"property":"og:locale","content":"en_US"}],["$","meta","12",{"property":"og:image","content":"https://arthur.buikis.com/opengraph-image?2757445c509e260e"}],["$","meta","13",{"property":"og:image:type","content":"image/png"}],["$","meta","14",{"property":"og:image:width","content":"1200"}],["$","meta","15",{"property":"og:image:height","content":"630"}],["$","meta","16",{"property":"og:image:alt","content":"Arthur Buikis — Senior full-stack engineer. Ships systems that hold up."}],["$","meta","17",{"property":"og:type","content":"website"}],["$","meta","18",{"name":"twitter:card","content":"summary_large_image"}],["$","meta","19",{"name":"twitter:title","content":"Arthur Buikis"}],["$","meta","20",{"name":"twitter:description","content":"Senior full-stack engineer. Ships systems that hold up."}],["$","meta","21",{"name":"twitter:image","content":"https://arthur.buikis.com/opengraph-image?2757445c509e260e"}],["$","meta","22",{"name":"twitter:image:alt","content":"Arthur Buikis — Senior full-stack engineer. Ships systems that hold up."}],["$","meta","23",{"name":"twitter:image:type","content":"image/png"}],["$","meta","24",{"name":"twitter:image:width","content":"1200"}],["$","meta","25",{"name":"twitter:image:height","content":"630"}],["$","link","26",{"rel":"icon","href":"/favicon.ico","sizes":"any"}],["$","link","27",{"rel":"icon","href":"/favicon-16x16.png","type":"image/png","sizes":"16x16"}],["$","link","28",{"rel":"icon","href":"/favicon-32x32.png","type":"image/png","sizes":"32x32"}],["$","link","29",{"rel":"apple-touch-icon","href":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}],["$","$Ld","30",{}]]}]}]}],null]}],"isPartial":"$@e","staleTime":"$a","varyParams":null},{"rsc":["$","$1","c",{"children":[null,["$","$Lf",null,{"parallelRouterKey":"children","template":["$","$L10",null,{}]}]]}],"isPartial":"$@11","staleTime":"$a","varyParams":"$12"}],"isUpgradeableISRFallback":false,"a":"$@13","rootVaryParams":null,"needsRuntimeRequest":"$@14"}
+4:{}
+5:"$0:data:0:rsc:props:children:0:props:serverProvidedParams:params"
+8:null
+14:true
+a:300
+a:C
+13:0
+e:"$undefined"
+11:"$undefined"
+9:"$undefined"
