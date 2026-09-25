@@ -17,7 +17,7 @@ Success means: it looks striking in a screenshot at desktop, mobile, and floatin
 | Movement | Free steering, not grid-based. |
 | Camera | High 3/4 view that follows the head with soft lag. Camera never rotates (fixed yaw), so controls are screen-relative. |
 | Surfaces | Keep the floating window (command palette → "play snake") and the `/snake` page. |
-| Sound | Procedural Web Audio (no audio files), muted by default, toggle persisted. |
+| Sound | Sound effects generated with ElevenLabs (Sound Effects v2, via the ElevenLabs MCP), shipped as small audio files and played through Web Audio. Muted by default, toggle persisted. |
 | Leaderboard | Local top 10 in `localStorage` with 3-letter initials. No backend. |
 | Mouse steering | Yes, alongside keys and touch. |
 | Light/dark | Scene follows the site theme: light = golden-hour dunes, dark = moonlit night desert. |
@@ -49,7 +49,7 @@ components/snake/
   render/post.ts           # composer: bloom, output/tone mapping
   render/camera-rig.ts     # follow camera
   render/palettes.ts       # light (golden hour) / dark (moonlit) scene palettes
-  audio/sound.ts           # Web Audio synth: ambience + one-shot effects
+  audio/sound.ts           # Web Audio player: lazy-loads clips, loops + one-shots, mixing
   leaderboard.ts           # local top-10 storage (pure, unit-tested)
   leaderboard.spec.ts
   snake-canvas.tsx         # host (rewritten)
@@ -57,6 +57,7 @@ components/snake/
   snake-window-host.tsx    # kept, console panel removed
 app/snake/page.tsx          # kept, console panel removed
 lib/snake-bus.ts            # unchanged
+public/snake/sfx/*.mp3      # ElevenLabs-generated clips (see Sound)
 ```
 
 Deleted: `snake-engine.ts`, `snake-engine.spec.ts`, `snake-renderer.ts`, `snake-shader-crt.ts`, `snake-console.tsx`, `snake-types.ts`. Dependency `pixi.js` removed, `three` + `@types/three` added; `pnpm-lock.yaml` updated (CI uses `--frozen-lockfile`).
@@ -156,13 +157,31 @@ The scene follows the site theme (`next-themes`, `class="dark"` on `<html>`), re
 
 ## Sound
 
-`audio/sound.ts` builds everything with Web Audio, no asset files:
+### Assets (generated once, committed)
 
-- Ambience: filtered noise wind with slow gain/filter-cutoff drift.
-- Slither: band-passed noise whose gain follows snake speed (quiet hiss).
-- Eat: short two-oscillator pluck with a pitch that rises slightly with the combo (consecutive eats within 4 s). Golden: brighter arpeggio.
-- Death: low thump plus a noise burst.
-- **Muted by default.** A speaker toggle in the HUD (and the `m` key) unmutes; the choice persists in `localStorage` (`snake.sound`). The `AudioContext` is created on the first user gesture (browsers require it) and suspended when the game is paused, the window closes, or the tab is hidden. Master gain ramps to avoid clicks.
+Generated with the ElevenLabs Sound Effects v2 model (`eleven_text_to_sound_v2`) through the ElevenLabs MCP, then downloaded, trimmed, loudness-normalised (−16 LUFS for loops, −14 LUFS for one-shots) and encoded to mono MP3 at 96 kbps with `ffmpeg`. Committed under `public/snake/sfx/`. Target total ≤ 400 KB.
+
+| File | Kind | Prompt intent | Length |
+|---|---|---|---|
+| `wind-light.mp3` | loop | soft warm desert wind, gentle gusts, open dunes, golden hour | ~12 s |
+| `wind-night.mp3` | loop | cold quiet night desert wind, faint distant hiss, very calm | ~12 s |
+| `slither.mp3` | loop | a snake sliding smoothly over fine dry sand, continuous soft hiss | ~4 s |
+| `eat.mp3` | one-shot | soft juicy bite and a small sand puff, satisfying, short | ~0.6 s |
+| `golden.mp3` | one-shot | shimmering magical pickup, bright chime with a warm swell | ~1.2 s |
+| `death.mp3` | one-shot | heavy thud into sand, collapsing sand pouring, dust | ~1.5 s |
+| `sink.mp3` | one-shot | sand swallowing an object, low soft rumble | ~1 s |
+| `ui.mp3` | one-shot | tiny soft click for menus and initials | ~0.2 s |
+
+Loops are generated with the model's `loop: true` option. Each prompt gets 2–4 candidates; the best is picked by listening-free checks (no clipping, loop seam RMS jump < 1 dB, duration fits) and noted in the plan. Prompts, chosen take and the ElevenLabs flow link are recorded in `public/snake/sfx/README.md` so clips can be regenerated.
+
+### Playback (`audio/sound.ts`)
+
+- Web Audio graph: per-clip `AudioBufferSourceNode` → category gain (ambience / movement / effects) → master gain → destination.
+- Ambience: the wind loop for the current theme, with slow random gain drift; crossfades (1 s) when the theme changes.
+- Slither: looped, gain and `playbackRate` (0.9–1.2) follow snake speed; fades out when paused, idle, or dead.
+- Eat: `playbackRate` rises slightly with the combo (consecutive eats within 4 s, up to +30%) for a rising-pitch reward. Golden, death, sink and UI are plain one-shots with small random rate variation (±4%) so repeats don't sound identical.
+- **Muted by default.** A speaker toggle in the HUD (and the `m` key) unmutes; the choice persists in `localStorage` (`snake.sound`). Clips are fetched and decoded only after the first unmute, so muted players download nothing. The `AudioContext` is created on that user gesture (browsers require it) and suspended when the game is paused, the window closes, or the tab is hidden. Gains ramp over 50 ms to avoid clicks. With reduced motion, sound is unaffected.
+- Missing or undecodable files fail silently (the game never depends on audio).
 
 ## Leaderboard
 
@@ -190,4 +209,4 @@ In development builds only (`process.env.NODE_ENV !== 'production'`), `window.__
 
 ## Out of scope
 
-A trail that affects gameplay; a global/shared leaderboard (needs a backend); audio files or music tracks.
+A trail that affects gameplay; a global/shared leaderboard (needs a backend); a music track (ElevenLabs Music is available if wanted later).
