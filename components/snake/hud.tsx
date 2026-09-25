@@ -3,7 +3,7 @@
 import { Volume2, VolumeX } from 'lucide-react';
 import type { DeathCause, GameStatus } from './engine/types';
 import { InitialsEntry } from './initials-entry';
-import type { LeaderboardEntry } from './leaderboard';
+import { insertEntry, type LeaderboardEntry } from './leaderboard';
 
 export type HudPhase = 'none' | 'initials' | 'table';
 export type HudView = {
@@ -34,7 +34,7 @@ type Props = {
 export function Hud(props: Props) {
   const { view, muted, onToggleSound } = props;
   return (
-    <div className="pointer-events-none absolute inset-0 select-none font-mono">
+    <div className="@container pointer-events-none absolute inset-0 select-none font-mono">
       <div className={`absolute left-3 top-3 px-3 py-1.5 ${PLATE}`}>
         <div className={LABEL}>score</div>
         <div className={`text-[22px] font-bold leading-none ${ACCENT}`}>{view.score}</div>
@@ -68,7 +68,7 @@ export function Hud(props: Props) {
 // Sits high, below the corner boxes, so the snake and food below stay in view.
 function IdlePanel({ touch, entries }: Props) {
   return (
-    <div className="absolute inset-x-0 top-[68px] flex justify-center px-4">
+    <div className="absolute inset-x-0 top-[68px] flex justify-center px-4 @[760px]:justify-start @[760px]:px-3">
       <div className={`w-full max-w-[340px] px-4 py-3 text-center ${PLATE}`}>
         <div className={`text-[24px] font-bold leading-none tracking-[0.35em] ${ACCENT}`}>SNAKE</div>
         <div className="mt-2 text-[11px] leading-snug text-[#f5ead9]/85">
@@ -84,8 +84,14 @@ function IdlePanel({ touch, entries }: Props) {
 function GameOverPanel({ view, phase, entries, rank, touch, lastInitials, onSubmitInitials }: Props) {
   const cause = view.deathCause === 'self' ? 'bit your own tail' : 'hit the rocks';
   const record = entries.length === 0 || view.score > entries[0].score;
+  // While initials are entered, show where this run will land.
+  const provisional =
+    phase === 'initials'
+      ? insertEntry(entries, { initials: '···', score: view.score, length: view.length, date: Infinity })
+      : null;
+  // Anchored low: the camera frames the crash in the upper part of the view.
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/25 px-4">
+    <div className="absolute inset-0 flex items-end justify-center bg-black/15 px-4 pb-5">
       <div className={`w-full max-w-[380px] px-5 py-4 ${PLATE}`}>
         <div className="text-center text-[11px] uppercase tracking-[0.3em] text-[#f5ead9]/60">{cause}</div>
         <div className="mt-2 flex justify-center gap-6 text-center">
@@ -100,6 +106,9 @@ function GameOverPanel({ view, phase, entries, rank, touch, lastInitials, onSubm
               onSubmit={onSubmitInitials}
               title={record ? 'new high score — your initials' : 'top 10 — your initials'}
             />
+            {provisional && (
+              <Table entries={provisional.entries.slice(0, 5)} rank={provisional.rank} compact />
+            )}
           </div>
         ) : (
           <Table entries={entries} rank={rank} />

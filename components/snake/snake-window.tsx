@@ -125,7 +125,13 @@ export function SnakeWindow({
 
   return (
     <div
-      style={{ ...baseStyle, background: 'var(--surface)', border: '2px solid var(--border)' }}
+      style={{
+        ...baseStyle,
+        background: 'var(--surface)',
+        border: '2px solid var(--border)',
+        // Reads as a layer above the page rather than a hole cut into it.
+        boxShadow: isMobile ? undefined : '0 24px 60px -12px rgba(0, 0, 0, 0.45)',
+      }}
       className="flex flex-col font-mono"
       role="dialog"
       aria-label="snake"

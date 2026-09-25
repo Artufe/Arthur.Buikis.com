@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BODY_R } from '../engine/types';
-import { radiusProfile } from './snake-mesh';
+import { radiusProfile, VISUAL_R } from './snake-mesh';
 
 describe('snake radius profile', () => {
   it('has a slimmer neck, a full body and a tapered tail', () => {
-    expect(radiusProfile(0, 10)).toBeCloseTo(0.8 * BODY_R);
-    expect(radiusProfile(2, 10)).toBeCloseTo(BODY_R);
-    expect(radiusProfile(10, 10)).toBeCloseTo(0.18 * BODY_R);
+    expect(radiusProfile(0, 10)).toBeCloseTo(0.8 * VISUAL_R);
+    expect(radiusProfile(2, 10)).toBeCloseTo(VISUAL_R);
+    expect(radiusProfile(10, 10)).toBeCloseTo(0.18 * VISUAL_R);
   });
 
   it('only narrows along the tail', () => {

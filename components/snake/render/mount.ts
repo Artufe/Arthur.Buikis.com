@@ -146,6 +146,11 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
         if (arcAt(cur.carry, i) > cur.bodyLength) break;
         points.push(cur.path[i]);
       }
+      if (cur.status === 'idle') {
+        // At rest the snake lies in a fresh groove of its own body, tail to head.
+        trail.clear();
+        for (let i = points.length - 1; i >= 0; i--) trail.push(points[i].x, points[i].z, trailClock);
+      }
       const s = deathAt === null ? 0 : Math.min(1, (clock - deathAt) / SINK_SECONDS);
       snake.update(points, heading, dt, cur.speed, s * s * (3 - 2 * s), cur.status === 'playing');
       food.sync(cur.food, cur.time, clock);

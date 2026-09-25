@@ -49,7 +49,8 @@ float arenaUndulation(vec2 p) {
 float duneField(vec2 p) {
   float warp = fbm(p * 0.018);
   float phase = dot(p, vec2(0.82, 0.57)) * 0.085 + warp * 6.0;
-  float crest = pow(1.0 - abs(sin(phase)), 1.6);
+  // Rounded crests: a sharp ridge turns into a saw-tooth silhouette on the coarse far mesh.
+  float crest = pow(max(0.0, 0.5 + 0.5 * cos(2.0 * phase)), 1.5);
   return crest * 6.5 + fbm(p * 0.05) * 3.0;
 }
 float terrainHeight(vec2 p) {

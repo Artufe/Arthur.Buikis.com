@@ -2,9 +2,10 @@ import { PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three';
 import type { GameStatus, Vec2 } from '../engine/types';
 
 const PITCH = (48 * Math.PI) / 180;
-const LOOK_AHEAD = 2.5;
-const FOOD_PULL = 0.28; // share of the way the focus leans toward nearby food
-const FOOD_PULL_R = 16;
+const LOOK_AHEAD = 3.5;
+const FOOD_PULL = 0.38; // share of the way the focus leans toward nearby food
+const FOOD_PULL_R = 20;
+const CRASH_OFFSET = 4.5; // on game over the focus sits below the head, so the crash shows above the panel
 const MAX_FOCUS_R = 11;
 const FOLLOW_TIME = 0.35;
 const BLEND_TIME = 1.2;
@@ -51,7 +52,7 @@ export class CameraRig {
     const portrait = aspect < 0.8;
     this.camera.aspect = aspect;
     this.camera.fov = portrait ? 50 : 42;
-    this.dist = portrait ? 38 : 30;
+    this.dist = portrait ? 34 : 27;
     this.camera.updateProjectionMatrix();
   }
 
@@ -76,7 +77,7 @@ export class CameraRig {
     const want = status === 'idle' ? 0 : 1;
     this.blend = this.reduced ? want : Math.max(0, Math.min(1, this.blend + Math.sign(want - this.blend) * (dt / BLEND_TIME)));
 
-    const goal = playFocusGoal(head, heading);
+    const goal = status === 'gameover' ? { x: head.x, z: head.z + CRASH_OFFSET } : playFocusGoal(head, heading);
     // Lean toward the food so it tends to stay in frame instead of trailing off an edge.
     if (food && status === 'playing') {
       const d = Math.hypot(food.x - goal.x, food.z - goal.z);
@@ -88,11 +89,12 @@ export class CameraRig {
       this.fx = goal.x;
       this.fz = goal.z;
     } else {
-      this.fx = smoothDamp(this.fx, goal.x, this.vx, FOLLOW_TIME, dt);
-      this.fz = smoothDamp(this.fz, goal.z, this.vz, FOLLOW_TIME, dt);
+      const follow = status === 'gameover' ? FOLLOW_TIME * 0.5 : FOLLOW_TIME;
+      this.fx = smoothDamp(this.fx, goal.x, this.vx, follow, dt);
+      this.fz = smoothDamp(this.fz, goal.z, this.vz, follow, dt);
     }
 
-    const d = this.dist * (status === 'gameover' ? 1.12 : 1);
+    const d = this.dist * (status === 'gameover' ? 0.8 : 1);
     this.tmpPos.set(this.fx, d * Math.sin(PITCH), this.fz + d * Math.cos(PITCH));
     this.tmpLook.set(this.fx, 0, this.fz);
 
@@ -101,13 +103,14 @@ export class CameraRig {
     this.idleTime += dt;
     const swing = this.reduced ? 0 : Math.sin(this.idleTime * 0.12) * 0.2;
     const a = this.sunAzimuth + Math.PI / 2 + swing;
-    const idleDist = this.dist * 0.46;
-    this.idleLook.set(head.x, 0.3, head.z + 1.2);
-    this.idlePos.set(
-      this.idleLook.x + Math.cos(a) * idleDist,
-      idleDist * 0.42,
-      this.idleLook.z + Math.sin(a) * idleDist,
-    );
+    // The camera looks past the snake (pitch ≈ 9°), which puts the snake in the lower middle
+    // and the horizon about 30% down, leaving real sky for the sun or moon and the stars.
+    const idleDist = this.dist * 0.5;
+    const sx = head.x;
+    const sz = head.z + 1.2;
+    this.idlePos.set(sx + Math.cos(a) * idleDist, idleDist * 0.36, sz + Math.sin(a) * idleDist);
+    const beyond = idleDist * 1.27;
+    this.idleLook.set(sx - Math.cos(a) * beyond, 0, sz - Math.sin(a) * beyond);
 
     const t = this.blend * this.blend * (3 - 2 * this.blend);
     this.camera.position.lerpVectors(this.idlePos, this.tmpPos, t);

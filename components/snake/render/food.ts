@@ -27,7 +27,8 @@ function contactShadowTexture(): CanvasTexture {
   c.width = c.height = 64;
   const ctx = c.getContext('2d')!;
   const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0, 'rgba(255,255,255,0.75)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.3)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
@@ -45,7 +46,7 @@ export class FoodView {
   private readonly crownGeo = new CylinderGeometry(0.09, 0.12, 0.07, 12);
   private readonly gemGeo = new OctahedronGeometry(0.42, 0).scale(1, 1.3, 1);
   private readonly ringGeo = new TorusGeometry(0.62, 0.025, 8, 72);
-  private readonly shadowGeo = new PlaneGeometry(1.9, 1.9).rotateX(-Math.PI / 2);
+  private readonly shadowGeo = new PlaneGeometry(1.25, 1.25).rotateX(-Math.PI / 2);
   private readonly normalMat = new MeshPhysicalMaterial({
     color: '#c71f4f',
     emissive: '#ff2f5f',
@@ -57,11 +58,11 @@ export class FoodView {
     sheenColor: new Color('#ff9fb4'),
   });
   private readonly goldenMat = new MeshPhysicalMaterial({
-    color: '#ffab00',
-    metalness: 0.35,
-    roughness: 0.2,
-    emissive: '#ff9500',
-    emissiveIntensity: 1.8,
+    color: '#ff9a10',
+    metalness: 0,
+    roughness: 0.15,
+    emissive: '#ff7a00',
+    emissiveIntensity: 2.4,
     clearcoat: 1,
     flatShading: true,
   });
@@ -72,7 +73,7 @@ export class FoodView {
     color: 0x000000,
     alphaMap: this.shadowTex,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.22,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -2,
@@ -130,7 +131,7 @@ export class FoodView {
   setGlow(glow: number): void {
     this.glow = glow;
     this.normalMat.emissiveIntensity = 0.9 * glow;
-    this.goldenMat.emissiveIntensity = 1.8 * glow;
+    this.goldenMat.emissiveIntensity = 2.4 * glow;
   }
 
   setReducedMotion(on: boolean): void {

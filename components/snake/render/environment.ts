@@ -67,12 +67,12 @@ void main() {
     float lit = step(layer == 0 ? 0.972 : 0.955, s);
     float bright = layer == 0 ? 0.6 + 1.4 * fract(s * 37.0) : 0.35 + 0.5 * fract(s * 53.0);
     float twinkle = 0.75 + 0.25 * sin(uTime * (1.0 + 2.0 * fract(s * 11.0)) + s * 80.0);
-    stars += lit * bright * twinkle * smoothstep(0.22, 0.0, r);
+    stars += lit * bright * twinkle * (1.0 - smoothstep(0.0, 0.22, r));
   }
   // A faint band of milky light across the sky.
   vec3 bandAxis = normalize(vec3(0.35, 0.45, 0.82));
   float band = exp(-pow(dot(d, bandAxis) * 3.2, 2.0)) * (0.55 + 0.45 * hash31(floor(d * 60.0)));
-  float horizonFade = smoothstep(0.03, 0.3, h);
+  float horizonFade = smoothstep(0.0, 0.1, h);
   col += (vec3(1.2, 1.2, 1.35) * stars + vec3(0.05, 0.06, 0.1) * band) * horizonFade * uStars;
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
@@ -188,6 +188,7 @@ export function createEnvironment(scene: Scene, opts: { shadowSize: number }): E
   cam.far = 160;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.035;
+  sun.shadow.radius = 3;
   scene.add(sun, sun.target);
 
   const hemi = new HemisphereLight(0xffffff, 0x000000, 0.6);
@@ -227,7 +228,15 @@ export function createEnvironment(scene: Scene, opts: { shadowSize: number }): E
       skyUniforms.uZenith.value.copy(p.skyZenith);
       skyUniforms.uHorizon.value.copy(p.skyHorizon);
       skyUniforms.uSunColor.value.copy(p.sunColor);
-      skyUniforms.uSunDir.value.copy(p.sunDir);
+      // The disc is drawn where the idle shot (which looks 90° from the light, see CameraRig)
+      // can see it, low above the far dunes; the light itself keeps its direction.
+      const discAz = Math.atan2(p.sunDir.z, p.sunDir.x) - Math.PI / 2 + 0.32;
+      const discEl = (9.5 * Math.PI) / 180;
+      skyUniforms.uSunDir.value.set(
+        Math.cos(discAz) * Math.cos(discEl),
+        Math.sin(discEl),
+        Math.sin(discAz) * Math.cos(discEl),
+      );
       skyUniforms.uSunSize.value = p.sunSize;
       skyUniforms.uStars.value = p.stars;
       sun.color.copy(p.sunColor);

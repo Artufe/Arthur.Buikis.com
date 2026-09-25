@@ -10,7 +10,7 @@ import {
   type Texture,
 } from 'three';
 import type { Palette } from './palettes';
-import { NOISE_GLSL, TERRAIN_GLSL, TERRAIN_HALF } from './terrain-shape';
+import { DUNE_START, NOISE_GLSL, TERRAIN_GLSL, TERRAIN_HALF } from './terrain-shape';
 import { GROOVE_DEPTH, RIM_HEIGHT, TRAIL_HALF_EXTENT } from './trail-constants';
 
 /** Dense near the centre (≈0.14 units at 400 segments), coarse toward the horizon. */
@@ -131,7 +131,8 @@ vec2 windDir = normalize(vec2(0.82, 0.57));
 float ripplePhase = dot(vXZ, windDir) * 7.2 + fbm(vXZ * 0.33) * 6.0;
 float rippleAA = clamp(1.0 - fwidth(ripplePhase) * 0.4, 0.0, 1.0);
 float disturbed = clamp(groove * 1.6 + rim * 1.2, 0.0, 1.0);
-float rippleAmp = 0.045 * rippleAA * (1.0 - disturbed);
+float duneFade = 1.0 - 0.75 * smoothstep(${DUNE_START.toFixed(1)}, ${(DUNE_START + 20).toFixed(1)}, length(vXZ));
+float rippleAmp = 0.045 * rippleAA * (1.0 - disturbed) * duneFade * (0.55 + 0.9 * fbm(vXZ * 0.11));
 float dRipple = cos(ripplePhase) + 0.35 * cos(2.0 * ripplePhase);
 vec2 grad = windDir * dRipple * 7.2 * rippleAmp * 0.8;
 float te = uTrailTexel;
@@ -139,7 +140,7 @@ grad += 1.6 * vec2(
   trailH(vXZ + vec2(te, 0.0)) - trailH(vXZ - vec2(te, 0.0)),
   trailH(vXZ + vec2(0.0, te)) - trailH(vXZ - vec2(0.0, te))
 ) / (2.0 * te);
-grad += (vec2(vnoise(vXZ * 11.0), vnoise(vXZ * 11.0 + 31.7)) - 0.5) * 0.18 * rippleAA;
+grad += (vec2(vnoise(vXZ * 11.0), vnoise(vXZ * 11.0 + 31.7)) - 0.5) * 0.1 * rippleAA;
 vec3 sandN = normalize(normalize(vWN) + vec3(-grad.x, 0.0, -grad.y));
 normal = normalize((viewMatrix * vec4(sandN, 0.0)).xyz);
 `;

@@ -10,7 +10,7 @@ const SPARK_GOLDEN = new Color(2.6, 1.8, 0.5);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class Effects {
-  readonly flash = new PointLight(0xffffff, 0, 7, 2);
+  readonly flash = new PointLight(0xffffff, 0, 11, 2);
   private flashLevel = 0;
   private sprayCarry = 0;
   private wispCarry = 0;
@@ -179,27 +179,46 @@ export class Effects {
   impact(pos: Vector3): void {
     const scale = this.budget * (this.reduced ? 0.5 : 1);
     const gy = groundHeight(pos.x, pos.z);
-    for (let i = 0; i < Math.round(60 * scale); i++) {
+    for (let i = 0; i < Math.round(150 * scale); i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = rnd(2, 5.5);
+      const sp = rnd(2, 7);
       this.sand.emit({
         x: pos.x,
         y: gy + 0.2,
         z: pos.z,
         vx: Math.cos(a) * sp,
-        vy: rnd(2, 5),
+        vy: rnd(2.5, 6.5),
         vz: Math.sin(a) * sp,
-        life: rnd(0.7, 1.3),
-        size: rnd(0.12, 0.3),
-        alpha: 0.75,
+        life: rnd(0.8, 1.5),
+        size: rnd(0.16, 0.42),
+        alpha: 0.9,
         color: this.dust,
         gravity: 8,
-        drag: 1.4,
+        drag: 1.3,
+      });
+    }
+    // A low ring of sand rolling outward along the ground.
+    for (let i = 0; i < Math.round(48 * scale); i++) {
+      const a = (i / 48) * Math.PI * 2;
+      const sp = rnd(3.5, 5);
+      this.sand.emit({
+        x: pos.x,
+        y: gy + 0.1,
+        z: pos.z,
+        vx: Math.cos(a) * sp,
+        vy: rnd(0.3, 0.9),
+        vz: Math.sin(a) * sp,
+        life: rnd(0.9, 1.4),
+        size: rnd(0.3, 0.55),
+        alpha: 0.55,
+        grow: 1.2,
+        color: this.dust,
+        drag: 2.2,
       });
     }
     this.flash.color.set('#ffe2b8');
     this.flash.position.set(pos.x, gy + 1.2, pos.z);
-    this.flashLevel = 30;
+    this.flashLevel = 60;
   }
 
   /** Motes of light rising around the golden food. */

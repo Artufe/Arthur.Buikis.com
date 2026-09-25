@@ -18,10 +18,13 @@ const RADIAL = 14;
 const FLAT = 0.8; // cross-section height / width
 const SWAY = 0.07;
 
+/** Drawn girth. Wider than the collision radius so the snake holds the eye at play distance. */
+export const VISUAL_R = BODY_R * 1.3;
+
 export function radiusProfile(s: number, length: number): number {
   const neck = 0.8 + 0.2 * smoothstep(0, 0.7, s);
-  const tail = 1 - 0.82 * smoothstep(length * 0.5, length, s);
-  return BODY_R * neck * tail;
+  const tail = 1 - 0.82 * smoothstep(length * 0.35, length, s);
+  return VISUAL_R * neck * tail;
 }
 
 // vUv.x = arc length from the head (world units), vUv.y = angle around the body
@@ -30,11 +33,16 @@ const SCALE_GLSL = /* glsl */ `
 float around = fract(vUv.y);
 float top = 0.5 + 0.5 * sin(around * 6.2831853);
 vec3 skin = mix(uBelly, uBase, smoothstep(0.18, 0.5, top));
-float spine = abs(fract(around - 0.25 + 0.5) - 0.5);
-float dia = abs(fract(vUv.x * 2.1) - 0.5) * 0.85 + spine * 3.4;
-float dorsal = smoothstep(0.35, 0.65, top);
-skin = mix(skin, uDark, (1.0 - smoothstep(0.30, 0.35, dia)) * dorsal);
-skin = mix(skin, uAccent, (1.0 - smoothstep(0.17, 0.22, dia)) * dorsal);
+// Dark saddles across the back, edged in a warm accent; they read even at play distance.
+float band = abs(fract(vUv.x * 1.15) - 0.5);
+float dorsal = smoothstep(0.2, 0.6, top);
+float saddle = (1.0 - smoothstep(0.17, 0.23, band)) * dorsal;
+skin = mix(skin, uDark, saddle);
+float edge = (1.0 - smoothstep(0.0, 0.035, abs(band - 0.2))) * dorsal;
+skin = mix(skin, uAccent, edge * 0.85);
+// Pale line where the flank meets the belly.
+float flank = 1.0 - smoothstep(0.0, 0.05, abs(top - 0.22));
+skin = mix(skin, uBelly * 1.1, flank * 0.6);
 vec2 sc = vec2(vUv.x * 10.0, around * 28.0);
 sc.x += 0.5 * mod(floor(sc.y), 2.0);
 float cell = length(fract(sc) - 0.5);
@@ -70,10 +78,10 @@ function createBodyMaterial(rim: RimUniforms): MeshPhysicalMaterial {
   });
   m.defines = { USE_UV: '' };
   m.onBeforeCompile = (shader) => {
-    shader.uniforms.uBase = { value: new Color('#1e6b57') };
-    shader.uniforms.uDark = { value: new Color('#0c3a31') };
-    shader.uniforms.uBelly = { value: new Color('#e2cf96') };
-    shader.uniforms.uAccent = { value: new Color('#d8a23c') };
+    shader.uniforms.uBase = { value: new Color('#4c9a3f') };
+    shader.uniforms.uDark = { value: new Color('#173d24') };
+    shader.uniforms.uBelly = { value: new Color('#ecdca6') };
+    shader.uniforms.uAccent = { value: new Color('#e8b54a') };
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uBase;\nuniform vec3 uDark;\nuniform vec3 uBelly;\nuniform vec3 uAccent;')
       .replace('#include <color_fragment>', `#include <color_fragment>\n${SCALE_GLSL}`);
@@ -131,7 +139,7 @@ export class SnakeMesh {
     body.frustumCulled = false;
 
     const headMat = new MeshPhysicalMaterial({
-      color: '#1f6a55',
+      color: '#3f8636',
       roughness: 0.5,
       clearcoat: 0.2,
       clearcoatRoughness: 0.45,
@@ -142,11 +150,11 @@ export class SnakeMesh {
     const headGeo = new SphereGeometry(1, 32, 20);
     // Wedge head: a wide skull behind a narrower, flatter snout.
     const skull = new Mesh(headGeo, headMat);
-    skull.scale.set(0.5, 0.3, 0.44);
+    skull.scale.set(0.52, 0.29, 0.46);
     skull.castShadow = true;
     const snout = new Mesh(headGeo, headMat);
-    snout.scale.set(0.34, 0.2, 0.28);
-    snout.position.set(0.32, -0.04, 0);
+    snout.scale.set(0.42, 0.22, 0.33);
+    snout.position.set(0.22, -0.03, 0);
     snout.castShadow = true;
     const eyeGeo = new SphereGeometry(0.085, 16, 12);
     const eyeMat = new MeshPhysicalMaterial({
@@ -181,6 +189,7 @@ export class SnakeMesh {
     }
     this.tongue.position.set(0.55, -0.02, 0);
     this.head.add(skull, snout, this.tongue);
+    this.head.scale.setScalar(VISUAL_R / BODY_R);
     this.group.add(body, this.head);
     this.disposables.push(this.geometry, bodyMat, headMat, headGeo, eyeGeo, eyeMat, pupilGeo, pupilMat, tongueMat, stemGeo, forkGeo);
   }
@@ -242,7 +251,7 @@ export class SnakeMesh {
     const hp = points[0];
     this.head.position.set(
       hp.x + Math.cos(heading) * 0.1,
-      groundHeight(hp.x, hp.z) + 0.26 - drop * 1.3,
+      groundHeight(hp.x, hp.z) + 0.3 - drop * 1.3,
       hp.z + Math.sin(heading) * 0.1,
     );
     this.head.rotation.set(0, -heading, 0);

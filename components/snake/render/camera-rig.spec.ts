@@ -4,7 +4,7 @@ import { playFocusGoal, smoothDamp } from './camera-rig';
 describe('camera rig helpers', () => {
   it('looks ahead of the head', () => {
     const g = playFocusGoal({ x: 0, z: 0 }, 0);
-    expect(g.x).toBeCloseTo(2.5);
+    expect(g.x).toBeCloseTo(3.5);
     expect(g.z).toBeCloseTo(0);
   });
 
