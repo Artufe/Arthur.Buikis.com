@@ -17,6 +17,10 @@ Success means: it looks striking in a screenshot at desktop, mobile, and floatin
 | Movement | Free steering, not grid-based. |
 | Camera | High 3/4 view that follows the head with soft lag. Camera never rotates (fixed yaw), so controls are screen-relative. |
 | Surfaces | Keep the floating window (command palette → "play snake") and the `/snake` page. |
+| Sound | Procedural Web Audio (no audio files), muted by default, toggle persisted. |
+| Leaderboard | Local top 10 in `localStorage` with 3-letter initials. No backend. |
+| Mouse steering | Yes, alongside keys and touch. |
+| Light/dark | Scene follows the site theme: light = golden-hour dunes, dark = moonlit night desert. |
 
 ## Architecture
 
@@ -44,6 +48,10 @@ components/snake/
   render/environment.ts    # sky, sun, fog, rocks ring, lights
   render/post.ts           # composer: bloom, output/tone mapping
   render/camera-rig.ts     # follow camera
+  render/palettes.ts       # light (golden hour) / dark (moonlit) scene palettes
+  audio/sound.ts           # Web Audio synth: ambience + one-shot effects
+  leaderboard.ts           # local top-10 storage (pure, unit-tested)
+  leaderboard.spec.ts
   snake-canvas.tsx         # host (rewritten)
   snake-window.tsx         # kept (drag/Escape/expand)
   snake-window-host.tsx    # kept, console panel removed
@@ -132,29 +140,54 @@ No camera lag (snaps), no screen shake, no ambient wisps or sand spray, food doe
 
 ## Host and UI
 
-- Controls: arrows / WASD (8-way combos) set the target heading; space pauses; `r` restarts; touch drag on the canvas sets heading from the drag vector. Keys are ignored while typing into inputs (as now). Escape closes the floating window (as now).
+- Controls: arrows / WASD (8-way combos) set the target heading; space pauses; `r` restarts; touch drag on the canvas sets heading from the drag vector; **mouse steering**: while the pointer is over the canvas and has moved in the last 1.5 s, the target heading points from the head toward the pointer's ray hit on the ground plane (y = 0). Any key press hands control back to the keyboard until the mouse moves again. Clicking the canvas starts from idle. Keys are ignored while typing into inputs (as now). Escape closes the floating window (as now).
 - HUD overlay (DOM, not WebGL): score top-left, best top-right, "paused" and game-over panels. Game-over shows score, length, best, and "press r to restart" / "tap to restart". Styling uses the site's mono font and warm tokens but must stay legible over bright sand (text shadow or backing plate).
 - Best score persists in `localStorage` (`snake.best`, kept for continuity).
 - The canvas fills its container: 560 × 640 floating window (the canvas takes the full body; the console panel is removed), full viewport area on `/snake`. It resizes with the container.
 - The idle/start state shows the scene with a "press any arrow to start" prompt, so the first screenshot is the attractive scene, not an instant action.
 
+## Light / dark
+
+The scene follows the site theme (`next-themes`, `class="dark"` on `<html>`), read at mount and live-updated via a `MutationObserver` on the class attribute. `render/palettes.ts` defines both as data (sky colours, sun/moon colour, elevation and intensity, hemisphere colours, fog colour/density, sand albedo tint, groove tint, food emissive, bloom strength); `RendererHandle.setPalette()` swaps them with a 0.6 s crossfade (instant with reduced motion).
+
+- **Light — golden hour**: warm peach horizon, low sun (~12°), long warm shadows, amber sand.
+- **Dark — moonlit night**: deep indigo sky with a star field (points on the sky dome) and a pale moon, cool blue-silver key light with soft shadows, sand desaturated toward cool grey-beige. The grooves read by moonlight edge highlights; food glows more strongly and bloom is slightly higher so the fruit is the brightest thing in the scene.
+- HUD tokens use the site's `--accent` in both modes.
+
+## Sound
+
+`audio/sound.ts` builds everything with Web Audio, no asset files:
+
+- Ambience: filtered noise wind with slow gain/filter-cutoff drift.
+- Slither: band-passed noise whose gain follows snake speed (quiet hiss).
+- Eat: short two-oscillator pluck with a pitch that rises slightly with the combo (consecutive eats within 4 s). Golden: brighter arpeggio.
+- Death: low thump plus a noise burst.
+- **Muted by default.** A speaker toggle in the HUD (and the `m` key) unmutes; the choice persists in `localStorage` (`snake.sound`). The `AudioContext` is created on the first user gesture (browsers require it) and suspended when the game is paused, the window closes, or the tab is hidden. Master gain ramps to avoid clicks.
+
+## Leaderboard
+
+`leaderboard.ts` is a pure module over a storage interface (so it is unit-tested without the DOM): `load()`, `qualifies(score)`, `insert({ initials, score, length, date })`, keeping the top 10 sorted by score (ties: earlier date first). Stored under `snake.leaderboard` as versioned JSON; corrupt or unknown data resets to empty. `snake.best` stays in sync (it is the top entry's score).
+
+- On game over, if the score qualifies, the game-over panel asks for 3 initials (A–Z, keyboard or on-screen letter pickers on touch; defaults to the last-used initials) before showing the table. Keyboard shortcuts for steering/restart are suspended while entering initials.
+- The game-over panel shows the top 10 with the new entry highlighted; the idle screen shows the top 3.
+
 ## Dev test hook
 
-In development builds only (`process.env.NODE_ENV !== 'production'`), `window.__snake` exposes `setScene(name)` and `freeze(bool)` for screenshotting. Scenes: `idle`, `mid-run` (long snake curving, fresh groove behind it, food visible), `trail-fade` (groove visibly at several ages), `golden` (golden food active), `death` (mid dust cloud), `gameover`. Built by constructing engine states directly and advancing the renderer's clock, so shots are deterministic.
+In development builds only (`process.env.NODE_ENV !== 'production'`), `window.__snake` exposes `setScene(name)` and `freeze(bool)` for screenshotting. Scenes: `idle`, `mid-run` (long snake curving, fresh groove behind it, food visible), `trail-fade` (groove visibly at several ages), `golden` (golden food active), `death` (mid dust cloud), `gameover` (with a populated leaderboard and initials entry). `setTheme('light' | 'dark')` switches the palette instantly for captures. Built by constructing engine states directly and advancing the renderer's clock, so shots are deterministic.
 
 ## Testing
 
-- **Unit (vitest)**: steering rotates toward target at the capped rate and takes the shortest way; reversal does not stall; path sampling respects spacing and trims to length; growth on eat; wall death; self-collision ignores the neck but triggers on a loop; golden food expiry; pause freezes time; restart keeps best; same seed + inputs → same run.
+- **Unit (vitest)**: steering rotates toward target at the capped rate and takes the shortest way; reversal does not stall; path sampling respects spacing and trims to length; growth on eat; wall death; self-collision ignores the neck but triggers on a loop; golden food expiry; pause freezes time; restart keeps best; same seed + inputs → same run; pointer steering maps a ground point to the right heading; leaderboard keeps top 10 sorted, handles ties, rejects non-qualifying scores, recovers from corrupt storage.
 - **E2E (playwright)**: existing tests updated — window opens from the bus, Escape closes, expand routes to `/snake`, `/snake` mounts a canvas with a WebGL context, best score persists.
 - `pnpm typecheck`, `pnpm test`, `pnpm build` all pass (static export unaffected: the renderer is client-only and dynamically imported).
 
 ## Visual critic loop
 
-1. **Checkpoint**: when the full visual build is in (all sections above implemented), a capture script (Playwright, headed-quality WebGL in Chromium) loads the dev server and captures each dev-hook scene at 1440×900 (`/snake`), 390×844 (mobile `/snake`), and the floating window at 1440×900 on the home page.
+1. **Checkpoint**: when the full visual build is in (all sections above implemented), a capture script (Playwright, headed-quality WebGL in Chromium) loads the dev server and captures each dev-hook scene at 1440×900 (`/snake`), 390×844 (mobile `/snake`), and the floating window at 1440×900 on the home page — in both light and dark themes.
 2. **Critique**: a fresh subagent with no access to the code gets the brief (this Goal section), the screenshots, and a rubric: composition & framing, lighting & mood, sand material & trail groove readability (is "lingers → shrinks → gone" legible?), snake quality, food & effects, HUD legibility, cohesion with the site, and artifacts (aliasing, shadow acne, banding, seams, clipping). It returns issues ranked by severity (major / minor / nit) with the screenshot each applies to, and an overall 1–10 score.
 3. **Iterate**: fix all major and the most valuable minor issues, re-capture, re-critique with a fresh critic (which sees the previous report, to check the fixes). Stop after 3 rounds, or earlier when there are no major issues and the score is 8 or higher.
 4. Before/after screenshots and the critic reports are kept in the PR description; the images themselves are not committed.
 
 ## Out of scope
 
-Sound; a leaderboard; mouse steering; a trail that affects gameplay; theming the scene by site light/dark mode (the desert has its own palette).
+A trail that affects gameplay; a global/shared leaderboard (needs a backend); audio files or music tracks.
