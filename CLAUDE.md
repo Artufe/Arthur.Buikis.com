@@ -1,6 +1,6 @@
 # Arts-site
 
-Personal site for Arthur Buikis — Next.js 15 (App Router) + Tailwind v4 + MDX, statically exported to GitHub Pages on every push to `master`.
+Personal site for Arthur Buikis — Next.js 16 (App Router, Turbopack) + Tailwind v4 + MDX, statically exported to GitHub Pages on every push to `master`.
 
 ## Commands
 
@@ -14,7 +14,7 @@ pnpm test:e2e       # playwright (tests/e2e) — auto-starts `pnpm dev` unless :
 
 There is no lint script (no ESLint config in the repo) and no `start` script (`next start` doesn't work with `output: 'export'`; use `npx serve out` to preview a build).
 
-**Use pnpm.** `pnpm-lock.yaml` is the only lockfile (`package-lock.json` is gitignored). CI pins **pnpm 9** and **Node 20** with `--frozen-lockfile`. If your local pnpm is newer, check that it doesn't rewrite the lockfile format before committing, and don't commit a locally generated `pnpm-workspace.yaml`.
+**Use pnpm.** `pnpm-lock.yaml` is the only lockfile (`package-lock.json` is gitignored). CI pins **pnpm 9** and **Node 22** with `--frozen-lockfile` (vitest 5 and jsdom 30 need Node ≥22). If your local pnpm is newer, check that it doesn't rewrite the lockfile format before committing, and don't commit a locally generated `pnpm-workspace.yaml`. When local pnpm is 11+, run things through `npx pnpm@9 …`: pnpm 11 re-installs before every `pnpm <script>` (and aborts with no TTY), pnpm 9 refuses to run while pnpm 11's `pnpm-workspace.yaml` is present, and a `node_modules` linked by one major must be deleted before the other can install.
 
 ## Layout
 
@@ -23,7 +23,7 @@ app/            Routes: / (page.tsx), about/, building/, contact/, cv/, work/[sl
                 subscribe/, snake/,
                 plus sitemap.ts, robots.ts, llms.txt/, llms-full.txt/, opengraph-image.tsx
 components/     Page sections + global chrome; ui/ (Input, Textarea), mdx/ (MDX overrides),
-                snake/ (PixiJS snake game)
+                snake/ (three.js 3D snake game)
 content/        site.ts, cv.ts, about.ts (typed data) + work/*.mdx, building/*.mdx
 lib/            Pure helpers: commands.ts (palette commands), fuzzy.ts, utils.ts (cn),
                 and window-event buses: palette-bus, plasma-bus, snake-bus, ide-bus
@@ -51,7 +51,7 @@ Direct `git push origin master` is blocked by the harness ("bypasses pull reques
 Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav`, `Footer`, `SnakeWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
 
 - **Command palette** (`components/command-palette*.tsx`, commands in `lib/commands.ts`) — opens on `/` or `Ctrl/⌘+K`. The lazy wrapper listens for the keys and idle-prefetches the real palette.
-- **Snake** (`components/snake/`) — floating window opened via the palette (`snake-bus`), expandable to `/snake`. Engine is pure and unit-tested (`snake-engine.spec.ts`).
+- **Snake** (`components/snake/`) — floating window opened via the palette (`snake-bus`), expandable to `/snake`. Engine (`engine/`) is pure and unit-tested; specs sit next to the code they cover.
 - **IDE overlay** (`components/ide-overlay.tsx`) — Zed-style "view source" easter egg built from `content/*` data. Opened by the header "open in zed" button, the footer `$EDITOR` link, or the palette (`ide-bus`).
 - **Reveal** — elements with a bare `reveal` class start at opacity 0. `RevealObserver` adds `vis` on intersection (including nodes added by client navigation); `ScrollReveal` wraps sections on the home page.
 
@@ -103,8 +103,11 @@ Honored in several places:
 
 ## Gotchas
 
-- **Multiple lockfiles warning.** Next infers workspace root as `~/` because of a parent `pnpm-lock.yaml`. Harmless; ignore unless setting `outputFileTracingRoot`.
+- **Parent lockfile.** There's a stray `~/pnpm-lock.yaml` on this machine. Next 15 warned about it; Next 16 is silent. Only matters if you set `outputFileTracingRoot` / `turbopack.root`.
 - **`scripts/dev.mjs` exists for a reason** — Next 15 was picking up `NODE_ENV=production` via env layering in this user's shell. Don't replace `pnpm dev` with raw `next dev` without testing.
+- **`agentRules: false` in `next.config.mjs` is deliberate.** Next 16.3+ otherwise appends a managed block to this file whenever `next dev` runs under an AI agent. Version-matched Next docs ship in `node_modules/next/dist/docs/`; check them before assuming Next 15 APIs.
+- **`data-scroll-behavior="smooth"` on `<html>`** (in `app/layout.tsx`) keeps route changes jumping to the top instead of smooth-scrolling, since `globals.css` sets `scroll-behavior: smooth`. Next 16 only suppresses smooth scroll during navigation when that attribute is present.
+- **TypeScript 7** (native `tsgo`) is the compiler. `tsc` and Next's build type-check both run on it. The `next` language-service plugin in `tsconfig.json` may not load in editors using TS 7's native language server; if editor-only Next hints go missing, that's why.
 - **No request-time data fetching.** Static export means everything resolves at build time (the `llms-full.txt` route reads MDX from disk during build).
 - **MDX `meta` exports are typed `any`** (`mdx.d.ts`). The consumer declares its own shape (`WorkModule` in `app/work/[slug]/page.tsx`), so keep it in sync with the frontmatter-style `meta` objects.
 

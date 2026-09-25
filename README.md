@@ -4,13 +4,13 @@ Personal website — engineering portfolio, case studies, CV, and what I'm curre
 
 ## Stack
 
-- **Next.js 15** (App Router, fully static export)
+- **Next.js 16** (App Router, Turbopack, fully static export)
 - **React 19**, TypeScript strict
 - **Tailwind CSS v4** + CSS custom-property design tokens (`app/globals.css`)
 - **MDX** for case studies (`content/work/*.mdx`) and the building page
 - **next-themes** for light/dark persistence
 - **Formspree** for the contact form (plain HTML POST, no backend)
-- A WebGL plasma hero (`public/hero-shader.js`, see [`docs/hero-shader.md`](docs/hero-shader.md)) and a PixiJS snake game easter egg
+- A WebGL plasma hero (`public/hero-shader.js`, see [`docs/hero-shader.md`](docs/hero-shader.md)) and a three.js 3D snake game easter egg
 
 ## Local dev
 

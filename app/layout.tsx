@@ -106,7 +106,7 @@ const websiteLd = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className="min-h-screen">
         <script
           type="application/ld+json"
