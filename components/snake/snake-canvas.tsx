@@ -1,18 +1,31 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { applyInput, createInitialState, step } from './snake-engine';
-import type { RendererHandle } from './snake-renderer';
-import type { Cell, ConsoleLine, Direction, GameState } from './snake-types';
-
-type Props = {
-  variant: 'window' | 'page';
-  onConsoleChange?: (lines: ConsoleLine[]) => void;
-};
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { comboRate, SnakeSound, SOUND_KEY } from './audio/sound';
+import { applyInput, createInitialState, step } from './engine/engine';
+import { headingFromKeys, headingToward, type DirKeys } from './engine/math';
+import { SIM_DT, type EngineEvent, type GameState } from './engine/types';
+import { Hud, WebGLFallback, type HudPhase, type HudView } from './hud';
+import {
+  insertEntry,
+  loadLeaderboard,
+  qualifies,
+  readNumber,
+  readString,
+  safeStorage,
+  saveLeaderboard,
+  writeString,
+  type LeaderboardEntry,
+} from './leaderboard';
+import type { RendererHandle, Theme } from './render/mount';
 
 const BEST_KEY = 'snake.best';
+const INITIALS_KEY = 'snake.initials';
+const MOUSE_IDLE_MS = 1500;
+const DRAG_START_PX = 14;
+const TAP_MS = 300;
 
-const KEY_TO_DIR: Record<string, Direction | undefined> = {
+const KEY_DIR: Record<string, keyof DirKeys | undefined> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
   ArrowLeft: 'left',
@@ -27,317 +40,406 @@ const KEY_TO_DIR: Record<string, Direction | undefined> = {
   D: 'right',
 };
 
-function readBest(): number {
-  if (typeof window === 'undefined') return 0;
-  try {
-    const v = window.localStorage.getItem(BEST_KEY);
-    const n = v ? parseInt(v, 10) : 0;
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
+function readTheme(): Theme {
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
-function writeBest(n: number) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(n));
-  } catch {}
+function viewOf(s: GameState): HudView {
+  return {
+    status: s.status,
+    score: s.score,
+    best: s.best,
+    length: Math.round(s.bodyLength * 10) / 10,
+    deathCause: s.deathCause,
+  };
 }
 
-function getCssColor(name: string, fallback: string): number {
-  if (typeof window === 'undefined') return parseInt(fallback.slice(1), 16);
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-  const hex = v.startsWith('#') ? v.slice(1) : v;
-  const n = parseInt(hex, 16);
-  return Number.isFinite(n) ? n : parseInt(fallback.slice(1), 16);
+function sameView(a: HudView | null, b: HudView): boolean {
+  return (
+    !!a &&
+    a.status === b.status &&
+    a.score === b.score &&
+    a.best === b.best &&
+    a.length === b.length &&
+    a.deathCause === b.deathCause
+  );
 }
 
-export function SnakeCanvas({ variant, onConsoleChange }: Props) {
+export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<GameState | null>(null);
   const handleRef = useRef<RendererHandle | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const reducedMotionRef = useRef(false);
-  const prevTailRef = useRef<Cell | null>(null);
+  const soundRef = useRef<SnakeSound | null>(null);
+  const stateRef = useRef<GameState | null>(null);
+  const prevRef = useRef<GameState | null>(null);
+  const accRef = useRef(0);
+  const frozenRef = useRef(false);
+  const phaseRef = useRef<HudPhase>('none');
+  const viewRef = useRef<HudView | null>(null);
+  const keysRef = useRef<DirKeys>({ up: false, down: false, left: false, right: false });
+  const mouseRef = useRef({ x: 0, y: 0, at: -Infinity, active: false });
+  const wantSoundRef = useRef(false);
+
+  const [view, setView] = useState<HudView>({ status: 'idle', score: 0, best: 0, length: 4, deathCause: null });
+  const [phase, setPhaseState] = useState<HudPhase>('none');
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [rank, setRank] = useState(-1);
+  const [lastInitials, setLastInitials] = useState('');
+  const [muted, setMuted] = useState(true);
+  const [touch, setTouch] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [status, setStatus] = useState<GameState['status']>('idle');
-  const [score, setScore] = useState(0);
-  const [best, setBest] = useState(0);
-  const [comboCount, setComboCount] = useState(0);
-  const [bestCombo, setBestCombo] = useState(0);
-  const [maxLength, setMaxLength] = useState(0);
+  const [failed, setFailed] = useState(false);
 
-  const gridCount = variant === 'page' ? 28 : 22;
-  const cellSize = variant === 'page' ? 22 : 20;
+  const setPhase = useCallback((p: HudPhase) => {
+    phaseRef.current = p;
+    setPhaseState(p);
+  }, []);
 
+  const syncView = useCallback((s: GameState) => {
+    const next = viewOf(s);
+    if (sameView(viewRef.current, next)) return;
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  const onEngineEvents = useCallback(
+    (events: EngineEvent[], s: GameState) => {
+      const sound = soundRef.current;
+      for (const e of events) {
+        if (e.type === 'eat') sound?.play(e.food.kind === 'golden' ? 'golden' : 'eat', comboRate(e.combo));
+        if (e.type === 'death') {
+          sound?.play('death');
+          window.setTimeout(() => soundRef.current?.play('sink'), 250);
+          const store = safeStorage();
+          writeString(store, BEST_KEY, String(Math.max(readNumber(store, BEST_KEY), s.score)));
+          const table = loadLeaderboard(store);
+          setEntries(table);
+          setRank(-1);
+          setPhase(qualifies(table, s.score) ? 'initials' : 'table');
+        }
+      }
+    },
+    [setPhase],
+  );
+
+  const restart = useCallback(() => {
+    const s = stateRef.current;
+    if (!s) return;
+    const best = Math.max(s.best, readNumber(safeStorage(), BEST_KEY));
+    const next = applyInput({ ...s, best }, { type: 'restart' });
+    stateRef.current = next;
+    prevRef.current = next;
+    accRef.current = 0;
+    handleRef.current?.reset(next);
+    setPhase('none');
+    setRank(-1);
+    syncView(next);
+    soundRef.current?.play('ui');
+  }, [setPhase, syncView]);
+
+  const submitInitials = useCallback(
+    (initials: string) => {
+      const s = stateRef.current;
+      if (!s) return;
+      const store = safeStorage();
+      const result = insertEntry(loadLeaderboard(store), {
+        initials,
+        score: s.score,
+        length: Math.round(s.bodyLength * 10) / 10,
+        date: Date.now(),
+      });
+      saveLeaderboard(store, result.entries);
+      writeString(store, INITIALS_KEY, initials);
+      setLastInitials(initials);
+      setEntries(result.entries);
+      setRank(result.rank);
+      setPhase('table');
+      soundRef.current?.play('ui');
+    },
+    [setPhase],
+  );
+
+  // Must run inside a user gesture (click / key): browsers only start audio there.
+  const toggleSound = useCallback(() => {
+    const want = !wantSoundRef.current;
+    wantSoundRef.current = want;
+    writeString(safeStorage(), SOUND_KEY, want ? 'on' : 'off');
+    setMuted(!want);
+    void soundRef.current?.setMuted(!want);
+  }, []);
+
+  const unlockSound = useCallback(() => {
+    const sound = soundRef.current;
+    if (sound && wantSoundRef.current && sound.isMuted()) void sound.setMuted(false);
+  }, []);
+
+  const togglePause = useCallback(() => {
+    const s = stateRef.current;
+    if (!s) return;
+    const next = applyInput(s, { type: 'pause' });
+    stateRef.current = next;
+    if (next.status === 'paused') soundRef.current?.suspend();
+    else soundRef.current?.resume();
+  }, []);
+
+  // Renderer, sound and the game loop.
   useEffect(() => {
-    let cancelled = false;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let cancelled = false;
+    let raf = 0;
+    let resizeObserver: ResizeObserver | null = null;
+    let themeObserver: MutationObserver | null = null;
+
+    const store = safeStorage();
+    const theme = readTheme();
+    const sound = new SnakeSound(theme);
+    soundRef.current = sound;
+    wantSoundRef.current = readString(store, SOUND_KEY) === 'on';
+    setMuted(!wantSoundRef.current);
+    setTouch(window.matchMedia('(pointer: coarse)').matches);
+    setLastInitials(readString(store, INITIALS_KEY) ?? '');
+    setEntries(loadLeaderboard(store));
+    const initial = createInitialState({ seed: Math.floor(Math.random() * 0x7fffffff), best: readNumber(store, BEST_KEY) });
+    stateRef.current = initial;
+    prevRef.current = initial;
+    syncView(initial);
 
     (async () => {
-      const { mount } = await import('./snake-renderer');
-      if (cancelled || !canvasRef.current) return;
-      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      reducedMotionRef.current = reduced;
-      const accentHex = getCssColor('--accent', '#FFB84D');
-      const handle = await mount(canvas, {
-        gridCount,
-        cellSize,
-        reducedMotion: reduced,
-        accentHex,
-        panicHex: 0xff5050,
-        bgHex: 0x0a0a0a,
-      });
+      let handle: RendererHandle;
+      try {
+        const { mount } = await import('./render/mount');
+        if (cancelled) return;
+        handle = mount(canvas, {
+          theme,
+          reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+        });
+      } catch {
+        if (!cancelled) setFailed(true);
+        return;
+      }
       if (cancelled) {
         handle.dispose();
         return;
       }
       handleRef.current = handle;
-
-      const now = performance.now();
-      const initial = createInitialState({
-        gridCount,
-        seed: Math.floor(Math.random() * 0x7fffffff),
-        now,
-        best: readBest(),
+      const rect = wrap.getBoundingClientRect();
+      handle.resize(rect.width, rect.height);
+      resizeObserver = new ResizeObserver(([entry]) => handle.resize(entry.contentRect.width, entry.contentRect.height));
+      resizeObserver.observe(wrap);
+      themeObserver = new MutationObserver(() => {
+        const t = readTheme();
+        handle.setTheme(t);
+        soundRef.current?.setTheme(t);
       });
-      stateRef.current = initial;
-      prevTailRef.current = initial.snake[initial.snake.length - 1];
-      onConsoleChange?.(initial.consoleLines);
-      setStatus(initial.status);
-      setScore(initial.score);
-      setBest(initial.best);
-      setComboCount(initial.comboCount);
-      setBestCombo(initial.bestCombo);
-      setMaxLength(initial.maxLength);
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
       setMounted(true);
 
-      let lastFrame = now;
-      let acc = 0;
-      const loop = () => {
-        if (!stateRef.current || !handleRef.current) return;
-        const t = performance.now();
-        const dt = t - lastFrame;
-        lastFrame = t;
-        // Only advance the accumulator while playing. Otherwise gameover/paused time would
-        // pile up and on resume the step loop would fire many ticks at once — restart used
-        // to teleport the snake straight into a wall.
-        if (stateRef.current.status === 'playing') acc += dt;
-        else acc = 0;
-        const tickInterval = 1000 / stateRef.current.tickRate;
-        while (acc >= tickInterval && stateRef.current.status === 'playing') {
-          const before = stateRef.current;
-          const after = step(before, before.lastTickAt + tickInterval);
-          const ate = after.score !== before.score || after.snake.length !== before.snake.length;
-          // The eaten pellet is the one whose cell matches the new head's destination.
-          const newHead = after.snake[0];
-          const eaten = ate ? before.pellets.find((p) => p.cell.x === newHead.x && p.cell.y === newHead.y) : null;
-          if (ate && eaten) {
-            // Light shake on every eat — universal "thump" feedback.
-            // Heavier on claude (the rare big-payoff pellet).
-            const intensity = eaten.kind === 'claude' ? 6 : 3;
-            handleRef.current.triggerShake(intensity, 180);
-            if (eaten.kind === 'claude') handleRef.current.triggerShockwave(eaten.cell);
-            if (eaten.kind === 'async') handleRef.current.flashGlitch();
+      let last = performance.now();
+      const loop = (now: number) => {
+        const dt = Math.min(0.1, (now - last) / 1000);
+        last = now;
+        let s = stateRef.current!;
+        const frozen = frozenRef.current;
+        if (!frozen) {
+          const m = mouseRef.current;
+          if (m.active && s.status === 'playing' && now - m.at < MOUSE_IDLE_MS) {
+            const g = handle.screenToGround(m.x, m.y);
+            if (g && (g.x - s.head.x) ** 2 + (g.z - s.head.z) ** 2 > 0.36) {
+              const h = headingToward(s.head, g);
+              if (h !== null) s = applyInput(s, { type: 'steer', heading: h });
+            }
           }
-          if (after.status === 'gameover' && before.status === 'playing') {
-            handleRef.current.flashGlitch();
-            handleRef.current.triggerShake(12, 400);
-            handleRef.current.triggerDeathCascade(before.snake);
-            if (after.score > readBest()) writeBest(after.score);
+          accRef.current = s.status === 'playing' ? accRef.current + dt : 0;
+          let prev = prevRef.current ?? s;
+          while (accRef.current >= SIM_DT) {
+            prev = s;
+            const r = step(s, SIM_DT);
+            s = r.state;
+            accRef.current -= SIM_DT;
+            if (r.events.length > 0) {
+              handle.handleEvents(r.events, s);
+              onEngineEvents(r.events, s);
+            }
           }
-          if (after.consoleLines !== before.consoleLines) {
-            onConsoleChange?.(after.consoleLines);
-          }
-          if (after.status !== before.status) setStatus(after.status);
-          if (after.score !== before.score) setScore(after.score);
-          if (after.best !== before.best) setBest(after.best);
-          if (after.comboCount !== before.comboCount) setComboCount(after.comboCount);
-          if (after.bestCombo !== before.bestCombo) setBestCombo(after.bestCombo);
-          if (after.maxLength !== before.maxLength) setMaxLength(after.maxLength);
-          // Save the pre-tick tail so we can lerp from it during the next frame.
-          // On growth ticks the tail didn't move, so prevTail equals the new tail's cell anyway.
-          prevTailRef.current = before.snake[before.snake.length - 1];
-          stateRef.current = after;
-          acc -= tickInterval;
+          prevRef.current = prev;
+          stateRef.current = s;
         }
-        // Head + tail tweens for fluid motion at both ends of the snake.
-        const s = stateRef.current;
-        const head = s.snake[0];
-        const tail = s.snake[s.snake.length - 1];
-        let headTween: Cell;
-        let tailTween: Cell;
-        if (reducedMotionRef.current) {
-          headTween = head;
-          tailTween = tail;
-        } else {
-          const tickInterval2 = 1000 / s.tickRate;
-          const tweenT = Math.min(1, acc / tickInterval2);
-          const headPrev = s.snake[1] ?? head;
-          headTween = {
-            x: headPrev.x + (head.x - headPrev.x) * tweenT,
-            y: headPrev.y + (head.y - headPrev.y) * tweenT,
-          };
-          const tailPrev = prevTailRef.current ?? tail;
-          tailTween = {
-            x: tailPrev.x + (tail.x - tailPrev.x) * tweenT,
-            y: tailPrev.y + (tail.y - tailPrev.y) * tweenT,
-          };
-        }
-        handleRef.current.render(s, headTween, tailTween, t);
-        rafRef.current = requestAnimationFrame(loop);
+        const alpha = !frozen && s.status === 'playing' ? accRef.current / SIM_DT : 1;
+        handle.frame({ prev: prevRef.current ?? s, cur: s, alpha, dt: frozen ? 0 : dt });
+        soundRef.current?.setMotion(s.speed, s.status === 'playing');
+        syncView(s);
+        raf = requestAnimationFrame(loop);
       };
-      rafRef.current = requestAnimationFrame(loop);
+      raf = requestAnimationFrame(loop);
     })();
 
     return () => {
       cancelled = true;
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(raf);
+      resizeObserver?.disconnect();
+      themeObserver?.disconnect();
       handleRef.current?.dispose();
       handleRef.current = null;
-      stateRef.current = null;
+      sound.dispose();
+      soundRef.current = null;
     };
-  }, [gridCount, cellSize, onConsoleChange]);
+  }, [onEngineEvents, syncView]);
 
+  // Keyboard.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (phaseRef.current === 'initials') return; // the initials field owns the keyboard
       const s = stateRef.current;
-      if (!s) return;
+      if (!s || !handleRef.current) return;
+      unlockSound();
       if (e.key === ' ') {
         e.preventDefault();
-        const next = applyInput(s, { type: 'pause' });
-        stateRef.current = next;
-        setStatus(next.status);
+        togglePause();
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
-        const next = applyInput({ ...s, best: readBest() }, { type: 'restart' });
-        stateRef.current = next;
-        prevTailRef.current = next.snake[next.snake.length - 1];
-        setStatus(next.status);
-        setScore(next.score);
-        setBest(next.best);
-        setComboCount(next.comboCount);
-        setBestCombo(next.bestCombo);
-        setMaxLength(next.maxLength);
-        onConsoleChange?.(next.consoleLines);
+        restart();
         return;
       }
-      const dir = KEY_TO_DIR[e.key];
-      if (dir) {
+      if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
-        stateRef.current = applyInput(s, { type: 'turn', dir });
+        toggleSound();
+        return;
+      }
+      const dir = KEY_DIR[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      keysRef.current = { ...keysRef.current, [dir]: true };
+      mouseRef.current.active = false;
+      const h = headingFromKeys(keysRef.current);
+      if (h !== null) stateRef.current = applyInput(s, { type: 'steer', heading: h });
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const dir = KEY_DIR[e.key];
+      if (dir) keysRef.current = { ...keysRef.current, [dir]: false };
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, [restart, toggleSound, togglePause, unlockSound]);
+
+  // Mouse (steer toward the pointer) and touch (drag like a joystick, tap to start/restart).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let drag: { id: number; x: number; y: number; t: number; moved: boolean } | null = null;
+
+    const tap = () => {
+      const s = stateRef.current;
+      if (!s) return;
+      if (s.status === 'idle') stateRef.current = applyInput(s, { type: 'start' });
+      else if (s.status === 'paused') togglePause();
+      else if (s.status === 'gameover' && phaseRef.current === 'table') restart();
+    };
+    const onDown = (e: PointerEvent) => {
+      unlockSound();
+      if (e.pointerType === 'mouse') {
+        tap();
+        return;
+      }
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+      canvas.setPointerCapture(e.pointerId);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') {
+        mouseRef.current = { x: e.clientX, y: e.clientY, at: performance.now(), active: true };
+        return;
+      }
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      if (dx * dx + dy * dy < DRAG_START_PX * DRAG_START_PX) return;
+      drag.moved = true;
+      const s = stateRef.current;
+      if (!s || phaseRef.current === 'initials') return;
+      // The camera never rotates, so screen right = +x and screen down = +z.
+      stateRef.current = applyInput(s, { type: 'steer', heading: Math.atan2(dy, dx) });
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (!drag.moved && performance.now() - drag.t < TAP_MS) tap();
+      drag = null;
+    };
+    const onLeave = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') mouseRef.current.active = false;
+    };
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('pointerleave', onLeave);
+    return () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
+      canvas.removeEventListener('pointerleave', onLeave);
+    };
+  }, [restart, togglePause, unlockSound]);
+
+  // Hidden tab: pause the run and silence audio.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        const s = stateRef.current;
+        if (s?.status === 'playing') stateRef.current = applyInput(s, { type: 'pause' });
+        soundRef.current?.suspend();
+      } else if (stateRef.current?.status !== 'paused') {
+        soundRef.current?.resume();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
+  // Reduced motion can change while the game is open.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const apply = () => {
-      reducedMotionRef.current = mq.matches;
-      handleRef.current?.setReducedMotion(mq.matches);
-    };
-    apply();
+    const apply = () => handleRef.current?.setReducedMotion(mq.matches);
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, []);
 
-  // Touch swipe (mobile)
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let startX = 0;
-    let startY = 0;
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch') return;
-      startX = e.clientX;
-      startY = e.clientY;
-    };
-    const onUp = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch') return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
-      const dir: Direction = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
-      const s = stateRef.current;
-      if (s) stateRef.current = applyInput(s, { type: 'turn', dir });
-    };
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointerup', onUp);
-    return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointerup', onUp);
-    };
-  }, []);
-
   return (
-    <div
-      style={{
-        position: 'relative',
-        // Subtle accent-toned frame so the play-area edges read clearly against
-        // the surrounding background. 1px hard line + a soft outer glow ties it
-        // to the rest of the terminal/CRT vibe without re-adding the shader.
-        border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
-        boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 0 18px color-mix(in srgb, var(--accent) 12%, transparent)',
-      }}
-    >
+    <div ref={wrapRef} data-variant={variant} className="relative h-full w-full overflow-hidden bg-[#0d0a07]">
       <canvas
         ref={canvasRef}
-        style={{
-          width: gridCount * cellSize,
-          height: gridCount * cellSize,
-          display: 'block',
-          touchAction: 'none',
-        }}
         data-mounted={mounted ? '1' : '0'}
+        aria-label="snake game"
+        className="block h-full w-full touch-none"
       />
-      {/* Corner brackets — terminal-style "this is your bounded play area" markers.
-          Quick visual confirmation of the four corners on top of the soft frame. */}
-      {(['top-1 left-1 border-t border-l', 'top-1 right-1 border-t border-r', 'bottom-1 left-1 border-b border-l', 'bottom-1 right-1 border-b border-r'] as const).map(
-        (pos, i) => (
-          <span
-            key={i}
-            aria-hidden
-            className={`absolute ${pos} w-3 h-3 border-[var(--accent)]/70 pointer-events-none`}
-          />
-        ),
-      )}
-      <div className="absolute top-2 left-2 font-mono text-[11px] text-[var(--accent)] pointer-events-none select-none">
-        score {score}
-      </div>
-      <div className="absolute top-2 right-2 font-mono text-[11px] dim pointer-events-none select-none">
-        best {best}
-      </div>
-      {/* Combo badge — visible only while a streak is active. Bottom-left so it doesn't
-          compete with score (top-left) and pulses to signal momentum. */}
-      {comboCount >= 2 && status === 'playing' && (
-        <div className="absolute bottom-2 left-2 font-mono text-[14px] font-bold text-[var(--accent)] pointer-events-none select-none animate-pulse tracking-wider">
-          ×{comboCount} combo
-        </div>
-      )}
-      {status === 'paused' && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center font-mono text-[13px] text-[var(--accent)] pointer-events-none">
-          // paused
-        </div>
-      )}
-      {status === 'gameover' && (
-        <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center gap-2 font-mono pointer-events-none px-4 text-center">
-          <div className="text-[14px] text-[#ff7070] font-bold">
-            panic! at line {score}
-          </div>
-          <div className="text-[10px] dim flex gap-3 mt-1">
-            <span>len <span className="dim">{maxLength}</span></span>
-            <span>combo <span className="dim">×{bestCombo}</span></span>
-            <span>best <span className="dim">{best}</span></span>
-          </div>
-          <div className="text-[11px] text-[var(--accent)] mt-2">press r to restart</div>
-        </div>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%)' }}
+      />
+      {failed ? (
+        <WebGLFallback />
+      ) : (
+        <Hud
+          view={view}
+          phase={phase}
+          entries={entries}
+          rank={rank}
+          muted={muted}
+          touch={touch}
+          lastInitials={lastInitials}
+          onToggleSound={toggleSound}
+          onSubmitInitials={submitInitials}
+        />
       )}
     </div>
   );

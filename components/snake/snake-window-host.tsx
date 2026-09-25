@@ -1,21 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { onSnakeClose, onSnakeOpen, onSnakeRaise } from '@/lib/snake-bus';
-import { SnakeWindow } from './snake-window';
 import { SnakeCanvas } from './snake-canvas';
-import { SnakeConsole } from './snake-console';
-import type { ConsoleLine } from './snake-types';
+import { SnakeWindow } from './snake-window';
 
 export function SnakeWindowHost() {
   const [open, setOpen] = useState(false);
   const [raiseToken, setRaiseToken] = useState(0);
-  const [lines, setLines] = useState<ConsoleLine[]>([]);
   const router = useRouter();
+  const pathname = usePathname();
+  // On /snake the full-page game is already running; a second one would fight it for the keyboard.
+  const onSnakePage = pathname?.startsWith('/snake') ?? false;
 
   useEffect(() => {
     const offOpen = onSnakeOpen(() => {
+      if (window.location.pathname.startsWith('/snake')) return;
       setOpen((wasOpen) => {
         if (wasOpen) setRaiseToken((t) => t + 1);
         return true;
@@ -30,7 +31,7 @@ export function SnakeWindowHost() {
     };
   }, []);
 
-  if (!open) return null;
+  if (!open || onSnakePage) return null;
   return (
     <SnakeWindow
       key={raiseToken}
@@ -39,11 +40,8 @@ export function SnakeWindowHost() {
         router.push('/snake');
       }}
     >
-      <div className="flex-1 flex">
-        <div className="flex-1 flex items-center justify-center bg-[#0a0a0a]">
-          <SnakeCanvas variant="window" onConsoleChange={setLines} />
-        </div>
-        <SnakeConsole lines={lines} />
+      <div className="relative min-h-0 flex-1">
+        <SnakeCanvas variant="window" />
       </div>
     </SnakeWindow>
   );

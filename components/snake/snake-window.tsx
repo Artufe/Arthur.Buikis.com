@@ -126,7 +126,7 @@ export function SnakeWindow({
       style={{ ...baseStyle, background: 'var(--surface)', border: '2px solid var(--border)' }}
       className="flex flex-col font-mono"
       role="dialog"
-      aria-label="snake.py"
+      aria-label="snake"
     >
       <div
         onPointerDown={onPointerDown}
@@ -138,7 +138,7 @@ export function SnakeWindow({
         }`}
         style={{ borderBottom: '2px solid var(--border)' }}
       >
-        <span className="text-[12px]">&gt; snake.py</span>
+        <span className="text-[12px] tracking-[0.2em]">snake</span>
         <div className="flex items-center gap-1" data-no-drag>
           <button
             type="button"

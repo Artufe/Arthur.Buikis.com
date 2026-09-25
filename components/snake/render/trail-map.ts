@@ -4,6 +4,7 @@ import {
   Camera,
   Color,
   CustomBlending,
+  DoubleSide,
   DynamicDrawUsage,
   HalfFloatType,
   LinearFilter,
@@ -126,6 +127,8 @@ export class TrailMap {
       depthTest: false,
       depthWrite: false,
       transparent: true,
+      // perp is always left of travel, so every ribbon triangle winds clockwise in clip space.
+      side: DoubleSide,
     });
     const mesh = new Mesh(this.geometry, this.material);
     mesh.frustumCulled = false;
