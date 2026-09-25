@@ -76,10 +76,8 @@ function HeroShaderMount() {
   const modeRef = useRef<PlasmaMode>('vivid');
   const { resolvedTheme } = useTheme();
 
-  useEffect(() => {
-    if (handleRef.current) applyState(handleRef.current, resolvedTheme, modeRef.current);
-  }, [resolvedTheme]);
-
+  // Re-applies palette + plasma mode on theme change and whenever the
+  // command palette flips calm/vivid.
   useEffect(() => {
     modeRef.current = getPlasmaMode();
     if (handleRef.current) applyState(handleRef.current, resolvedTheme, modeRef.current);

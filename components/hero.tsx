@@ -4,7 +4,7 @@ import { site } from '@/content/site';
 import { sideThings } from '@/content/about';
 
 const stats = [
-  { value: '12', label: 'years engineering' },
+  { value: '10', label: 'years engineering' },
   { value: '12', label: 'contracts · 100% JSS' },
   { value: 'Py', label: 'Python native tongue' },
   { value: 'Riga', label: 'based · CET/CEST' },

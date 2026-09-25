@@ -14,8 +14,6 @@ export const site = {
   //   ConvertKit:   https://app.convertkit.com/forms/<form-id>/subscriptions
   //   MailerLite:   https://assets.mailerlite.com/jsonp/<account>/forms/<id>/subscribe
   // Leave empty to render a "coming soon" CTA instead of a live form.
-  // After updating: `node scripts/test-live-subscribe.mjs` against prod
-  // confirms a real round-trip.
   subscribeEndpoint: '',
   nav: [
     { label: 'Work', href: '/#work' },
@@ -32,7 +30,7 @@ export const site = {
     jobTitle: 'Senior software engineer',
     location: { city: 'Riga', country: 'LV', timezone: 'Europe/Riga' },
     summary:
-      'Backend and platform engineer based in Riga. Around twelve years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.',
+      'Backend and platform engineer based in Riga. Around ten years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.',
     knowsAbout: [
       'Python',
       'Django',

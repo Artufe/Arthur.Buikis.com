@@ -3,8 +3,11 @@
  *
  * Single fragment-shader plasma effect: orbiting wave sources interfere on a
  * dark warm-neutral palette; the cursor is its own wave emitter; clicks drop
- * transient pulses. Tuned for the artufe.github.io hero: minimal intensity,
- * slow drift, almost no grain.
+ * transient pulses.
+ *
+ * On arthur.buikis.com this is mounted by components/hero-shader.tsx, which
+ * overrides the defaults below with per-theme palettes. See
+ * docs/hero-shader.md.
  *
  * Usage:
  *   <canvas id="hero-bg" style="position:fixed;inset:0;width:100%;height:100%;z-index:-1"></canvas>
@@ -20,7 +23,8 @@
  *     accent: [0.95, 0.72, 0.35],       // bright color in highlights
  *   });
  *
- * No deps. ~3KB minified. Auto-pauses when offscreen / tab hidden.
+ * No deps. Auto-pauses when offscreen / tab hidden. Under
+ * prefers-reduced-motion it renders a single static frame instead.
  */
 (function (root) {
   const VERT = `
@@ -98,7 +102,7 @@
   function mount(canvas, opts){
     opts = opts || {};
     const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: false });
-    if(!gl){ console.warn('[hero-shader] WebGL unavailable'); return { stop(){} }; }
+    if(!gl){ console.warn('[hero-shader] WebGL unavailable'); return { set(){}, stop(){} }; }
 
     const prog = gl.createProgram();
     gl.attachShader(prog, compile(gl, VERT, gl.VERTEX_SHADER));
@@ -115,8 +119,8 @@
     ['uRes','uTime','uMouse','uClick','uClickPos','uIntensity','uGrain','uSpeed','uSeed','uDeep','uMid','uAccent']
       .forEach(k => u[k] = gl.getUniformLocation(prog, k));
 
-    // Defaults — tuned for hero use: lowest intensity, slow speed, almost no
-    // grain. Palette defaults to the prior hardcoded amber-on-near-black.
+    // Standalone defaults: low intensity, slow speed, almost no grain,
+    // amber-on-near-black palette. The site passes its own values on mount.
     const state = {
       intensity: opts.intensity ?? 0.55,
       speed:     opts.speed     ?? 0.35,

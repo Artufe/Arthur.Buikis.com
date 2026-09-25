@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// /about (and /building, /notes) render elements with a bare `reveal` class,
+// /about (and /building) render elements with a bare `reveal` class,
 // which globals.css holds at opacity 0 until something adds `vis`. The
 // RevealObserver in the root layout is responsible for adding it.
 

@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 
-// Pages render bare `className="reveal"` elements (about, building, notes)
+// Pages render bare `className="reveal"` elements (about, building)
 // that globals.css keeps at opacity 0 until `vis` is added. ScrollReveal only
 // covers its own wrapped children, so this observer handles everything else —
 // including elements added later by client-side navigation.

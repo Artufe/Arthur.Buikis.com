@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { ContactForm } from '@/components/contact-form';
 import { site } from '@/content/site';
 
 const title = 'Contact';
@@ -23,12 +22,6 @@ export const metadata: Metadata = {
   },
 };
 
-const expectations = [
-  <>I read everything. Replies usually land inside <em className="not-italic font-mono text-[12px] text-[var(--accent)]">2 working days</em>.</>,
-  <>The shape of the system and what&apos;s getting in the way is more useful than a wish-list.</>,
-  <>If a call works better, 30-minute slots are linked in most replies.</>,
-];
-
 export default function ContactPage() {
   return (
     <div className="page">
@@ -39,6 +32,16 @@ export default function ContactPage() {
       <div className="l-asym" style={{ padding: '0 28px', maxWidth: 1200, margin: '0 auto' }}>
         <div>
           <form action={site.formspreeEndpoint} method="POST" className="contact-grid">
+            {/* Honeypot: off-screen and skipped by keyboard/AT, so only bots fill it.
+                Formspree silently discards any submission where `_gotcha` is non-empty. */}
+            <input
+              type="text"
+              name="_gotcha"
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              style={{ position: 'absolute', left: '-9999px', width: 0, height: 0 }}
+            />
             <input type="text" name="name" placeholder="name" required />
             <input type="email" name="email" placeholder="email" required />
             <div style={{ gridColumn: '1 / -1' }}>

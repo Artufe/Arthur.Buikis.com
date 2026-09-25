@@ -7,10 +7,9 @@ import {
   antiList,
   beliefs,
 } from '@/content/about';
-import { site } from '@/content/site';
 
 const title = 'About';
-const description = 'Backend & platform engineer · Riga · twelve-ish years in.';
+const description = 'Backend & platform engineer · Riga · ten-ish years in.';
 const path = '/about/';
 
 export const metadata: Metadata = {

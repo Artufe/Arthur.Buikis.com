@@ -8,7 +8,6 @@ import { site } from '@/content/site';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { OpenInZedButton } from '@/components/open-in-zed-button';
 import { cn } from '@/lib/utils';
-import { openPalette } from '@/lib/palette-bus';
 
 export function Nav() {
   const pathname = usePathname();
