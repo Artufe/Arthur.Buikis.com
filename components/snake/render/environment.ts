@@ -53,11 +53,27 @@ void main() {
   col = mix(col, uHorizon * 0.85, smoothstep(0.0, -0.25, h));
   float c = dot(d, normalize(uSunDir));
   float disc = smoothstep(cos(uSunSize * 1.08), cos(uSunSize * 0.92), c);
-  float glow = pow(max(c, 0.0), 8.0) * 0.35 + pow(max(c, 0.0), 64.0) * 0.6;
-  col += uSunColor * (disc * 6.0 + glow);
-  float s = hash31(floor(d * 180.0));
-  float star = step(0.9975, s) * smoothstep(0.02, 0.25, h) * (0.6 + 0.4 * sin(uTime * 1.5 + s * 80.0));
-  col += vec3(1.3) * star * uStars;
+  float glow = pow(max(c, 0.0), 6.0) * 0.4 + pow(max(c, 0.0), 48.0) * 0.5;
+  col += uSunColor * (disc * 2.6 + glow);
+  // Stars: one jittered, round point per occupied cell, in two layers of different density.
+  float stars = 0.0;
+  for (int layer = 0; layer < 2; layer++) {
+    float scale = layer == 0 ? 190.0 : 420.0;
+    vec3 q = d * scale;
+    vec3 cell = floor(q);
+    float s = hash31(cell);
+    vec3 jitter = vec3(hash31(cell + 1.7), hash31(cell + 4.1), hash31(cell + 9.3)) - 0.5;
+    float r = length(fract(q) - 0.5 - jitter * 0.5);
+    float lit = step(layer == 0 ? 0.972 : 0.955, s);
+    float bright = layer == 0 ? 0.6 + 1.4 * fract(s * 37.0) : 0.35 + 0.5 * fract(s * 53.0);
+    float twinkle = 0.75 + 0.25 * sin(uTime * (1.0 + 2.0 * fract(s * 11.0)) + s * 80.0);
+    stars += lit * bright * twinkle * smoothstep(0.22, 0.0, r);
+  }
+  // A faint band of milky light across the sky.
+  vec3 bandAxis = normalize(vec3(0.35, 0.45, 0.82));
+  float band = exp(-pow(dot(d, bandAxis) * 3.2, 2.0)) * (0.55 + 0.45 * hash31(floor(d * 60.0)));
+  float horizonFade = smoothstep(0.03, 0.3, h);
+  col += (vec3(1.2, 1.2, 1.35) * stars + vec3(0.05, 0.06, 0.1) * band) * horizonFade * uStars;
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -94,7 +110,7 @@ function rockGeometry(seed: number): BufferGeometry {
   return g;
 }
 
-function createRocks(): { group: Group; dispose(): void } {
+function createRocks(): { group: Group; material: MeshStandardMaterial; dispose(): void } {
   const group = new Group();
   const material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
   const variants = [1.7, 4.2, 8.9].map(rockGeometry);
@@ -143,6 +159,7 @@ function createRocks(): { group: Group; dispose(): void } {
   });
   return {
     group,
+    material,
     dispose() {
       variants.forEach((g) => g.dispose());
       material.dispose();
@@ -221,6 +238,7 @@ export function createEnvironment(scene: Scene, opts: { shadowSize: number }): E
       hemi.intensity = p.hemiIntensity;
       fog.color.copy(p.fog);
       fog.density = p.fogDensity;
+      rocks.material.color.copy(p.rock);
     },
     update(time, cameraPosition) {
       skyUniforms.uTime.value = time;

@@ -85,6 +85,7 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
   let slowAvg = 1 / 60;
   let slowFor = 0;
   const points: Vec2[] = [];
+  const sparklePos = new Vector3();
 
   function applyPalette() {
     env.setPalette(palette);
@@ -93,6 +94,7 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
     renderer.toneMappingExposure = palette.exposure;
     food.setGlow(palette.foodGlow);
     effects.setDust(palette.dust);
+    snake.setRim(palette.snakeRim);
     rig.setSunAzimuth(Math.atan2(palette.sunDir.z, palette.sunDir.x));
   }
 
@@ -147,10 +149,17 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
       const s = deathAt === null ? 0 : Math.min(1, (clock - deathAt) / SINK_SECONDS);
       snake.update(points, heading, dt, cur.speed, s * s * (3 - 2 * s), cur.status === 'playing');
       food.sync(cur.food, cur.time, clock);
+      for (const f of cur.food) {
+        if (f.kind === 'golden' && cur.status !== 'gameover') {
+          sparklePos.set(f.pos.x, groundHeight(f.pos.x, f.pos.z) + 0.55, f.pos.z);
+          effects.sparkle(sparklePos, dt);
+        }
+      }
       if (cur.status === 'playing') effects.spray(head, heading, cur.speed, dt);
       effects.wisps(dt, rig.focus());
       effects.update(dt);
-      rig.update(dt, head, heading, cur.status);
+      const nearest = cur.food.find((f) => f.kind === 'golden') ?? cur.food[0];
+      rig.update(dt, head, heading, cur.status, nearest ? nearest.pos : null);
 
       if (fadeFrom && fadeT < 1) {
         fadeT = Math.min(1, fadeT + dt / FADE_SECONDS);
@@ -184,8 +193,9 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
           }
         } else if (e.type === 'death') {
           deathAt = clock;
+          effects.impact(new Vector3(state.head.x, 0, state.head.z));
           effects.deathDust(bodyPoints(state));
-          rig.shake(0.7);
+          rig.shake(0.8);
         }
       }
     },

@@ -62,7 +62,8 @@ void main() {
   float core = max(0.0, 1.0 - (u / 0.5) * (u / 0.5));
   float groove = pow(core, 0.8);
   float rim = smoothstep(0.35, 0.55, u) * (1.0 - smoothstep(0.62, 1.0, u));
-  float depth = pow(vShape, 0.6);
+  // Depth and rims fade faster than the width narrows, so an old groove reads as shallow and soft.
+  float depth = pow(vShape, 1.4);
   gl_FragColor = vec4(groove * depth, rim * depth, vShape * (1.0 - u), 1.0);
 }
 `;

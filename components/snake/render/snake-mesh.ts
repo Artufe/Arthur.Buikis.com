@@ -42,14 +42,29 @@ skin *= 0.8 + 0.2 * (1.0 - smoothstep(0.22, 0.52, cell));
 diffuseColor.rgb = skin;
 `;
 
-function createBodyMaterial(): MeshPhysicalMaterial {
+// Fresnel rim so the silhouette separates from the sand, strongest at night.
+const RIM_GLSL = /* glsl */ `
+float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+totalEmissiveRadiance += uRimColor * rimF * uRim;
+`;
+
+type RimUniforms = { uRim: { value: number }; uRimColor: { value: Color } };
+
+function addRim(shader: { uniforms: Record<string, unknown>; fragmentShader: string }, rim: RimUniforms): void {
+  Object.assign(shader.uniforms, rim);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uRim;\nuniform vec3 uRimColor;')
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${RIM_GLSL}`);
+}
+
+function createBodyMaterial(rim: RimUniforms): MeshPhysicalMaterial {
   const m = new MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.4,
+    roughness: 0.55,
     metalness: 0,
-    clearcoat: 0.45,
-    clearcoatRoughness: 0.35,
-    iridescence: 0.3,
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.5,
+    iridescence: 0.12,
     iridescenceIOR: 1.3,
     iridescenceThicknessRange: [180, 420],
   });
@@ -62,6 +77,7 @@ function createBodyMaterial(): MeshPhysicalMaterial {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uBase;\nuniform vec3 uDark;\nuniform vec3 uBelly;\nuniform vec3 uAccent;')
       .replace('#include <color_fragment>', `#include <color_fragment>\n${SCALE_GLSL}`);
+    addRim(shader, rim);
   };
   return m;
 }
@@ -76,6 +92,7 @@ export class SnakeMesh {
   private readonly head = new Group();
   private readonly tongue = new Group();
   private readonly disposables: Array<{ dispose(): void }> = [];
+  private readonly rim: RimUniforms = { uRim: { value: 0.1 }, uRimColor: { value: new Color('#8fe0c0') } };
   private swayPhase = 0;
   private tongueClock = 0;
 
@@ -107,29 +124,47 @@ export class SnakeMesh {
     this.geometry.setIndex(new BufferAttribute(index, 1));
     this.geometry.setDrawRange(0, 0);
 
-    const bodyMat = createBodyMaterial();
+    const bodyMat = createBodyMaterial(this.rim);
     const body = new Mesh(this.geometry, bodyMat);
     body.castShadow = true;
     body.receiveShadow = true;
     body.frustumCulled = false;
 
     const headMat = new MeshPhysicalMaterial({
-      color: '#1b5d4d',
-      roughness: 0.36,
-      clearcoat: 0.5,
-      clearcoatRoughness: 0.3,
-      iridescence: 0.3,
+      color: '#1f6a55',
+      roughness: 0.5,
+      clearcoat: 0.2,
+      clearcoatRoughness: 0.45,
+      iridescence: 0.12,
       iridescenceIOR: 1.3,
     });
+    headMat.onBeforeCompile = (shader) => addRim(shader, this.rim);
     const headGeo = new SphereGeometry(1, 32, 20);
+    // Wedge head: a wide skull behind a narrower, flatter snout.
     const skull = new Mesh(headGeo, headMat);
-    skull.scale.set(0.62, 0.34, 0.45);
+    skull.scale.set(0.5, 0.3, 0.44);
     skull.castShadow = true;
-    const eyeGeo = new SphereGeometry(0.075, 16, 12);
-    const eyeMat = new MeshPhysicalMaterial({ color: '#050505', roughness: 0.05, clearcoat: 1 });
+    const snout = new Mesh(headGeo, headMat);
+    snout.scale.set(0.34, 0.2, 0.28);
+    snout.position.set(0.32, -0.04, 0);
+    snout.castShadow = true;
+    const eyeGeo = new SphereGeometry(0.085, 16, 12);
+    const eyeMat = new MeshPhysicalMaterial({
+      color: '#f0b429',
+      emissive: '#8a5a00',
+      emissiveIntensity: 0.6,
+      roughness: 0.15,
+      clearcoat: 1,
+    });
+    const pupilGeo = new SphereGeometry(1, 12, 8);
+    const pupilMat = new MeshStandardMaterial({ color: '#050505', roughness: 0.2 });
     for (const side of [-1, 1]) {
       const eye = new Mesh(eyeGeo, eyeMat);
-      eye.position.set(0.3, 0.12, 0.22 * side);
+      eye.position.set(0.2, 0.12, 0.3 * side);
+      const pupil = new Mesh(pupilGeo, pupilMat);
+      pupil.scale.set(0.022, 0.06, 0.02);
+      pupil.position.set(0.035, 0, 0.055 * side);
+      eye.add(pupil);
       this.head.add(eye);
     }
     const tongueMat = new MeshStandardMaterial({ color: '#c3223c', roughness: 0.5 });
@@ -145,9 +180,9 @@ export class SnakeMesh {
       this.tongue.add(fork);
     }
     this.tongue.position.set(0.55, -0.02, 0);
-    this.head.add(skull, this.tongue);
+    this.head.add(skull, snout, this.tongue);
     this.group.add(body, this.head);
-    this.disposables.push(this.geometry, bodyMat, headMat, headGeo, eyeGeo, eyeMat, tongueMat, stemGeo, forkGeo);
+    this.disposables.push(this.geometry, bodyMat, headMat, headGeo, eyeGeo, eyeMat, pupilGeo, pupilMat, tongueMat, stemGeo, forkGeo);
   }
 
   update(points: Vec2[], heading: number, dt: number, speed: number, sink: number, moving: boolean): void {
@@ -163,7 +198,7 @@ export class SnakeMesh {
       this.arcs[i] = this.arcs[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
     }
     const length = this.arcs[n - 1] || 1;
-    const drop = sink * 0.9;
+    const drop = sink * 0.36; // half-buried, so the body still reads after death
 
     for (let i = 0; i < n; i++) {
       const p = points[i];
@@ -207,7 +242,7 @@ export class SnakeMesh {
     const hp = points[0];
     this.head.position.set(
       hp.x + Math.cos(heading) * 0.1,
-      groundHeight(hp.x, hp.z) + 0.26 - drop,
+      groundHeight(hp.x, hp.z) + 0.26 - drop * 1.3,
       hp.z + Math.sin(heading) * 0.1,
     );
     this.head.rotation.set(0, -heading, 0);
@@ -217,6 +252,10 @@ export class SnakeMesh {
     const out = cycle < 0.22 ? Math.sin((cycle / 0.22) * Math.PI) : 0;
     this.tongue.visible = out > 0.01 && sink === 0;
     this.tongue.scale.set(Math.max(0.001, out), 1, 1);
+  }
+
+  setRim(strength: number): void {
+    this.rim.uRim.value = strength;
   }
 
   setVisible(visible: boolean): void {

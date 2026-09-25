@@ -20,6 +20,8 @@ export type Palette = {
   groove: Color; // compacted sand in the groove
   rim: Color; // pushed-up sand either side
   dust: Color; // particle colour
+  rock: Color; // multiplies the sandstone vertex colours
+  snakeRim: number; // fresnel rim on the snake
   glint: number;
   foodGlow: number;
   bloom: number;
@@ -38,6 +40,7 @@ const COLOR_KEYS = [
   'groove',
   'rim',
   'dust',
+  'rock',
 ] as const;
 const NUMBER_KEYS = [
   'fogDensity',
@@ -49,17 +52,18 @@ const NUMBER_KEYS = [
   'foodGlow',
   'bloom',
   'exposure',
+  'snakeRim',
 ] as const;
 
 export const PALETTES: Record<Theme, Palette> = {
   // Golden hour: low warm sun behind the play field, long shadows toward the camera.
   light: {
-    skyZenith: new Color('#4f79b8'),
-    skyHorizon: new Color('#ffc995'),
-    fog: new Color('#f0c39a'),
+    skyZenith: new Color('#5b6fa6'),
+    skyHorizon: new Color('#ffb07a'),
+    fog: new Color('#eeb88f'),
     fogDensity: 0.011,
-    sunDir: new Vector3(-0.5, 0.26, -0.83).normalize(),
-    sunColor: new Color('#ffcf9a'),
+    sunDir: new Vector3(-0.5, 0.2, -0.83).normalize(),
+    sunColor: new Color('#ffc88a'),
     sunIntensity: 3.4,
     sunSize: 0.035,
     stars: 0,
@@ -71,6 +75,8 @@ export const PALETTES: Record<Theme, Palette> = {
     groove: new Color('#9c6538'),
     rim: new Color('#f2cd98'),
     dust: new Color('#e9c28f'),
+    rock: new Color('#ffffff'),
+    snakeRim: 0.08,
     glint: 1,
     foodGlow: 1,
     bloom: 0.32,
@@ -82,19 +88,22 @@ export const PALETTES: Record<Theme, Palette> = {
     skyHorizon: new Color('#16213d'),
     fog: new Color('#141c33'),
     fogDensity: 0.014,
-    sunDir: new Vector3(0.45, 0.55, -0.7).normalize(),
-    sunColor: new Color('#aebfff'),
-    sunIntensity: 1.25,
-    sunSize: 0.022,
+    // Low and across the wind, so moonlight rakes the ripples.
+    sunDir: new Vector3(-0.62, 0.3, -0.55).normalize(),
+    sunColor: new Color('#b4c4ff'),
+    sunIntensity: 1.9,
+    sunSize: 0.03,
     stars: 1,
     hemiSky: new Color('#2b3a6b'),
     hemiGround: new Color('#2e2a26'),
     hemiIntensity: 0.45,
-    sandA: new Color('#a8a095'),
-    sandB: new Color('#7d776f'),
+    sandA: new Color('#b3aa9c'),
+    sandB: new Color('#857e74'),
     groove: new Color('#4d4a4a'),
-    rim: new Color('#c2bcb0'),
+    rim: new Color('#cdc6b8'),
     dust: new Color('#8e8a86'),
+    rock: new Color('#a6aecb'),
+    snakeRim: 0.28,
     glint: 1.6,
     foodGlow: 1.8,
     bloom: 0.55,

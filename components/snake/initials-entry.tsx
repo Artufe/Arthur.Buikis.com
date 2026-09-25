@@ -9,7 +9,15 @@ function shift(letter: string, by: number): string {
   return String.fromCharCode(A + ((letter.charCodeAt(0) - A + by + 26) % 26));
 }
 
-export function InitialsEntry({ initial, onSubmit }: { initial: string; onSubmit: (initials: string) => void }) {
+export function InitialsEntry({
+  initial,
+  onSubmit,
+  title = 'top 10 — your initials',
+}: {
+  initial: string;
+  onSubmit: (initials: string) => void;
+  title?: string;
+}) {
   const [letters, setLetters] = useState(() => (normalizeInitials(initial) + 'AAA').slice(0, 3).split(''));
   const [slot, setSlot] = useState(0);
   const lettersRef = useRef(letters);
@@ -60,7 +68,7 @@ export function InitialsEntry({ initial, onSubmit }: { initial: string; onSubmit
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="text-[11px] uppercase tracking-[0.2em] text-[#f5ead9]/70">new high score — your initials</div>
+      <div className="text-[11px] uppercase tracking-[0.2em] text-[#f5ead9]/70">{title}</div>
       <div className="flex gap-2">
         {letters.map((c, i) => (
           <div key={i} className="flex flex-col items-center">

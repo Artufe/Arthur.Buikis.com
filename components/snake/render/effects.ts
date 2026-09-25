@@ -14,6 +14,7 @@ export class Effects {
   private flashLevel = 0;
   private sprayCarry = 0;
   private wispCarry = 0;
+  private sparkleCarry = 0;
   private budget = 1;
   private reduced = false;
   private readonly dust = new Color('#e9c28f');
@@ -125,7 +126,7 @@ export class Effects {
 
   deathDust(points: Vec2[]): void {
     const scale = this.budget * (this.reduced ? 0.5 : 1);
-    for (let i = 0; i < points.length; i += 3) {
+    for (let i = 0; i < points.length; i += 4) {
       const p = points[i];
       const gy = groundHeight(p.x, p.z);
       for (let j = 0; j < Math.max(1, Math.round(3 * scale)); j++) {
@@ -136,10 +137,10 @@ export class Effects {
           vx: rnd(-0.6, 0.6),
           vy: rnd(0.3, 1.1),
           vz: rnd(-0.6, 0.6),
-          life: rnd(1.4, 2.2),
-          size: rnd(0.5, 1.0),
-          alpha: 0.5,
-          grow: 1.2,
+          life: rnd(1.2, 1.9),
+          size: rnd(0.28, 0.55),
+          alpha: 0.22,
+          grow: 0.9,
           color: this.dust,
           gravity: -0.3,
           drag: 1.5,
@@ -166,10 +167,60 @@ export class Effects {
         vy: 0.1,
         vz: WIND.z * sp,
         life: rnd(3.5, 6),
-        size: rnd(0.5, 1.1),
-        alpha: rnd(0.1, 0.2),
-        grow: 0.6,
+        size: rnd(0.22, 0.55),
+        alpha: rnd(0.05, 0.11),
+        grow: 0.5,
         color: this.dust,
+      });
+    }
+  }
+
+  /** The crash: a bright flash and a spray of sand thrown up at the head. */
+  impact(pos: Vector3): void {
+    const scale = this.budget * (this.reduced ? 0.5 : 1);
+    const gy = groundHeight(pos.x, pos.z);
+    for (let i = 0; i < Math.round(60 * scale); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(2, 5.5);
+      this.sand.emit({
+        x: pos.x,
+        y: gy + 0.2,
+        z: pos.z,
+        vx: Math.cos(a) * sp,
+        vy: rnd(2, 5),
+        vz: Math.sin(a) * sp,
+        life: rnd(0.7, 1.3),
+        size: rnd(0.12, 0.3),
+        alpha: 0.75,
+        color: this.dust,
+        gravity: 8,
+        drag: 1.4,
+      });
+    }
+    this.flash.color.set('#ffe2b8');
+    this.flash.position.set(pos.x, gy + 1.2, pos.z);
+    this.flashLevel = 30;
+  }
+
+  /** Motes of light rising around the golden food. */
+  sparkle(pos: Vector3, dt: number): void {
+    this.sparkleCarry += 14 * this.budget * dt;
+    while (this.sparkleCarry >= 1) {
+      this.sparkleCarry -= 1;
+      const a = Math.random() * Math.PI * 2;
+      const r = rnd(0.35, 0.8);
+      this.sparks.emit({
+        x: pos.x + Math.cos(a) * r,
+        y: pos.y + rnd(-0.3, 0.2),
+        z: pos.z + Math.sin(a) * r,
+        vx: 0,
+        vy: rnd(0.4, 0.9),
+        vz: 0,
+        life: rnd(0.7, 1.2),
+        size: rnd(0.05, 0.1),
+        alpha: 1,
+        color: SPARK_GOLDEN,
+        drag: 0.5,
       });
     }
   }

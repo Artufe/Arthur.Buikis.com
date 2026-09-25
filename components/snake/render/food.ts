@@ -7,6 +7,7 @@ import {
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
+  OctahedronGeometry,
   PlaneGeometry,
   PointLight,
   SphereGeometry,
@@ -38,12 +39,13 @@ type Item = { food: Food; group: Group; fruit: Mesh; ring: Mesh | null; shadow: 
 export class FoodView {
   readonly group = new Group();
   private readonly items = new Map<number, Item>();
-  private readonly normalLight = new PointLight('#ff4a6e', 0, 6, 2);
-  private readonly goldenLight = new PointLight('#ffc043', 0, 7, 2);
+  private readonly normalLight = new PointLight('#ff4a6e', 0, 4.5, 2);
+  private readonly goldenLight = new PointLight('#ffb52e', 0, 5.5, 2);
   private readonly fruitGeo = new SphereGeometry(0.34, 32, 24).scale(1, 1.15, 1);
   private readonly crownGeo = new CylinderGeometry(0.09, 0.12, 0.07, 12);
+  private readonly gemGeo = new OctahedronGeometry(0.42, 0).scale(1, 1.3, 1);
   private readonly ringGeo = new TorusGeometry(0.62, 0.025, 8, 72);
-  private readonly shadowGeo = new PlaneGeometry(1.5, 1.5).rotateX(-Math.PI / 2);
+  private readonly shadowGeo = new PlaneGeometry(1.9, 1.9).rotateX(-Math.PI / 2);
   private readonly normalMat = new MeshPhysicalMaterial({
     color: '#c71f4f',
     emissive: '#ff2f5f',
@@ -55,21 +57,22 @@ export class FoodView {
     sheenColor: new Color('#ff9fb4'),
   });
   private readonly goldenMat = new MeshPhysicalMaterial({
-    color: '#ffcf57',
-    metalness: 1,
-    roughness: 0.18,
-    emissive: '#ffb020',
-    emissiveIntensity: 1.2,
+    color: '#ffab00',
+    metalness: 0.35,
+    roughness: 0.2,
+    emissive: '#ff9500',
+    emissiveIntensity: 1.8,
     clearcoat: 1,
+    flatShading: true,
   });
   private readonly crownMat = new MeshStandardMaterial({ color: '#6b8f3a', roughness: 0.8 });
-  private readonly ringMat = new MeshBasicMaterial({ color: new Color(2.4, 1.7, 0.5) });
+  private readonly ringMat = new MeshBasicMaterial({ color: new Color(3.4, 2.1, 0.35) });
   private readonly shadowTex = contactShadowTexture();
   private readonly shadowMat = new MeshBasicMaterial({
     color: 0x000000,
     alphaMap: this.shadowTex,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.3,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -2,
@@ -116,7 +119,7 @@ export class FoodView {
       const light = golden ? this.goldenLight : this.normalLight;
       light.position.set(f.pos.x, gy + 0.9, f.pos.z);
       light.intensity =
-        (golden ? 9 : 6) * this.glow * appear * (visible ? 1 : 0.3) * (0.85 + 0.15 * Math.sin(clock * 3 + f.id));
+        (golden ? 5 : 3.5) * this.glow * appear * (visible ? 1 : 0.3) * (0.85 + 0.15 * Math.sin(clock * 3 + f.id));
       if (golden) goldenLit = true;
       else normalLit = true;
     }
@@ -127,7 +130,7 @@ export class FoodView {
   setGlow(glow: number): void {
     this.glow = glow;
     this.normalMat.emissiveIntensity = 0.9 * glow;
-    this.goldenMat.emissiveIntensity = 1.2 * glow;
+    this.goldenMat.emissiveIntensity = 1.8 * glow;
   }
 
   setReducedMotion(on: boolean): void {
@@ -144,6 +147,7 @@ export class FoodView {
     for (const d of [
       this.fruitGeo,
       this.crownGeo,
+      this.gemGeo,
       this.ringGeo,
       this.shadowGeo,
       this.normalMat,
@@ -159,11 +163,14 @@ export class FoodView {
 
   private create(f: Food, clock: number): Item {
     const group = new Group();
-    const fruit = new Mesh(this.fruitGeo, f.kind === 'golden' ? this.goldenMat : this.normalMat);
-    fruit.castShadow = true;
-    const crown = new Mesh(this.crownGeo, this.crownMat);
-    crown.position.y = 0.4;
-    fruit.add(crown);
+    const golden = f.kind === 'golden';
+    // The golden prize is a faceted gem; the normal food is a fruit with a leafy crown.
+    const fruit = new Mesh(golden ? this.gemGeo : this.fruitGeo, golden ? this.goldenMat : this.normalMat);
+    if (!golden) {
+      const crown = new Mesh(this.crownGeo, this.crownMat);
+      crown.position.y = 0.4;
+      fruit.add(crown);
+    }
     group.add(fruit);
     let ring: Mesh | null = null;
     if (f.kind === 'golden') {

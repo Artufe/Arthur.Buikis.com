@@ -60,31 +60,22 @@ export function Hud(props: Props) {
           <div className={`px-5 py-3 text-[13px] uppercase tracking-[0.3em] ${PLATE}`}>paused</div>
         </div>
       )}
-      {view.status === 'gameover' && <GameOverPanel {...props} />}
+      {view.status === 'gameover' && props.phase !== 'none' && <GameOverPanel {...props} />}
     </div>
   );
 }
 
+// Sits high, below the corner boxes, so the snake and food below stay in view.
 function IdlePanel({ touch, entries }: Props) {
   return (
-    <div className="absolute inset-x-0 bottom-6 flex justify-center px-4">
-      <div className={`w-full max-w-[420px] px-5 py-4 text-center ${PLATE}`}>
-        <div className={`text-[28px] font-bold tracking-[0.35em] ${ACCENT}`}>SNAKE</div>
-        <div className="mt-1 text-[11px] text-[#f5ead9]/80">
-          {touch ? 'drag anywhere to steer · tap to start' : 'arrows, wasd or the mouse to steer · press a direction or click to start'}
+    <div className="absolute inset-x-0 top-[68px] flex justify-center px-4">
+      <div className={`w-full max-w-[340px] px-4 py-3 text-center ${PLATE}`}>
+        <div className={`text-[24px] font-bold leading-none tracking-[0.35em] ${ACCENT}`}>SNAKE</div>
+        <div className="mt-2 text-[11px] leading-snug text-[#f5ead9]/85">
+          {touch ? 'drag anywhere to steer · tap to start' : 'arrows, wasd or mouse to steer · press a key to start'}
         </div>
-        {entries.length > 0 && (
-          <ol className="mx-auto mt-3 max-w-[220px] text-[12px]">
-            {entries.slice(0, 3).map((e, i) => (
-              <li key={`${e.date}-${i}`} className="flex justify-between">
-                <span className="opacity-60">{i + 1}</span>
-                <span>{e.initials}</span>
-                <span className={ACCENT}>{e.score}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-        {!touch && <div className="mt-3 text-[10px] text-[#f5ead9]/50">space pause · r restart · m sound</div>}
+        {entries.length > 0 && <Table entries={entries.slice(0, 3)} rank={-1} compact />}
+        {!touch && <div className="mt-2 text-[10px] text-[#f5ead9]/50">space pause · r restart · m sound</div>}
       </div>
     </div>
   );
@@ -92,6 +83,7 @@ function IdlePanel({ touch, entries }: Props) {
 
 function GameOverPanel({ view, phase, entries, rank, touch, lastInitials, onSubmitInitials }: Props) {
   const cause = view.deathCause === 'self' ? 'bit your own tail' : 'hit the rocks';
+  const record = entries.length === 0 || view.score > entries[0].score;
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/25 px-4">
       <div className={`w-full max-w-[380px] px-5 py-4 ${PLATE}`}>
@@ -103,7 +95,11 @@ function GameOverPanel({ view, phase, entries, rank, touch, lastInitials, onSubm
         </div>
         {phase === 'initials' ? (
           <div className="pointer-events-auto mt-4">
-            <InitialsEntry initial={lastInitials} onSubmit={onSubmitInitials} />
+            <InitialsEntry
+              initial={lastInitials}
+              onSubmit={onSubmitInitials}
+              title={record ? 'new high score — your initials' : 'top 10 — your initials'}
+            />
           </div>
         ) : (
           <Table entries={entries} rank={rank} />
@@ -127,22 +123,32 @@ function Stat({ label, value, accent = false }: { label: string; value: number |
   );
 }
 
-function Table({ entries, rank }: { entries: LeaderboardEntry[]; rank: number }) {
+const ROW = 'grid grid-cols-[1.5rem_1fr_3.5rem_3rem] gap-x-2 px-2 tabular-nums';
+
+function Table({ entries, rank, compact = false }: { entries: LeaderboardEntry[]; rank: number; compact?: boolean }) {
   if (entries.length === 0) return <div className="mt-4 text-center text-[11px] text-[#f5ead9]/60">no scores yet</div>;
   return (
-    <ol className="mt-4 text-[12px]">
-      {entries.map((e, i) => (
-        <li
-          key={`${e.date}-${i}`}
-          className={`flex justify-between px-2 py-0.5 ${i === rank ? 'bg-[#ffb84d] font-bold text-[#1a1208]' : ''}`}
-        >
-          <span className="w-6 opacity-60">{i + 1}</span>
-          <span className="flex-1">{e.initials}</span>
-          <span className="w-16 text-right opacity-70">{e.length.toFixed(1)}</span>
-          <span className="w-12 text-right">{e.score}</span>
-        </li>
-      ))}
-    </ol>
+    <div className={`${compact ? 'mx-auto mt-3 max-w-[240px] text-[11px]' : 'mt-4 text-[12px]'} text-left`}>
+      <div className={`${ROW} pb-1 text-[9px] uppercase tracking-[0.18em] text-[#f5ead9]/45`}>
+        <span>#</span>
+        <span>name</span>
+        <span className="text-right">len</span>
+        <span className="text-right">score</span>
+      </div>
+      <ol>
+        {entries.map((e, i) => (
+          <li
+            key={`${e.date}-${i}`}
+            className={`${ROW} py-0.5 ${i === rank ? 'bg-[#ffb84d] font-bold text-[#1a1208]' : ''}`}
+          >
+            <span className="opacity-60">{i + 1}</span>
+            <span>{e.initials}</span>
+            <span className="text-right opacity-70">{e.length.toFixed(1)}</span>
+            <span className={`text-right ${i === rank ? '' : ACCENT}`}>{e.score}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

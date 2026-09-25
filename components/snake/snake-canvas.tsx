@@ -24,6 +24,7 @@ const INITIALS_KEY = 'snake.initials';
 const MOUSE_IDLE_MS = 1500;
 const DRAG_START_PX = 14;
 const TAP_MS = 300;
+const GAMEOVER_DELAY_MS = 900; // let the crash play out before the panel covers it
 
 const KEY_DIR: Record<string, keyof DirKeys | undefined> = {
   ArrowUp: 'up',
@@ -79,6 +80,7 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
   const keysRef = useRef<DirKeys>({ up: false, down: false, left: false, right: false });
   const mouseRef = useRef({ x: 0, y: 0, at: -Infinity, active: false });
   const wantSoundRef = useRef(false);
+  const deathTokenRef = useRef(0);
 
   const [view, setView] = useState<HudView>({ status: 'idle', score: 0, best: 0, length: 4, deathCause: null });
   const [phase, setPhaseState] = useState<HudPhase>('none');
@@ -115,7 +117,11 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
           const table = loadLeaderboard(store);
           setEntries(table);
           setRank(-1);
-          setPhase(qualifies(table, s.score) ? 'initials' : 'table');
+          const token = ++deathTokenRef.current;
+          const next = qualifies(table, s.score) ? 'initials' : 'table';
+          window.setTimeout(() => {
+            if (deathTokenRef.current === token) setPhase(next);
+          }, GAMEOVER_DELAY_MS);
         }
       }
     },
@@ -127,6 +133,7 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
     if (!s) return;
     const best = Math.max(s.best, readNumber(safeStorage(), BEST_KEY));
     const next = applyInput({ ...s, best }, { type: 'restart' });
+    deathTokenRef.current++;
     stateRef.current = next;
     prevRef.current = next;
     accRef.current = 0;

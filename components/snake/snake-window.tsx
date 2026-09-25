@@ -32,8 +32,10 @@ function clamp(p: Pos, w: number, h: number): Pos {
   return { x: Math.min(maxX, Math.max(0, p.x)), y: Math.min(maxY, Math.max(0, p.y)) };
 }
 
+// Docked toward the right, clear of the home page headline, when there is room.
 function defaultPos(w: number, h: number): Pos {
-  return clamp({ x: (window.innerWidth - w) / 2, y: (window.innerHeight - h) / 2 }, w, h);
+  const x = window.innerWidth >= w * 2 ? window.innerWidth - w - 48 : (window.innerWidth - w) / 2;
+  return clamp({ x, y: (window.innerHeight - h) / 2 }, w, h);
 }
 
 export function SnakeWindow({

@@ -3,6 +3,8 @@ import type { GameStatus, Vec2 } from '../engine/types';
 
 const PITCH = (48 * Math.PI) / 180;
 const LOOK_AHEAD = 2.5;
+const FOOD_PULL = 0.28; // share of the way the focus leans toward nearby food
+const FOOD_PULL_R = 16;
 const MAX_FOCUS_R = 11;
 const FOLLOW_TIME = 0.35;
 const BLEND_TIME = 1.2;
@@ -70,11 +72,18 @@ export class CameraRig {
     return { x: this.fx, z: this.fz };
   }
 
-  update(dt: number, head: Vec2, heading: number, status: GameStatus): void {
+  update(dt: number, head: Vec2, heading: number, status: GameStatus, food: Vec2 | null = null): void {
     const want = status === 'idle' ? 0 : 1;
     this.blend = this.reduced ? want : Math.max(0, Math.min(1, this.blend + Math.sign(want - this.blend) * (dt / BLEND_TIME)));
 
     const goal = playFocusGoal(head, heading);
+    // Lean toward the food so it tends to stay in frame instead of trailing off an edge.
+    if (food && status === 'playing') {
+      const d = Math.hypot(food.x - goal.x, food.z - goal.z);
+      const w = FOOD_PULL * Math.max(0, 1 - d / FOOD_PULL_R);
+      goal.x += (food.x - goal.x) * w;
+      goal.z += (food.z - goal.z) * w;
+    }
     if (this.reduced) {
       this.fx = goal.x;
       this.fz = goal.z;
@@ -87,12 +96,18 @@ export class CameraRig {
     this.tmpPos.set(this.fx, d * Math.sin(PITCH), this.fz + d * Math.cos(PITCH));
     this.tmpLook.set(this.fx, 0, this.fz);
 
-    // Idle: a low shot from the side opposite the sun, so sun, sky and dunes are in frame.
+    // Idle: a close front three-quarter shot of the resting snake, side-lit (90° from the sun) so
+    // the ripples rake and the snake is not a backlit silhouette, with the horizon high in frame.
     this.idleTime += dt;
-    const swing = this.reduced ? 0 : Math.sin(this.idleTime * 0.12) * 0.45;
-    const a = this.sunAzimuth + Math.PI + swing;
-    this.idlePos.set(Math.cos(a) * 34, 8.5, Math.sin(a) * 34);
-    this.idleLook.set(0, 2, 0);
+    const swing = this.reduced ? 0 : Math.sin(this.idleTime * 0.12) * 0.2;
+    const a = this.sunAzimuth + Math.PI / 2 + swing;
+    const idleDist = this.dist * 0.46;
+    this.idleLook.set(head.x, 0.3, head.z + 1.2);
+    this.idlePos.set(
+      this.idleLook.x + Math.cos(a) * idleDist,
+      idleDist * 0.42,
+      this.idleLook.z + Math.sin(a) * idleDist,
+    );
 
     const t = this.blend * this.blend * (3 - 2 * this.blend);
     this.camera.position.lerpVectors(this.idlePos, this.tmpPos, t);

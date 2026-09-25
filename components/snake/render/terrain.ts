@@ -128,12 +128,12 @@ diffuseColor.rgb *= sand;
 
 const FRAGMENT_NORMAL = /* glsl */ `
 vec2 windDir = normalize(vec2(0.82, 0.57));
-float ripplePhase = dot(vXZ, windDir) * 5.5 + fbm(vXZ * 0.33) * 5.0;
+float ripplePhase = dot(vXZ, windDir) * 7.2 + fbm(vXZ * 0.33) * 6.0;
 float rippleAA = clamp(1.0 - fwidth(ripplePhase) * 0.4, 0.0, 1.0);
 float disturbed = clamp(groove * 1.6 + rim * 1.2, 0.0, 1.0);
 float rippleAmp = 0.045 * rippleAA * (1.0 - disturbed);
 float dRipple = cos(ripplePhase) + 0.35 * cos(2.0 * ripplePhase);
-vec2 grad = windDir * dRipple * 5.5 * rippleAmp;
+vec2 grad = windDir * dRipple * 7.2 * rippleAmp * 0.8;
 float te = uTrailTexel;
 grad += 1.6 * vec2(
   trailH(vXZ + vec2(te, 0.0)) - trailH(vXZ - vec2(te, 0.0)),
@@ -151,7 +151,8 @@ vec3 halfW = normalize(viewDirW + normalize(uSunDir));
 float glintSpec = pow(max(dot(sandN, halfW), 0.0), 90.0);
 float twinkle = 0.55 + 0.45 * sin(uTime * 2.3 + glintSeed * 71.0);
 float glintFade = 1.0 - smoothstep(18.0, 45.0, length(cameraPosition - vWPos));
-totalEmissiveRadiance += uSunColor * step(0.982, glintSeed) * glintSpec * twinkle * glintFade * uGlint * 2.5 * (1.0 - groove);
+float crest = smoothstep(0.45, 0.95, sin(ripplePhase));
+totalEmissiveRadiance += uSunColor * step(0.993, glintSeed) * crest * glintSpec * twinkle * glintFade * uGlint * 2.5 * (1.0 - groove);
 `;
 
 export type Terrain = {

@@ -37,7 +37,15 @@ export function speedFor(score: number): number {
 export function createInitialState(opts: { seed: number; best?: number; status?: GameStatus }): GameState {
   const head: Vec2 = { x: 0, z: 6 };
   const count = Math.ceil(START_LENGTH / SAMPLE_SPACING) + 2;
-  const path: Vec2[] = Array.from({ length: count }, (_, i) => ({ x: 0, z: head.z + i * SAMPLE_SPACING }));
+  // Resting pose: a gentle S behind the head (samples stay SAMPLE_SPACING apart along it).
+  const path: Vec2[] = [];
+  let p = { ...head };
+  for (let i = 0; i < count; i++) {
+    path.push(p);
+    const s = (i + 0.5) * SAMPLE_SPACING;
+    const back = Math.PI / 2 + 0.75 * Math.sin(s * 1.5) * Math.min(1, s / 0.8);
+    p = { x: p.x + Math.cos(back) * SAMPLE_SPACING, z: p.z + Math.sin(back) * SAMPLE_SPACING };
+  }
   const base: GameState = {
     head,
     heading: -Math.PI / 2,
