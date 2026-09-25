@@ -961,3 +961,7 @@ h3 {
   .ide-cta:focus-visible,
   .ide-cta:active { transform: none; }
 }
+/* The full-page snake game is a 3D scene: the CRT scanlines only dull and band it. */
+body:has([data-variant="page"])::after {
+  display: none;
+}
