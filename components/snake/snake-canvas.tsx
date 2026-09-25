@@ -191,6 +191,7 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
     let raf = 0;
     let resizeObserver: ResizeObserver | null = null;
     let themeObserver: MutationObserver | null = null;
+    let removeDevHook: (() => void) | null = null;
 
     const store = safeStorage();
     const theme = readTheme();
@@ -235,6 +236,28 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
       });
       themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
       setMounted(true);
+      if (process.env.NODE_ENV !== 'production') {
+        void import('./dev-scenes').then(({ installDevHook }) => {
+          if (cancelled) return;
+          removeDevHook = installDevHook({
+            handle,
+            apply: (s, prev) => {
+              stateRef.current = s;
+              prevRef.current = prev;
+              accRef.current = 0;
+              syncView(s);
+            },
+            freeze: (on) => {
+              frozenRef.current = on;
+            },
+            setHud: (p, e, r) => {
+              setPhase(p);
+              setEntries(e);
+              setRank(r);
+            },
+          });
+        });
+      }
 
       let last = performance.now();
       const loop = (now: number) => {
@@ -280,12 +303,13 @@ export function SnakeCanvas({ variant }: { variant: 'window' | 'page' }) {
       cancelAnimationFrame(raf);
       resizeObserver?.disconnect();
       themeObserver?.disconnect();
+      removeDevHook?.();
       handleRef.current?.dispose();
       handleRef.current = null;
       sound.dispose();
       soundRef.current = null;
     };
-  }, [onEngineEvents, syncView]);
+  }, [onEngineEvents, setPhase, syncView]);
 
   // Keyboard.
   useEffect(() => {
