@@ -1,6 +1,6 @@
 # Arthur Buikis
 
-> Backend and platform engineer based in Riga. Around twelve years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.
+> Backend and platform engineer based in Riga. Around ten years in Python with Rust (PyO3) for hot paths. Currently working on a media-processing platform.
 
 This site is a portfolio. Prose is the canonical source — JSON-LD on each page mirrors the same facts.
 
