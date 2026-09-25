@@ -21,7 +21,9 @@ export type Palette = {
   rim: Color; // pushed-up sand either side
   dust: Color; // particle colour
   rock: Color; // multiplies the sandstone vertex colours
+  rockFill: Color; // emissive fill so shadowed rock faces keep detail
   snakeRim: number; // fresnel rim on the snake
+  snakeLift: number; // skin brightness multiplier
   glint: number;
   foodGlow: number;
   bloom: number;
@@ -41,6 +43,7 @@ const COLOR_KEYS = [
   'rim',
   'dust',
   'rock',
+  'rockFill',
 ] as const;
 const NUMBER_KEYS = [
   'fogDensity',
@@ -53,6 +56,7 @@ const NUMBER_KEYS = [
   'bloom',
   'exposure',
   'snakeRim',
+  'snakeLift',
 ] as const;
 
 export const PALETTES: Record<Theme, Palette> = {
@@ -76,7 +80,9 @@ export const PALETTES: Record<Theme, Palette> = {
     rim: new Color('#f2cd98'),
     dust: new Color('#e9c28f'),
     rock: new Color('#ffffff'),
+    rockFill: new Color('#000000'),
     snakeRim: 0.08,
+    snakeLift: 1,
     glint: 1,
     foodGlow: 1,
     bloom: 0.32,
@@ -102,8 +108,10 @@ export const PALETTES: Record<Theme, Palette> = {
     groove: new Color('#4d4a4a'),
     rim: new Color('#cdc6b8'),
     dust: new Color('#8e8a86'),
-    rock: new Color('#c3cae0'),
-    snakeRim: 0.28,
+    rock: new Color('#a9b6e6'),
+    rockFill: new Color('#10142a'),
+    snakeRim: 0.4,
+    snakeLift: 1.6,
     glint: 1.6,
     foodGlow: 1.8,
     bloom: 0.55,

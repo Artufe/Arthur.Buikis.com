@@ -12,17 +12,23 @@ const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 export class Effects {
   readonly flash = new PointLight(0xffffff, 0, 11, 2);
   private flashLevel = 0;
+  private flashDecay = 9;
   private sprayCarry = 0;
   private wispCarry = 0;
   private sparkleCarry = 0;
   private budget = 1;
   private reduced = false;
   private readonly dust = new Color('#e9c28f');
+  private readonly chunk = new Color('#f2cd98');
 
   constructor(private readonly sand: ParticlePool, private readonly sparks: ParticlePool) {}
 
   setDust(color: Color): void {
     this.dust.copy(color);
+  }
+
+  setChunk(color: Color): void {
+    this.chunk.copy(color);
   }
 
   setBudget(budget: number): void {
@@ -102,6 +108,7 @@ export class Effects {
     this.flash.color.set(kind === 'golden' ? '#ffc043' : '#ff4a6e');
     this.flash.position.copy(pos);
     this.flashLevel = kind === 'golden' ? 22 : 14;
+    this.flashDecay = 9;
   }
 
   puff(pos: Vector3): void {
@@ -191,8 +198,8 @@ export class Effects {
         vz: Math.sin(a) * sp,
         life: rnd(0.8, 1.5),
         size: rnd(0.16, 0.42),
-        alpha: 0.9,
-        color: this.dust,
+        alpha: 0.95,
+        color: this.chunk,
         gravity: 8,
         drag: 1.3,
       });
@@ -216,9 +223,10 @@ export class Effects {
         drag: 2.2,
       });
     }
-    this.flash.color.set('#ffe2b8');
+    this.flash.color.set('#ffc98a');
     this.flash.position.set(pos.x, gy + 1.2, pos.z);
-    this.flashLevel = 60;
+    this.flashLevel = 70;
+    this.flashDecay = 3.5; // the crash glow lingers
   }
 
   /** Motes of light rising around the golden food. */
@@ -245,7 +253,7 @@ export class Effects {
   }
 
   update(dt: number): void {
-    this.flashLevel *= Math.exp(-dt * 9);
+    this.flashLevel *= Math.exp(-dt * this.flashDecay);
     this.flash.intensity = this.flashLevel < 0.05 ? 0 : this.flashLevel;
     this.sand.update(dt);
     this.sparks.update(dt);

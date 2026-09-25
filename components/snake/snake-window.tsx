@@ -130,7 +130,8 @@ export function SnakeWindow({
         background: 'var(--surface)',
         border: '2px solid var(--border)',
         // Reads as a layer above the page rather than a hole cut into it.
-        boxShadow: isMobile ? undefined : '0 24px 60px -12px rgba(0, 0, 0, 0.45)',
+        // The faint warm glow lifts it off the near-black page in the dark theme.
+        boxShadow: isMobile ? undefined : '0 24px 60px -12px rgba(0, 0, 0, 0.45), 0 0 48px rgba(255, 184, 77, 0.07)',
       }}
       className="flex flex-col font-mono"
       role="dialog"

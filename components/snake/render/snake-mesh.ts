@@ -34,11 +34,13 @@ float around = fract(vUv.y);
 float top = 0.5 + 0.5 * sin(around * 6.2831853);
 vec3 skin = mix(uBelly, uBase, smoothstep(0.18, 0.5, top));
 // Dark saddles across the back, edged in a warm accent; they read even at play distance.
-float band = abs(fract(vUv.x * 1.15) - 0.5);
+float bandPos = vUv.x * 1.15 + 0.18 * sin(vUv.x * 0.83) + 0.1 * sin(vUv.x * 2.9);
+float band = abs(fract(bandPos) - 0.5);
+float bandW = 0.15 + 0.06 * sin(floor(bandPos) * 2.7);
 float dorsal = smoothstep(0.2, 0.6, top);
-float saddle = (1.0 - smoothstep(0.17, 0.23, band)) * dorsal;
+float saddle = (1.0 - smoothstep(bandW, bandW + 0.06, band)) * dorsal;
 skin = mix(skin, uDark, saddle);
-float edge = (1.0 - smoothstep(0.0, 0.035, abs(band - 0.2))) * dorsal;
+float edge = (1.0 - smoothstep(0.0, 0.035, abs(band - bandW - 0.03))) * dorsal;
 skin = mix(skin, uAccent, edge * 0.85);
 // Pale line where the flank meets the belly.
 float flank = 1.0 - smoothstep(0.0, 0.05, abs(top - 0.22));
@@ -56,12 +58,25 @@ float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3
 totalEmissiveRadiance += uRimColor * rimF * uRim;
 `;
 
-type RimUniforms = { uRim: { value: number }; uRimColor: { value: Color } };
+// Brighter skin at night so the body separates from the sand; drained and dusty once dead.
+const SKIN_ADJUST_GLSL = /* glsl */ `
+diffuseColor.rgb *= uLift;
+float skinLum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(skinLum) * vec3(1.05, 0.95, 0.85), uDead * 0.75);
+`;
+
+type RimUniforms = {
+  uRim: { value: number };
+  uRimColor: { value: Color };
+  uLift: { value: number };
+  uDead: { value: number };
+};
 
 function addRim(shader: { uniforms: Record<string, unknown>; fragmentShader: string }, rim: RimUniforms): void {
   Object.assign(shader.uniforms, rim);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform float uRim;\nuniform vec3 uRimColor;')
+    .replace('#include <common>', '#include <common>\nuniform float uRim;\nuniform vec3 uRimColor;\nuniform float uLift;\nuniform float uDead;')
+    .replace('#include <color_fragment>', `#include <color_fragment>\n${SKIN_ADJUST_GLSL}`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${RIM_GLSL}`);
 }
 
@@ -82,12 +97,28 @@ function createBodyMaterial(rim: RimUniforms): MeshPhysicalMaterial {
     shader.uniforms.uDark = { value: new Color('#173d24') };
     shader.uniforms.uBelly = { value: new Color('#ecdca6') };
     shader.uniforms.uAccent = { value: new Color('#e8b54a') };
+    // First, so the skin adjustment lands after the pattern that the next replace inserts.
+    addRim(shader, rim);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uBase;\nuniform vec3 uDark;\nuniform vec3 uBelly;\nuniform vec3 uAccent;')
       .replace('#include <color_fragment>', `#include <color_fragment>\n${SCALE_GLSL}`);
-    addRim(shader, rim);
   };
   return m;
+}
+
+/** One piece: a wide jaw at the back narrowing into a flat, rounded snout (forward = +x). */
+function wedgeHeadGeometry(): SphereGeometry {
+  const g = new SphereGeometry(1, 32, 20);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const t = (x + 1) / 2; // 0 back, 1 tip
+    const width = 0.46 * (1 - 0.45 * t * t);
+    const height = 0.29 * (1 - 0.35 * t) * (pos.getY(i) < 0 ? 0.8 : 1);
+    pos.setXYZ(i, x * 0.66 + 0.08, pos.getY(i) * height, pos.getZ(i) * width);
+  }
+  g.computeVertexNormals();
+  return g;
 }
 
 export class SnakeMesh {
@@ -100,7 +131,12 @@ export class SnakeMesh {
   private readonly head = new Group();
   private readonly tongue = new Group();
   private readonly disposables: Array<{ dispose(): void }> = [];
-  private readonly rim: RimUniforms = { uRim: { value: 0.1 }, uRimColor: { value: new Color('#8fe0c0') } };
+  private readonly rim: RimUniforms = {
+    uRim: { value: 0.1 },
+    uRimColor: { value: new Color('#8fe0c0') },
+    uLift: { value: 1 },
+    uDead: { value: 0 },
+  };
   private swayPhase = 0;
   private tongueClock = 0;
 
@@ -147,15 +183,9 @@ export class SnakeMesh {
       iridescenceIOR: 1.3,
     });
     headMat.onBeforeCompile = (shader) => addRim(shader, this.rim);
-    const headGeo = new SphereGeometry(1, 32, 20);
-    // Wedge head: a wide skull behind a narrower, flatter snout.
+    const headGeo = wedgeHeadGeometry();
     const skull = new Mesh(headGeo, headMat);
-    skull.scale.set(0.52, 0.29, 0.46);
     skull.castShadow = true;
-    const snout = new Mesh(headGeo, headMat);
-    snout.scale.set(0.42, 0.22, 0.33);
-    snout.position.set(0.22, -0.03, 0);
-    snout.castShadow = true;
     const eyeGeo = new SphereGeometry(0.085, 16, 12);
     const eyeMat = new MeshPhysicalMaterial({
       color: '#f0b429',
@@ -188,7 +218,7 @@ export class SnakeMesh {
       this.tongue.add(fork);
     }
     this.tongue.position.set(0.55, -0.02, 0);
-    this.head.add(skull, snout, this.tongue);
+    this.head.add(skull, this.tongue);
     this.head.scale.setScalar(VISUAL_R / BODY_R);
     this.group.add(body, this.head);
     this.disposables.push(this.geometry, bodyMat, headMat, headGeo, eyeGeo, eyeMat, pupilGeo, pupilMat, tongueMat, stemGeo, forkGeo);
@@ -201,6 +231,7 @@ export class SnakeMesh {
       return;
     }
     if (moving) this.swayPhase += dt * speed * 1.6;
+    this.rim.uDead.value = Math.min(1, sink * 2.5);
 
     this.arcs[0] = 0;
     for (let i = 1; i < n; i++) {
@@ -263,8 +294,9 @@ export class SnakeMesh {
     this.tongue.scale.set(Math.max(0.001, out), 1, 1);
   }
 
-  setRim(strength: number): void {
+  setRim(strength: number, lift = 1): void {
     this.rim.uRim.value = strength;
+    this.rim.uLift.value = lift;
   }
 
   setVisible(visible: boolean): void {

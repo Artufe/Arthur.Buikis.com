@@ -53,8 +53,10 @@ void main() {
   col = mix(col, uHorizon * 0.85, smoothstep(0.0, -0.25, h));
   float c = dot(d, normalize(uSunDir));
   float disc = smoothstep(cos(uSunSize * 1.08), cos(uSunSize * 0.92), c);
-  float glow = pow(max(c, 0.0), 6.0) * 0.4 + pow(max(c, 0.0), 48.0) * 0.5;
-  col += uSunColor * (disc * 2.6 + glow);
+  float glow = pow(max(c, 0.0), 12.0) * 0.3 + pow(max(c, 0.0), 90.0) * 0.45;
+  // Faint maria on the moon (stars > 0); the sun keeps a clean disc.
+  float maria = mix(1.0, 0.72 + 0.28 * hash31(floor(d * 900.0)) * smoothstep(0.0, 1.0, sin(d.x * 310.0) * sin(d.z * 270.0) + 0.6), uStars);
+  col += uSunColor * (disc * 2.2 * maria + glow);
   // Stars: one jittered, round point per occupied cell, in two layers of different density.
   float stars = 0.0;
   for (int layer = 0; layer < 2; layer++) {
@@ -248,6 +250,7 @@ export function createEnvironment(scene: Scene, opts: { shadowSize: number }): E
       fog.color.copy(p.fog);
       fog.density = p.fogDensity;
       rocks.material.color.copy(p.rock);
+      rocks.material.emissive.copy(p.rockFill);
     },
     update(time, cameraPosition) {
       skyUniforms.uTime.value = time;

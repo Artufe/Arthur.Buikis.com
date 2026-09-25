@@ -3,8 +3,8 @@ import type { GameStatus, Vec2 } from '../engine/types';
 
 const PITCH = (48 * Math.PI) / 180;
 const LOOK_AHEAD = 3.5;
-const FOOD_PULL = 0.38; // share of the way the focus leans toward nearby food
-const FOOD_PULL_R = 20;
+const FOOD_PULL = 0.5; // share of the way the focus leans toward nearby food
+const FOOD_PULL_R = 24;
 const CRASH_OFFSET = 4.5; // on game over the focus sits below the head, so the crash shows above the panel
 const MAX_FOCUS_R = 11;
 const FOLLOW_TIME = 0.35;

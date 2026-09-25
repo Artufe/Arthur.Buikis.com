@@ -16,6 +16,7 @@ export type HudView = {
 
 // Drawn over the 3D scene, not the site background: fixed plate + accent that read in both themes.
 const PLATE = 'bg-[rgba(14,11,8,0.58)] backdrop-blur-[3px] border border-white/10 text-[#f5ead9]';
+const SOLID_PLATE = 'bg-[rgba(14,11,8,0.82)] backdrop-blur-[6px] border border-white/10 text-[#f5ead9]';
 const ACCENT = 'text-[#ffb84d]';
 const LABEL = 'text-[10px] uppercase tracking-[0.2em] text-[#f5ead9]/60';
 
@@ -68,7 +69,8 @@ export function Hud(props: Props) {
 // Sits high, below the corner boxes, so the snake and food below stay in view.
 function IdlePanel({ touch, entries }: Props) {
   return (
-    <div className="absolute inset-x-0 top-[68px] flex justify-center px-4 @[760px]:justify-start @[760px]:px-3">
+    // Phones: at the bottom, under the snake, so the sky stays visible. Wide: top left.
+    <div className="absolute inset-x-0 bottom-5 flex justify-center px-4 @[500px]:bottom-auto @[500px]:top-[68px] @[760px]:justify-start @[760px]:px-3">
       <div className={`w-full max-w-[340px] px-4 py-3 text-center ${PLATE}`}>
         <div className={`text-[24px] font-bold leading-none tracking-[0.35em] ${ACCENT}`}>SNAKE</div>
         <div className="mt-2 text-[11px] leading-snug text-[#f5ead9]/85">
@@ -92,8 +94,8 @@ function GameOverPanel({ view, phase, entries, rank, touch, lastInitials, onSubm
   // Anchored low: the camera frames the crash in the upper part of the view.
   return (
     <div className="absolute inset-0 flex items-end justify-center bg-black/15 px-4 pb-5">
-      <div className={`w-full max-w-[380px] px-5 py-4 ${PLATE}`}>
-        <div className="text-center text-[11px] uppercase tracking-[0.3em] text-[#f5ead9]/60">{cause}</div>
+      <div className={`w-full max-w-[380px] px-5 py-4 ${SOLID_PLATE}`}>
+        <div className={`text-center text-[18px] font-bold uppercase tracking-[0.22em] ${ACCENT}`}>{cause}</div>
         <div className="mt-2 flex justify-center gap-6 text-center">
           <Stat label="score" value={view.score} accent />
           <Stat label="length" value={view.length.toFixed(1)} />

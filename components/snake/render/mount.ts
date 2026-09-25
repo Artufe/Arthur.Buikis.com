@@ -94,7 +94,8 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
     renderer.toneMappingExposure = palette.exposure;
     food.setGlow(palette.foodGlow);
     effects.setDust(palette.dust);
-    snake.setRim(palette.snakeRim);
+    effects.setChunk(palette.rim);
+    snake.setRim(palette.snakeRim, palette.snakeLift);
     rig.setSunAzimuth(Math.atan2(palette.sunDir.z, palette.sunDir.x));
   }
 
@@ -147,9 +148,10 @@ export function mount(canvas: HTMLCanvasElement, opts: MountOptions): RendererHa
         points.push(cur.path[i]);
       }
       if (cur.status === 'idle') {
-        // At rest the snake lies in a fresh groove of its own body, tail to head.
+        // At rest the snake lies in a shallow bed of its own body (an aged, narrower groove, so no
+        // rim wall shows around it).
         trail.clear();
-        for (let i = points.length - 1; i >= 0; i--) trail.push(points[i].x, points[i].z, trailClock);
+        for (let i = points.length - 1; i >= 0; i--) trail.push(points[i].x, points[i].z, trailClock - 7);
       }
       const s = deathAt === null ? 0 : Math.min(1, (clock - deathAt) / SINK_SECONDS);
       snake.update(points, heading, dt, cur.speed, s * s * (3 - 2 * s), cur.status === 'playing');
