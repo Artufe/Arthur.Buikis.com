@@ -20,6 +20,8 @@ export interface DebugHook {
   render(): void;
   perf(): { median: number; p99: number; fps: number; low1: number; max: number; hitches: number; drawCalls: number; triangles: number; systemMs: Record<string, number>; gpuMs: Record<string, number> };
   resetPerf(): void;
+  /** Where startup time went: stage → ms (plus 'total'). */
+  boot(): Array<{ stage: string; ms: number }>;
 }
 
 declare global {
@@ -81,6 +83,7 @@ export function installDebugHook(
     resetPerf() {
       ctx.perf.reset();
     },
+    boot: () => ctx.perf.boot.slice(),
   };
   window.__goldenline = hook;
   return () => {

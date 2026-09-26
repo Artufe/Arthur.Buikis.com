@@ -16,7 +16,7 @@ Phase A (parallel; 6 at once is this machine's limit)
   A5 surface state ───────────────────────────────┤
   A6 first-person player ─────────────────────────┘
 Phase B
-  B1 surfing (needs A6, A8) ──► B2 polish + performance hardening ──► orchestrator: final review
+  B1 surfing (needs A6, A8) ──► B2 polish + performance + startup ──► orchestrator: final review
 ```
 
 ---
@@ -387,7 +387,7 @@ takeoff through two carves into a tube section and out beside the pier; its `--s
 the drop, the backlit face, a spray fan casting a shadow, the foam trail persisting after the
 wave has passed, and the tube ceiling; no snaps entering or leaving any state.
 
-## B2 · Polish & performance hardening — `vfx/` (except `vfx/spray/`), plus tuning passes
+## B2 · Polish, performance & startup — `vfx/` (except `vfx/spray/`), plus tuning passes
 
 **Brief:** §3.6 (spray veils, salt mist, light shafts), §2 (ambient life), §3.7 calibration, §4,
 §5, §9. **Budget:** 0.3 ms for the ambient VFX; you own the frame total (10.6 ms allocated, 0.5 ms headroom).
@@ -407,4 +407,37 @@ wipeout), verify the M3 proxy budget, set the quality presets, and fill `PERF.md
 per-system table. Finally, walk the **BRIEF §9 acceptance list** item by item with evidence
 shots in `docs/goldenline/shots/final/`.
 
-Acceptance: all of BRIEF §9, except the 5070 Ti numbers, which are recorded later on the target PC.
+**Startup optimisation** (user request, added after Phase A). Startup is slow today. Baseline, from
+`node scripts/goldenline-shot.mjs --boot` (dev server, M3, other agents sharing the GPU):
+
+| stage | ms | what is really happening |
+|---|---|---|
+| dev route compile (before boot) | ~19,000 | Turbopack compiling `/surf` on first visit. Dev only, but measure the prod chunk size |
+| init (all systems) | ~3,500 | CPU bakes on the main thread: beach 1.1 s, player limb meshing 0.9 s, water 0.5 s, ocean 0.35 s (+ ~1 s swell eikonal) |
+| warmup beach | ~16,000 | the **first full post-chain render**: every system's pipelines node-built and compiled synchronously, one by one (main MRT pass + 4 shadow cascades) |
+| warmup pier | ~3,000 | the same again for pipelines the first frame missed |
+| compileAsync | ~2,200 | |
+| **engine total** | **~25,000** | plus the dev compile ≈ 44 s from click to "click to paddle out" |
+
+Targets: on a **production build** (`npx next build && npx serve out`, M3, warm HTTP cache), under 5 s
+from opening the window to "click to paddle out"; under 8 s with a cold cache; the loading
+bar keeps moving (no main-thread task over ~200 ms without yielding); and still **zero pipeline
+compiles after the loading screen closes** (the hitch rule wins over load time). Directions to
+try, measured one by one:
+- Compile pipelines **in parallel and asynchronously**: `compileAsync` against the real post-chain
+  scene pass (its MRT target) and each shadow cascade, not a synchronous first frame; kick off all
+  systems' compiles together.
+- Cut the pipeline count: share materials and node graphs across meshes, and merge permutations
+  that differ only by a uniform; log the count per system before and after.
+- Move CPU bakes off the main thread (workers) or onto the GPU (compute), or precompute them at build
+  time into compact binary files in `public/goldenline/` (terrain heightfield, swell eikonal field,
+  sky LUTs, limb meshes, pier plan) when that is smaller and faster than recomputing.
+- Run independent `init()`s concurrently instead of strictly in sequence where their contracts
+  allow it (the core loop in `core/engine.ts` may change for this; coordinate with the orchestrator).
+- Start loading before the click: prefetch the engine chunk and assets when the palette opens or on idle.
+- Loading screen: show real per-stage progress (the boot timeline is in `ctx.perf.boot`).
+
+Record the before and after timelines in `PERF.md`.
+
+Acceptance: all of BRIEF §9, except the 5070 Ti numbers, which are recorded later on the target PC,
+plus the startup targets above.

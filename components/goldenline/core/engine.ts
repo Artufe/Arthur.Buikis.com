@@ -42,6 +42,15 @@ const WARM_FRAMES = 8;
 export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const { canvas } = opts;
   if (typeof navigator === 'undefined' || !('gpu' in navigator) || !navigator.gpu) throw new NoWebGPUError();
+  // Boot timeline: where the loading screen's seconds go. Exposed as perf.boot and printed in dev.
+  const bootStart = performance.now();
+  let bootMark = bootStart;
+  const boot: Array<{ stage: string; ms: number }> = [];
+  const mark = (stage: string) => {
+    const now = performance.now();
+    boot.push({ stage, ms: Math.round(now - bootMark) });
+    bootMark = now;
+  };
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new NoWebGPUError();
   const query = new URLSearchParams(opts.search);
@@ -55,6 +64,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     trackTimestamp: adapter.features.has('timestamp-query'),
   });
   await renderer.init();
+  mark('webgpu device');
   // WebGPURenderer silently falls back to WebGL2. The brief forbids fallbacks.
   if (!(renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend) {
     renderer.dispose();
@@ -76,8 +86,11 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
         ? 'medium'
         : 'high';
 
+  const terrain = createTerrainService();
+  mark('terrain bake');
   const params = new ParamRegistry(opts.search);
   const perf = new Perf();
+  perf.boot = boot;
   const input = new Input(canvas);
 
   const ctx: GLContext = {
@@ -94,7 +107,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     variant: opts.variant,
     reducedMotion: opts.reducedMotion,
     services: {
-      terrain: createTerrainService(),
+      terrain,
       atmosphere: stubAtmosphere(),
       ocean: stubOcean(),
       state: stubState(),
@@ -135,6 +148,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     } catch (e) {
       fail(s, 'init', e);
     }
+    mark(`init ${s.name}`);
     progress(`building ${s.name}`);
   }
 
@@ -176,9 +190,11 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     } catch (e) {
       fail(s, 'warmup', e);
     }
+    if (s.warmup) mark(`warmup ${s.name}`);
     progress(`warming ${s.name}`);
   }
   await renderer.compileAsync(scene, camera);
+  mark('compileAsync');
   progress('compiling pipelines');
   for (let i = 0; i < WARM_FRAMES; i++) {
     ctx.time.dt = 1 / 60;
@@ -188,6 +204,9 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   }
   // Let the GPU drain the warm frames before the loading screen fades.
   await new Promise((r) => requestAnimationFrame(() => r(null)));
+  mark('warm frames');
+  boot.push({ stage: 'total', ms: Math.round(performance.now() - bootStart) });
+  if (process.env.NODE_ENV !== 'production') console.info('[goldenline] boot (ms)', JSON.stringify(boot));
   progress('ready');
 
   const overlay: Overlay = createOverlay(ctx, opts.overlayHost, (q) => engine.setQuality(q));

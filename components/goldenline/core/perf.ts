@@ -20,6 +20,8 @@ export class Perf {
   readonly systemMs: Record<string, number> = {};
   /** Per-pass GPU ms when timestamp queries are available (filled by the post owner). */
   readonly gpuMs: Record<string, number> = {};
+  /** Boot timeline (stage, ms since the previous stage), filled once by the engine. */
+  boot: Array<{ stage: string; ms: number }> = [];
   private readonly sorted = new Float32Array(RING);
   private t0 = 0;
   readonly summary: PerfSummary = { median: 0, p99: 0, fps: 0, low1: 0, max: 0, hitches: 0 };

@@ -10,6 +10,7 @@
 //   node scripts/goldenline-shot.mjs --shot beach-sun --perf 10 --size 1280x720       (prints JSON)
 //   node scripts/goldenline-shot.mjs --shot beach-sun --p ocean.swellHeight=1.8 --p post.bloom=0
 //   node scripts/goldenline-shot.mjs --list
+//   node scripts/goldenline-shot.mjs --boot                                   (startup timeline per stage)
 //
 // Flags: --size WxH (default 2560x1440) --q low|medium|high|ultra (default high) --warm N rAFs
 // before capture (default 45, lets TAA converge) --jpg (quality 92, for committed milestone shots)
@@ -65,6 +66,11 @@ try {
   await page.goto(`${base}/surf/?${search}`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
   await page.waitForFunction(() => !!window.__goldenline, null, { timeout: 180_000, polling: 250 });
   console.log(`booted in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  if (flags.boot) {
+    const boot = await page.evaluate(() => window.__goldenline.boot());
+    for (const b of boot) console.log(`${String(b.ms).padStart(7)} ms  ${b.stage}`);
+    if (!flags.shot && !flags.cam) process.exit(0);
+  }
 
   if (flags.list) {
     console.log(await page.evaluate(() => window.__goldenline.shots().join('\n')));
