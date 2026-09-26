@@ -56,3 +56,4 @@ One line per deviation from BRIEF.md, prefixed with the area. Newest at the bott
 - [state] Sand runs on an active-tile schedule (splat/scroll-in tiles + a rolling 1/8, per-tile clocks, plus a dt=0 sync pass): slow processes step at 7.5 Hz with exact accumulated time; splat-touched tiles update every frame.
 - [state] Added optional, additive members to `SurfaceStateService` (`sandHeight`, `sandTexel`, `nearTexel`, `reserve`, `splatData`) for self-shadowed prints and allocation-free bulk writers.
 
+- [orchestrator] Pier shortened (user feedback): `PIER.tipX` −176 → −110. The tip is in 11.4 m of channel water just past the +Z end of the break; an open end with a jump and a ladder climb is assigned to B1.

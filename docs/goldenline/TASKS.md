@@ -21,6 +21,10 @@ Phase B
 
 ## User feedback (binding, newest first)
 
+- **After Phase A:** the pier is **shorter**: the orchestrator moved `PIER.tipX` from −176 to −110
+  (a 144 m deck; the tip sits in 11.4 m of water just past the +Z end of the break). The pier also
+  needs an **open end to jump into the water**, and a way to **climb back out**. Both belong to B1
+  (see "Pier exit" there).
 - **After Phase A:** the waves must be **bigger**: overhead set faces of 2.5–3.5 m at the peak,
   about 1.5 m between sets (A8 owns this). The small wind chop was travelling seaward (it followed the
   offshore breeze); the user wants it to travel **shoreward** with the swell. The orchestrator
@@ -395,10 +399,33 @@ violent tumble of camera and spray that stays above the surface, then an eased r
 paddling. Speed without audio: motion blur on the face, spray streaking past, foam lines rushing
 under the board, horizon bank, and nose chatter over chop. Tune by hand until it is fun.
 
+**Pier exit (user request, added after Phase A).** Getting from the pier into the lineup and
+back is part of the loop. You may edit `pier/plan.ts`, `pier/service.ts` (and extend
+`PierService` additively) and the player controller for this; list every change.
+- **Open end:** a ~1.4 m gap in the tip railing, finished like the rest of the pier (end posts,
+  whipped rope ends tied off, worn planks where people stand), plus a timber **swim ladder** from
+  the gap down into the water (barnacles and algae below the tide line, like the pilings).
+  `clampToDeck` lets the body through the gap and nowhere else.
+- **Jump:** at the open edge, Space (or walking off) launches a physical jump with the board
+  under the arm: a short run-up, the drop from the 4.2 m deck, a big entry splash (shared spray
+  system + foam, wake ring and disturbance splats), then an eased hand-off into `paddle` as the
+  board comes under the chest. The camera must still never go below the surface (brief: no
+  underwater). Stop it at the surface inside the splash (a whiteout of spray and water sheeting
+  is fine), never a cut.
+- **Climb:** paddle up to the ladder and press Space (or W into it) to climb. Hands on the rungs
+  (first-person), the board tucked under one arm or slid onto the deck first, eased steps, water
+  streaming off, then step onto the deck in `walk`. Nice to have: climbing back out onto the
+  stairs' landing at the root the same way.
+- **Stretch (only if it looks finished):** vault over the railing anywhere along the deck by
+  facing it and pressing Space, and drop into the water. The user named this as the fallback if an
+  opening wasn't possible; with the opening it's a bonus, so cut it rather than ship it rough.
+
 Acceptance: a scripted ride (write a deterministic input playback for the shot tool) from
 takeoff through two carves into a tube section and out beside the pier; its `--seq` frames show
 the drop, the backlit face, a spray fan casting a shadow, the foam trail persisting after the
-wave has passed, and the tube ceiling; no snaps entering or leaving any state.
+wave has passed, and the tube ceiling; no snaps entering or leaving any state. Plus a scripted pier run: walk out the deck,
+jump through the opening, paddle, climb the ladder back up (`--seq` evidence, no snaps, the camera
+never underwater).
 
 ## B2 · Polish, performance & startup — `vfx/` (except `vfx/spray/`), plus tuning passes
 

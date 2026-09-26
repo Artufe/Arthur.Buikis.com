@@ -41,7 +41,7 @@ export const PEAK = { x: -138, z: -100 };
 export const PIER = {
   z: 48,
   rootX: 34, // landward end on dry sand
-  tipX: -176, // seaward end, past the break, in the channel
+  tipX: -110, // seaward end in the channel, just past the +Z end of the break (user: shorter pier)
   deckHeight: 4.2, // top of deck above sea level (m)
   width: 3.2,
   pilingSpacing: 6,
