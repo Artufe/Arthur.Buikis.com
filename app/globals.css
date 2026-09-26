@@ -965,3 +965,8 @@ h3 {
 body:has([data-variant="page"])::after {
   display: none;
 }
+/* [atmosphere] GOLDENLINE (page and floating window) renders its own grain; the 4 px scanlines
+   banded every frame and fought the post chain. */
+body:has(canvas[aria-label="GOLDENLINE surf demo"])::after {
+  display: none;
+}

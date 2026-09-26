@@ -197,6 +197,18 @@ export interface SurfaceStateService {
   /** World-space centre (XZ) and edge length (m) of the scrolling window. */
   center: Vector2;
   size: number;
+  // [state] Optional extras, additive (see components/goldenline/state/README.md):
+  /** TSL: (worldXZ: vec2) => float, displaced mass − depression (m), faded at the window edge. */
+  sandHeight?(worldXZ: TSLNode): TSLNode;
+  /** Texel pitch (m) of the sand and near-water fields, for finite differences. */
+  sandTexel?: number;
+  nearTexel?: number;
+  /**
+   * Bulk path for heavy writers: reserve `k` splats, get the float offset of the first (or -1 when
+   * full), then write [kind, x, z, radius, strength, dirX, dirZ, 1] per splat into `splatData`.
+   */
+  reserve?(k: number): number;
+  splatData?: Float32Array;
 }
 
 // ── Player (player/, extended by surf/) ──

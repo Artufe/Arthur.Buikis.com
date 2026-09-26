@@ -5,6 +5,11 @@ import type { Engine } from './core/engine';
 
 type Phase = 'loading' | 'ready' | 'playing' | 'nogpu' | 'error';
 
+// [atmosphere] Serialise engine boots. React (strict mode, or a quick close/reopen) can start a
+// second boot on the same canvas while the first is still loading; two WebGPU devices then fight
+// over the canvas context and the survivor renders nothing. Each boot waits for the previous one.
+let bootChain: Promise<void> = Promise.resolve();
+
 export function GoldenlineCanvas({ variant }: { variant: 'window' | 'page' }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,8 +27,14 @@ export function GoldenlineCanvas({ variant }: { variant: 'window' | 'page' }) {
     let ro: ResizeObserver | null = null;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    const prevBoot = bootChain;
+    let releaseBoot: () => void = () => {};
+    bootChain = new Promise<void>((r) => (releaseBoot = r));
+
     (async () => {
       try {
+        await prevBoot;
+        if (cancelled) return;
         const { createEngine, NoWebGPUError } = await import('./core/engine');
         let engine: Engine;
         try {
@@ -61,6 +72,8 @@ export function GoldenlineCanvas({ variant }: { variant: 'window' | 'page' }) {
       } catch (e) {
         console.error('[goldenline]', e);
         if (!cancelled) setPhase('error');
+      } finally {
+        releaseBoot();
       }
     })();
 
