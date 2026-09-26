@@ -46,11 +46,13 @@ orchestrator) compiles everyone's code into the same `/surf` route. So:
   retry (up to ~10 minutes). Do not touch their files.
 - If `curl -s localhost:3000 >/dev/null` fails for more than a minute, check `lsof -i :3000`; only
   if nothing is listening, restart it from the repo root with
-  `(PATH="$PWD/node_modules/.bin:$PATH" nohup node scripts/dev.mjs > /tmp/goldenline-dev.log 2>&1 &)`.
+  `(PATH="$PWD/node_modules/.bin:$PATH" nohup node scripts/dev.mjs > <scratch>/goldenline-dev.log 2>&1 &)`.
 - **No git writes.** No commit, stash, checkout, reset, rebase or branch. The orchestrator commits.
 - **No new npm dependencies** without a very strong reason (list it in your report; the
   orchestrator installs). three 0.186 (`three/webgpu`, `three/tsl`, `three/addons/*`) is available.
-- Don't run `pnpm` (local pnpm 11 re-installs). Use `npx tsc --noEmit`, `npx vitest run`, `npx next build`.
+- Don't run `pnpm` (local pnpm 11 re-installs). Use `npx tsc --noEmit` and `npx vitest run`.
+  **Don't run `npx next build`**: it writes `.next/`, which parallel builds would corrupt. The
+  orchestrator builds. Run at most one shot-tool process at a time (the machine has 16 GB and one GPU).
 
 **Code rules (from BRIEF §4).** Zero allocations in `update()`: no `new`, no closures, no
 `map/filter/reduce`, no spread or object-creating destructuring, no per-frame strings.
@@ -89,10 +91,10 @@ You are both builder and harshest critic. Loop until done:
 2. **Capture** at 2560×1440 with `node scripts/goldenline-shot.mjs` (run with no args to read its
    header: `--shot a,b --out dir/`, `--cam x,y,z,yaw,pitch`, `--t`, `--advance`, `--seq N
    --interval s` for motion, `--perf S --size 1280x720`, `--p key=value`). Work shots go in
-   `/tmp/goldenline/<area>/round-<n>/`. Always capture the shared beauty shots that show your
+   `<scratch>/goldenline/<area>/round-<n>/` (the orchestrator gives you `<scratch>`). Always capture the shared beauty shots that show your
    work, plus your own shots (add them to `lab/shots.ts`). Check motion with `--seq`, not only stills.
 3. **Look** at every image (Read the PNG). Write the critique down in
-   `/tmp/goldenline/<area>/review.md`: the **five most visible flaws**, ranked, each tied to a
+   `<scratch>/goldenline/<area>/review.md`: the **five most visible flaws**, ranked, each tied to a
    brief section or acceptance criterion. Be specific ("foam edge aliasing at 2 m", not "foam
    could be better"). Compare against real reference photography of golden-hour reef breaks.
 4. **Fix** the top flaws, replace techniques that aren't working (don't patch them), repeat.
