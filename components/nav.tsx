@@ -41,6 +41,9 @@ export function Nav() {
   const isActive = (href: string) =>
     pathname === href || (href !== '/' && pathname !== null && pathname.startsWith(href));
 
+  // The surf demo owns the whole viewport (app/surf/page.tsx).
+  if (pathname?.startsWith('/surf')) return null;
+
   return (
     <nav
       className={cn(

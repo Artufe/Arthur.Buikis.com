@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { onSnakeClose, onSnakeOpen, onSnakeRaise } from '@/lib/snake-bus';
+import { FloatingWindow } from '@/components/floating-window';
+import { closeSnake, onSnakeClose, onSnakeOpen, onSnakeRaise } from '@/lib/snake-bus';
 import { SnakeCanvas } from './snake-canvas';
-import { SnakeWindow } from './snake-window';
 
 export function SnakeWindowHost() {
   const [open, setOpen] = useState(false);
@@ -33,8 +33,13 @@ export function SnakeWindowHost() {
 
   if (!open || onSnakePage) return null;
   return (
-    <SnakeWindow
+    <FloatingWindow
       key={raiseToken}
+      title="snake"
+      posKey="snake.window.pos"
+      width={560}
+      height={640}
+      onClose={closeSnake}
       onExpand={() => {
         setOpen(false);
         router.push('/snake');
@@ -43,6 +48,6 @@ export function SnakeWindowHost() {
       <div className="relative min-h-0 flex-1">
         <SnakeCanvas variant="window" />
       </div>
-    </SnakeWindow>
+    </FloatingWindow>
   );
 }

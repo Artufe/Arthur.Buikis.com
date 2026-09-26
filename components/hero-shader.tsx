@@ -6,7 +6,7 @@ import { useTheme } from 'next-themes';
 import Script from 'next/script';
 import { getPlasmaMode, onPlasmaModeChange, type PlasmaMode } from '@/lib/plasma-bus';
 
-const SHADER_EXCLUDED_ROUTES = ['/cv', '/contact', '/snake'];
+const SHADER_EXCLUDED_ROUTES = ['/cv', '/contact', '/snake', '/surf'];
 
 type Vec3 = [number, number, number];
 type ShaderOpts = Partial<{
