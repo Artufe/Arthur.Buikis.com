@@ -19,6 +19,15 @@ Phase B
   B1 surfing (needs A6, A8) ──► B2 polish + performance + startup ──► orchestrator: final review
 ```
 
+## User feedback (binding, newest first)
+
+- **After Phase A:** the waves must be **bigger**: overhead set faces of 2.5–3.5 m at the peak,
+  about 1.5 m between sets (A8 owns this). The small wind chop was travelling seaward (it followed the
+  offshore breeze); the user wants it to travel **shoreward** with the swell. The orchestrator
+  changed `ocean/index.ts` (`spectrumParams`) so the short cascades follow the swell. Keep it that way.
+  The offshore breeze still blows spray off the lips toward the sea.
+- **After Phase A:** startup is too slow. See **Startup optimisation** in B2.
+
 ---
 
 ## Shared ground rules (every agent)
@@ -340,7 +349,11 @@ Build, on A2's swell trains and A7's material:
   blended seamlessly into the ocean surface. It evolves through steepening face → pitching lip
   → lip thrown forward → curl → collapse → whitewater bore, triggered by *depth* (shoaling
   criterion), peeling along the reef toward +Z at a speed consistent with the swell angle.
-  Head-high faces (1–2 m), with occasional throwing sections that form a small, makeable
+  **Overhead waves (user direction): set faces of 2.5–3.5 m at the peak, about 1.5 m between
+  sets.** The ocean agent's first cut peaked around a 1.6 m face, which the user found too small.
+  Raise the swell yourself (A2 has finished, so `ocean/swell.ts`, `ocean.swellHeight` and the
+  breaking criterion are yours to retune) and re-check the break point, peel speed and the
+  channel beside the pier, which must stay unbroken. Throwing sections form a makeable
   tube (a real open curl the camera can sit inside).
 - Whitewater: lip impact → aerated explosion (volumetric-looking foam geometry/billboards +
   compute spray + mist) → shoreward bore → spreading foam sheet written into `state` as foam.

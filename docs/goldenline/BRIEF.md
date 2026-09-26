@@ -30,6 +30,9 @@
 > - **Controls in a web page:** clicking the canvas takes pointer lock; Esc releases it (and in
 >   the floating window a second Esc closes it). The loading screen may show a one-line key legend
 >   before play starts — that is not a HUD. After that: nothing on screen, ever.
+> - **Waves are bigger than the original brief** (user feedback after Phase A): overhead set
+>   faces of 2.5–3.5 m at the peak, not head-high. The small wind chop travels **shoreward** with
+>   the swell; only the spray feathering off the lips blows seaward with the offshore breeze.
 > - **Reduced motion** (`prefers-reduced-motion`, exposed as `ctx.reducedMotion`): no head bob,
 >   no camera shake, no FOV kick; everything else unchanged.
 
@@ -41,7 +44,7 @@ You are the only engineer and technical artist on a real-time graphics tech demo
 
 0. Prime directive
 
-Visual quality is the product. There is no gameplay loop, no progression and no UI to design around. A player will load this at golden hour on a tropical reef beach. They will walk the sand, stroll out along the pier, paddle into the lineup, catch a head-high wave and ride it toward the pilings. Then they will either think "this is AAA" or close the tab. Everything below serves that one judgment.
+Visual quality is the product. There is no gameplay loop, no progression and no UI to design around. A player will load this at golden hour on a tropical reef beach. They will walk the sand, stroll out along the pier, paddle into the lineup, catch an overhead wave and ride it toward the pilings. Then they will either think "this is AAA" or close the tab. Everything below serves that one judgment.
 
 Two rules override everything else in this document:
 
@@ -84,7 +87,7 @@ A flat plane or a tiled normal map will kill this demo. The ocean needs real for
 
 Open water. Build an FFT ocean (Tessendorf, JONSWAP or TMA spectrum) with at least three cascades: long swell measured in tens of metres, wind waves measured in metres, and capillary chop measured in centimetres. Use horizontal (choppy) displacement, not only height. Put it on a camera-centred clipmap or projected grid so triangle density is highest near the viewer. The first-person camera sits within a metre of the surface while paddling, so the near field must hold up at that range.
 
-Swell and sets. A dominant groundswell arrives in sets of 3–5 waves, with lulls between sets, so the ocean has rhythm. Waves are head-high (1–2 m faces), clean and peeling. Now and then a section throws a small, makeable tube.
+Swell and sets. A dominant groundswell arrives in sets of 3–5 waves, with lulls between sets, so the ocean has rhythm. Waves are overhead: set faces of 2.5–3.5 m at the peak, with smaller waves of about 1.5 m between sets. They are clean and peeling, and they must read as big and powerful from the beach, not as a gentle roll. Now and then a section throws a makeable tube. (User direction after Phase A: the first cut, about 1.6 m faces, was too small.)
 
 Bathymetry. Author a procedural seabed: a reef shelf that runs diagonally to the shore (this is what makes waves peel), a sand channel beside the pier where the waves don't break, and a sloping beach face. Drive shoaling from depth: wavelength compresses, height grows and the crest steepens as the water gets shallower. Refraction bends the swell lines around the reef. Breaking must emerge from this, not be triggered on a timer.
 

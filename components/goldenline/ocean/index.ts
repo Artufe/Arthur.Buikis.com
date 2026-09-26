@@ -207,16 +207,19 @@ function registerParams(ctx: GLContext) {
 }
 
 function spectrumParams(p: ReturnType<typeof registerParams>): SpectrumParams {
-  // The distant wind sea runs a little off the swell; the breeze blows offshore.
+  // The distant wind sea runs a little off the swell. The short chop also travels shoreward with
+  // the swell (user direction: seaward ripples read as wrong); the offshore breeze (WIND) still
+  // drives the spray feathering off the lips.
   const a = Math.atan2(SWELL.dirZ, SWELL.dirX) + 0.35;
+  const b = Math.atan2(SWELL.dirZ, SWELL.dirX) - 0.2;
   return {
     seaWind: p.seaWind.value,
     seaFetchKm: 60,
     seaDirX: Math.cos(a),
     seaDirZ: Math.sin(a),
     localWind: p.localWind.value,
-    localDirX: WIND.dirX,
-    localDirZ: WIND.dirZ,
+    localDirX: Math.cos(b),
+    localDirZ: Math.sin(b),
     scale: p.windSea.value,
     chopScale: p.chop.value,
     capillaryScale: p.capillary.value,
