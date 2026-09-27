@@ -54,6 +54,35 @@ Gate results on the integrated scene (2560×1440, shots in the orchestrator's sc
   Owner of 1–4 and the streak: **the whitewater/foam look pass** (see below). They block B1's
   final evidence, not B1's start.
 
+**Look pass (done by the orchestrator, commit 43826b2; the user chose this over an 11th agent).**
+Fixed: foam lace now decimetre-scale with soft edges and bubble-volume lighting; whitewater lit as
+a bright multiple-scattering bubble mass; breaker faces get `aeration` so the reef no longer shows
+through as stucco and stepped dark ledges; capillary micro-normals fade out by 7 m (they aliased into
+radial streaks); sky reflections are roughness-filtered (`skyRadiance(dir, lod)`); spray sprites have a
+soft falloff (no discs) and fade within ~1 m of the lens. **Still open → B2** (in priority order):
+  1. The **tube ceiling** is dull grey-teal. The brief wants a ceiling glowing with transmitted
+     sunlight. Parameters barely move it (`breaking.lipGlow`, `lipDiffuse`, `water.throughPath`,
+     `water.sss`); the lighting of the lip's underside from inside the barrel needs rework.
+  2. A thin **dark line along the lip edge** seen edge-on (A8 known issue); the **reef-end closeout**:
+     the breaker ends within ~0.15 s and the rider is swallowed by a sudden 1.6 m rise (B1 frame 027).
+     Taper the lip and soften the face over 1–2 s.
+  3. **Foam lace holes** read too dark and graphic (dalmatian); thin lace should show turquoise
+     water through the holes and grade softly. Some **reflection streaking** remains toward the sun
+     on near water (`breaking-front`).
+  4. **Peel speed** is 16–18 m/s (real barrels peel at 5–10 m/s), so `surf.pocket` has to drag
+     the board. Slow the peel (A8's tracker / swell angle) and relax `surf.pocket` toward 0 (B1).
+  5. The **pier's shadow on the water** renders electric blue with a black core (visible from the
+     deck), and sun shadows barely show on water beyond the glitter, so the fan shadow is invisible (B1).
+  6. The piling foam makes a 5–8 m blanket in the pier run (`pier.foamRate`); spray GPU random seeds
+     aren't repeatable between captures (B1).
+- [B2] An **intermittent boot hang**: sometimes `window.__goldenline` never appears (180 s timeout,
+  no console error); an immediate retry boots in ~20 s. Find it (it would be a blank loading screen
+  for a real visitor).
+- [B2] Garbage per frame (B1's profile): three.js internals ~17 KB, A6's player ~6.5 KB (tagged
+  Vector3 fields box every changing double), A8's `sampleImpl` ~2 KB, A4's piling splats 1.4 KB. An
+  allocation-free sample()/breaker()/wave() path (coordinates via a typed array) removes the rest of
+  the ride's boxing.
+
 Integration notes (owner in brackets; each owner lists them as done or not in its report):
 - [B1] Sprites can't cast shadows: the rail-spray fan needs a shadow-only proxy mesh (A8).
 - [B1] Read `ctx.services.ocean` fresh every frame (A8 wraps it); `breaking-tube` needs `--advance 0.5`.
