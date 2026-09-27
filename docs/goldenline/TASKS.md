@@ -32,6 +32,50 @@ Phase B
   The offshore breeze still blows spray off the lips toward the sea.
 - **After Phase A:** startup is too slow. See **Startup optimisation** in B2.
 
+## Orchestrator review after Phase A (binding for Phase B)
+
+Gate results on the integrated scene (2560×1440, shots in the orchestrator's scratch `orch/gate/`):
+- **M2 (static beauty shot): pass.** `beach-sun` reads as a finished golden-hour beach.
+- **M3 (waves in motion): the shape and motion pass, the rendering fails.** A set rolls in,
+  jacks up on the reef, barrels, collapses into a bore and leaves foam behind (the `lineup` `--seq`
+  is convincing). Up close, four things read as placeholder:
+  1. **Foam lace** near the camera (`lineup`, `breaking-front`) is metre-scale, flat beige, hard-edged
+     blobs, like a cow print. It should be fine, bright, bubbly lace at centimetre to decimetre scale that
+     fades softly (see A5's request: low coverage → thin lace, not thresholded).
+  2. **Whitewater** (`breaking-front`, `pier-deck`) is beige and clay-like, and from the pier it reads
+     as a sandbar. It should be aerated, bright white-gold where lit, translucent where backlit, and
+     volumetric, with highlights and depth.
+  3. **Spray and mist** (`beach-sun` centre-right, `breaking-tube`, `breaking-front`) show visible
+     round discs. They should be soft, shaped, streaked sprites with depth fade and no visible edges.
+  4. **The breaking face up close** (`breaking-tube`) looks like matte, lumpy stucco with banded
+     light. It should be glossy moving water with fine detail and specular response. The flat white
+     shard-shaped spray flecks and the posterised seabed seen through the face read wrong too.
+  Also still visible: the **blue diagonal streak on the far water** (`pier-silhouette`, `breaking-tube`).
+  Owner of 1–4 and the streak: **the whitewater/foam look pass** (see below). They block B1's
+  final evidence, not B1's start.
+
+Integration notes (owner in brackets; each owner lists them as done or not in its report):
+- [B1] Sprites can't cast shadows: the rail-spray fan needs a shadow-only proxy mesh (A8).
+- [B1] Read `ctx.services.ocean` fresh every frame (A8 wraps it); `breaking-tube` needs `--advance 0.5`.
+- [B2] SSR: reject hits whose target pixel is water (ssr mask z = 1) so grazing rays fall back to
+  the sky (A7). Then relax `water.ssrGrazing` / `water.ssrFade`.
+- [B2] `perf.gpuMs` accumulates over the resolve interval (reads 100–490 ms); fix it so `--perf` gives
+  per-pass GPU ms (A2). `renderer.info` draw and triangle counts reset inside the post chain, so the
+  overlay undercounts (A6).
+- [B2] Garbage: three's renderer allocates ~200 KB/frame internally (A1); `CpuSea.eval` ~7.5 KB/frame
+  under the pier's `ocean.sample()` calls (A8); the pier's splat boxing ~1 KB/frame (A4). GC pauses
+  break the hitch rule, so chase all three.
+- [B2] Frame cost: `lineup` runs 23–25 ms on the M3 proxy (target 22); beach ~3.4 ms (vertex/submit
+  bound); 4 shadow cascades ~2 ms CPU re-encoding casters (A1, A3, A7, A8).
+- [B2] Switch `pier/spray.ts` to `ocean.gpu.spray.burst()` (same signature) so all spray shares one
+  pool and one look (A8). Smooth the piling foam emission so trails read as ribbons, not beads (A5).
+- [B2] Look: the sun's glow is very wide (≈20° bright core); the foreground wrack twigs in `beach-sun`
+  read as scribbles; footprint hollows are blue-black (more sky fill); the reef drop-off reads as a
+  dark sapphire stain from low grazing views (A7: soften the reef-front contour in `world/seabed.ts`).
+- [orchestrator] Evidence shots are 90+ MB and stay out of git until a curated set is committed at
+  the end. The dev server and `next build` share `.next/` (the installed Next is 15.5), so never
+  build while the dev server runs.
+
 ---
 
 ## Shared ground rules (every agent)
