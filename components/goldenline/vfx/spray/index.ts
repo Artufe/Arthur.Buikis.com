@@ -230,19 +230,21 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   const clump = sun
     .mul(shade.mul(0.3).add(0.06))
     .add(sun.mul(hg(cosT, float(0.62))).mul(puff.b.mul(1.3).add(0.22)))
-    .add(sky.mul(shade.mul(0.6).add(0.55)))
+    .add(sky.mul(shade.mul(0.7).add(0.85))) // [look] sky fill: clumps are white, not tan cut-outs
     .mul(0.92);
   const light = select(isFoam, clump, single);
   const q = uv().sub(0.5).mul(2);
   const r2 = q.dot(q);
-  const disc = select(isMist, puff.r.mul(exp(r2.mul(-1.2))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), float(1).sub(smoothstep(0.25, 1, r2)))));
+  // [look] Mist fades well inside its quad (its big sprites showed their rim as a disc).
+  const disc = select(isMist, puff.r.mul(exp(r2.mul(-2.6))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), float(1).sub(smoothstep(0.25, 1, r2)))));
   const fadeIn = smoothstep(0, select(isMist, float(0.18), float(0.05)), tAge);
   const fadeOut = float(1).sub(smoothstep(select(isFoam, float(0.45), float(0.55)), 1, tAge));
   // Hide the hard line where a big soft sprite meets the water it came from.
   const waterFade = select(isMist.or(isVeil).or(isFoam), smoothstep(0, r.mul(0.8), pa.y.sub(ma.z)), float(1));
   // Particles right at the lens would be white sticks or dark blobs clipped by the near plane:
   // fade them within a couple of their own radii.
-  const nearFade = smoothstep(r.mul(1.5).add(0.15), r.mul(4).add(0.6), dist);
+  // [look] …and always gone within ~1 m of the lens (B1: fans and tube drips pass close to it).
+  const nearFade = smoothstep(r.mul(1.5).add(0.15), r.mul(4).add(0.6), dist).mul(smoothstep(0.45, 1.2, dist));
   const opacity = select(isDrop, float(0.55).mul(cover), select(isMist, float(0.09), select(isFoam, float(0.24), float(0.11)))).div(pow(farK, 1.6));
   // Premultiplied by hand with a separate extinction: mist and veils scatter most of what they
   // intercept forward, so they barely dim what's behind them (a mist puff in front of the bright

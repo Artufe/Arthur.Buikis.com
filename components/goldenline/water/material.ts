@@ -24,7 +24,7 @@ import { glintFactor, glintFootprint } from './glitter';
 import { jacobianFromDD, normalFromDD, surfaceSlopes, type SlopeSources } from './slopes';
 
 const {
-  Fn, If, clamp, dFdx, dFdy, dot, exp, float, fract, length, max, mix, mrt, normalize, pow, reflect, refract, select, smoothstep, sqrt, texture, vec2, vec3, vec4, saturate,
+  Fn, If, clamp, dFdx, dFdy, dot, exp, float, fract, length, log2, max, mix, mrt, normalize, pow, reflect, refract, select, smoothstep, sqrt, texture, vec2, vec3, vec4, saturate,
 } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
 const { positionWorld, cameraPosition, cameraViewMatrix, cameraWorldMatrix } = TSL as unknown as Record<string, TSLNode>;
 
@@ -58,6 +58,7 @@ export interface WaterUniforms {
   slicks: TSLNode;
   micro: TSLNode;
   horizonLift: TSLNode;
+  reflBlur: TSLNode;
   time: TSLNode;
   ssrFade: TSLNode;
   ssrGrazing: TSLNode;
@@ -104,6 +105,12 @@ export interface WaterSurfaceInputs {
    * lip seen from inside the tube reflects the water, not the sky; open water clamps to the horizon).
    */
   underReflect?: TSLNode;
+  /**
+   * [look] Bubbles and stirred-up sand in a breaking wave (0 = clear lagoon, ~1 = heavily aerated).
+   * Veils the seabed seen through the face and turns the body milky; the thin lip's own
+   * through-light is left alone.
+   */
+  aeration?: TSLNode;
   /**
    * [breaking] 0-1: let the chop's facets modulate the transmitted (SSS) glow. Light leaving a
    * backlit face refracts through the facets, so facets turned toward the viewer glow brighter;
@@ -250,8 +257,11 @@ class WaterLightingModel extends LightingModel {
     If(s.foamA.greaterThan(1e-3), () => {
       // Foam is a volume of bubbles: lit from many angles, brighter than a Lambert sheet at a low sun.
       const fN = s.foamN;
-      const vol = max(dot(fN, L), 0).mul(0.65).add(0.35);
-      foam.assign(E.mul(s.foamAlb).mul(vol.mul(1.2 / PI).add(hg(cosV, 0.6).mul(0.15))));
+      // [look] Multiple scattering in a bubble volume: nearly isotropic, and strongly forward
+      // scattering when the sun is behind it (most shots look into the sun). A Lambert-ish sheet
+      // under an 11° sun went beige.
+      const vol = max(dot(fN, L), 0).mul(0.45).add(0.55);
+      foam.assign(E.mul(s.foamAlb).mul(vol.mul(1.25 / PI).add(hg(cosV, 0.55).mul(0.32))));
       // A wet sheen on the foam and sharp glints off bubble rims (both through the soft knee).
       const fH = max(dot(fN, H), 0);
       const sheen = ggxD(fH, float(0.28)).mul(smithVis(max(dot(fN, V), 1e-3), max(dot(fN, L), 1e-4), float(0.28))).mul(fresnelWater(VdH)).mul(max(dot(fN, L), 0));
@@ -378,7 +388,9 @@ function prepare(d: WaterDeps): Shading {
     flow,
     time: u.time,
     flowPeriod: 2.4,
-    near: float(1).sub(smoothstep(18, 30, dist)),
+    // [look] Capillaries only where they're resolved: at grazing angles beyond a few metres the 1.4 m tile
+    // aliases into radial streaks (the lost slope still roughens the surface via the variance table).
+    near: float(1).sub(smoothstep(2.5, 7, dist)),
   });
   const dd = sl.dd.add(vec4(gx, gz, 0, 0));
   const up = vec3(0, 1, 0);
@@ -456,7 +468,10 @@ function prepare(d: WaterDeps): Shading {
   const R0 = reflect(V.negate(), N).toVar();
   const R = normalize(vec3(R0.x, max(R0.y, 0).add(sigma.mul(u.horizonLift)), R0.z)).toVar();
   const F = fresnelWater(max(NdV, sigma.mul(0.6))).mul(shore).toVar();
-  const skyR = vec3(atmos.skyRadiance(R));
+  // [look] Rough water reflects a blurred sky: blur width ≈ 2·(filtered + micro slope) rad over a
+  // ~0.006 rad panorama texel. A sharp fetch mirrored every cirrus fibre as smooth streaks.
+  const reflLod = log2(float(1).add(sigma.add(u.reflBlur).mul(330)));
+  const skyR = vec3(atmos.skyRadiance(R, reflLod));
   // [breaking] a surface facing down mirrors the water below it, not the sky.
   const sky = sf.underReflect ? mix(skyR, vec3(sf.underReflect), float(1).sub(smoothstep(-0.35, 0, R0.y))) : skyR;
 
@@ -510,7 +525,9 @@ function prepare(d: WaterDeps): Shading {
   // Only thin crests pass light through: across a swell's full chord nothing survives but a
   // saturated blue remainder (which read as blue streaks on distant swell backs).
   const wThru = float(1).sub(smoothstep(0.22, 0.55, Tv0.y.negate())).mul(float(1).sub(smoothstep(2.5, 6, sf.chord))).toVar();
-  const Tbed = exp(sigT.mul(rr.path.add(rr.hitDepth.mul(u.sunPath))).negate()).mul(rr.hit).mul(seeBed);
+  const aer = sf.aeration ? sf.aeration.max(0) : float(0);
+  const sigBed = sigT.add(aer.mul(0.7)); // [look] scattering on the long path down to the reef
+  const Tbed = exp(sigBed.mul(rr.path.add(rr.hitDepth.mul(u.sunPath))).negate()).mul(rr.hit).mul(seeBed);
   const Tthru = exp(sigThrough.mul(sf.chord.mul(u.throughPath)).negate());
   const Tseen = mix(Tbed, Tthru, wThru).toVar();
   const backDir = normalize(vec3(V.x.negate(), max(V.y.negate(), 0.02).add(0.06), V.z.negate()));
@@ -529,7 +546,7 @@ function prepare(d: WaterDeps): Shading {
   // milky turquoise); the particles scatter flat, so the water's own absorption colours them.
   // (masked by the depth along the path seen: a view that runs out over the reef edge sees deep water)
   const lagoon = float(1).sub(smoothstep(2.5, 10, max(colDepth, rr.hitDepth))).mul(u.lagoon);
-  const bb = vec3(u.backscatter).add(lagoon.mul(0.006)).add(vec3(0.004, 0.009, 0.01).mul(bubbles));
+  const bb = vec3(u.backscatter).add(lagoon.mul(0.006)).add(vec3(0.004, 0.009, 0.01).mul(bubbles)).add(vec3(0.006, 0.011, 0.01).mul(aer));
   const Rinf = bb.div(max(vec3(u.absorb).add(bb), 1e-5)).mul(0.33);
   const bodyR = Rinf.mul(float(1).sub(Tseen)).mul(1 / PI).toVar();
 
@@ -540,7 +557,7 @@ function prepare(d: WaterDeps): Shading {
     .add(seabed.mul(Ft))
     .add(Esky.mul(0.934).mul(bodyR).mul(Ft))
     .mul(waterK)
-    .add(Esky.mul(foamAlb).mul(1 / PI).mul(0.8).mul(foamA))
+    .add(Esky.mul(foamAlb).mul(1 / PI).mul(1.25).mul(foamA)) // [look] foam is lit by the whole sky dome
     .toVar();
 
   // SSS path from water/thickness.ts (swell estimate, or a provider's for breakers). Where no

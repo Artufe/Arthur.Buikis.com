@@ -9,6 +9,7 @@ import {
   ClampToEdgeWrapping,
   HalfFloatType,
   LinearFilter,
+  LinearMipmapLinearFilter,
   Mesh,
   MeshBasicNodeMaterial,
   NodeMaterial,
@@ -46,8 +47,9 @@ export class SkyProducts {
     t.wrapS = RepeatWrapping;
     t.wrapT = ClampToEdgeWrapping;
     t.magFilter = LinearFilter;
-    t.minFilter = LinearFilter;
-    t.generateMipmaps = false;
+    // [look] Mipmapped so rough surfaces can reflect a blurred sky (see skyRadiance lod).
+    t.minFilter = LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
     t.name = 'goldenline.skyPano';
 
     this.panoMat = new NodeMaterial();
@@ -82,10 +84,14 @@ export class SkyProducts {
     this.envScene.add(this.envMesh);
   }
 
-  /** TSL: reflected sky radiance along a world direction (no sun disc). */
-  skyRadiance(dir: TSLNode): TSLNode {
+  /**
+   * TSL: reflected sky radiance along a world direction (no sun disc). `lod` picks a blurred mip
+   * for rough reflectors, so they don't mirror every cirrus fibre.
+   */
+  skyRadiance(dir: TSLNode, lod?: TSLNode): TSLNode {
     const d = normalize(dir);
-    const c = texture(this.pano.texture, panoUV(d)).rgb;
+    const tex = texture(this.pano.texture, panoUV(d));
+    const c = (lod ? tex.level(lod) : tex).rgb;
     // below the horizon a reflection sees the sea surface beyond; darken smoothly
     return c.mul(clamp(d.y.mul(4).add(1), 0.35, 1));
   }

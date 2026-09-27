@@ -9,7 +9,7 @@
 
 import { BackSide, DataTexture, LinearFilter, LinearMipmapLinearFilter, MeshStandardNodeMaterial, PhysicalLightingModel, RepeatWrapping, RGBAFormat, UnsignedByteType } from 'three/webgpu';
 import * as TSL from 'three/tsl';
-import type { TSLNode } from '../../core/contracts';
+import type { AtmosphereService, TSLNode } from '../../core/contracts';
 import type { RibbonPart } from './ribbon';
 
 const { Fn, abs, cross, dFdx, dFdy, dot, float, max, mix, normalize, pow, sign, smoothstep, texture, vec2, vec3, vec4, clamp } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
@@ -44,7 +44,8 @@ class WhitewaterLighting extends PhysicalLightingModel {
     const lobe = hg(cosT, 0.6).mul(0.8).add(0.06);
     // Multiple scattering inside the aerated mass carries some sunlight round to faces turned
     // away from it (foam is never black on its shadow side), plus the forward lobe through it.
-    const wrap = float(0.14).div(Math.PI);
+    // [look] Aerated water is a strongly multiple-scattering volume: shading is soft, never dark.
+    const wrap = float(0.32).div(Math.PI);
     reflectedLight.directDiffuse.addAssign(vec3(lightColor).mul(diffuseColor.rgb).mul(lobe.mul(this.trans).mul(this.thin).add(wrap)));
   }
 }
@@ -118,7 +119,7 @@ export function bakeBubbleTexture(): DataTexture {
   return t;
 }
 
-export function createWhitewaterMaterial(part: RibbonPart, u: WhitewaterUniforms, bubbles: DataTexture) {
+export function createWhitewaterMaterial(part: RibbonPart, u: WhitewaterUniforms, bubbles: DataTexture, atmos?: AtmosphereService) {
   const v = part.v;
   const foam = v.vBillow.y;
   const billow = v.vBillow.x;
@@ -128,7 +129,10 @@ export function createWhitewaterMaterial(part: RibbonPart, u: WhitewaterUniforms
   const uvB = v.vRest.div(0.37).add(vec2(u.time.mul(0.23), 0.37));
   const hA = texture(bubbles, uvA).x;
   const hB = texture(bubbles, uvB).x;
-  const hgt = hA.mul(0.09).add(hB.mul(0.035)).toVar();
+  // [look] A third, centimetre scale: individual bubble clusters, so it never reads as clay.
+  const uvC = v.vRest.div(0.12).add(vec2(u.time.mul(0.41), 0.71));
+  const hC = texture(bubbles, uvC).x;
+  const hgt = hA.mul(0.09).add(hB.mul(0.035)).add(hC.mul(0.012)).toVar();
   const N0 = normalize(v.vN);
   const pW = positionWorld;
   const dpx = dFdx(pW);
@@ -151,10 +155,18 @@ export function createWhitewaterMaterial(part: RibbonPart, u: WhitewaterUniforms
   mat.positionNode = part.positionNode;
   // Billow tops are dense white bubbles; the creases between them are thinner, bluer and dimmer.
   const top = smoothstep(0.05, 0.75, billow).mul(0.7).add(cluster.mul(0.3));
-  const alb = mix(vec3(0.6, 0.72, 0.78), vec3(0.97, 0.975, 0.98), top).mul(mix(float(0.7), float(1), top));
+  // [look] Creases are thinner and a touch bluer, but still bright (was 0.6-0.78 × 0.7: clay).
+  const alb = mix(vec3(0.8, 0.87, 0.9), vec3(0.98, 0.98, 0.985), top).mul(mix(float(0.88), float(1), top));
   mat.colorNode = vec4(alb.mul(u.albedo), 1);
-  mat.roughnessNode = mix(float(0.45), float(0.8), top);
+  mat.roughnessNode = mix(float(0.62), float(0.9), top);
   mat.metalnessNode = float(0);
+  // [look] Sky fill: the whole dome lights a bubble mass from every side (the IBL alone left it tan
+  // under the orange 11° sun). Same irradiance estimate as the water's foam.
+  if (atmos) {
+    const sd = atmos.sunDirNode;
+    const Esky = vec3(atmos.skyRadiance(vec3(0, 1, 0))).add(vec3(atmos.skyRadiance(normalize(vec3(sd.x, 0.45, sd.z))))).mul(0.5);
+    mat.emissiveNode = alb.mul(u.albedo).mul(Esky).mul(mix(float(0.55), float(0.85), top));
+  }
   mat.normalNode = Fn(() => normalize(cameraViewMatrix.mul(vec4(Nb, 0)).xyz))();
   // Dissolve the edges into ragged clumps and lace.
   const keep = foam.mul(float(0.7).add(cluster.sub(0.45).mul(u.ragged))).add(hB.mul(0.1));

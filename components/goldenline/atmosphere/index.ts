@@ -209,7 +209,7 @@ export function createAtmosphereSystem(): GLSystem {
         sunDirNode: sky.sunDir,
         sunColorNode: sky.sunColor,
         applyFog: (color: TSLNode, worldPos: TSLNode) => fog.apply(color, worldPos),
-        skyRadiance: (dir: TSLNode) => products.skyRadiance(dir),
+        skyRadiance: (dir: TSLNode, lod?: TSLNode) => products.skyRadiance(dir, lod),
         envTexture: null,
       };
       ctx.services.atmosphere = service;

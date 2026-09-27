@@ -194,6 +194,9 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
           underReflect: vec3(c.services.atmosphere.skyRadiance(vec3(0.9, 0.12, 0.2).normalize())).mul(vec3(0.3, 0.52, 0.48)),
           sssTexture: ru.faceTexture,
           sssDiffuse: select(v.vThick.y.greaterThan(0), ru.lipDiffuse, float(0)),
+          // [look] A breaking wave over a reef is full of bubbles and sand: the reef mustn't show
+          // crisply through the face (it read as stucco and dark ledges).
+          aeration: float(0.45).add(v.vSwX.y.mul(0.6)),
         });
         mat.positionNode = ribbon.positionNode;
         ribbon.mesh.material = mat;
@@ -219,7 +222,7 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
         void abs;
       }
       if (P.debug.value > 0) ribbon.mesh.material = debugMat;
-      const shellMat = createWhitewaterMaterial(ribbon.shell, wu, bubbles);
+      const shellMat = createWhitewaterMaterial(ribbon.shell, wu, bubbles, c.services.atmosphere);
       ribbon.shell.mesh.material = shellMat;
       ribbon.shell.mesh.renderOrder = (water?.renderOrder ?? 0) + 1;
       c.scene.add(ribbon.shell.mesh);

@@ -116,8 +116,11 @@ export interface AtmosphereService {
    * get it through scene.fogNode.
    */
   applyFog(color: TSLNode, worldPos: TSLNode): TSLNode;
-  /** Sky radiance along a world direction, for reflections. TSL: (dir: vec3) => vec3. */
-  skyRadiance(dir: TSLNode): TSLNode;
+  /**
+   * Sky radiance along a world direction, for reflections. TSL: (dir: vec3, lod?: float) => vec3.
+   * `lod` (optional) selects a blurred mip of the sky panorama for rough reflectors.
+   */
+  skyRadiance(dir: TSLNode, lod?: TSLNode): TSLNode;
   /** Prefiltered environment for image-based lighting, or null until built. */
   envTexture: Texture | null;
 }
@@ -213,7 +216,8 @@ export interface SurfaceStateService {
 
 // ── Player (player/, extended by surf/) ──
 
-export type PlayerMode = 'walk' | 'wade' | 'paddle' | 'catch' | 'popup' | 'ride' | 'wipeout';
+// [surf] 'climb': up the pier's swim ladder (additive).
+export type PlayerMode = 'walk' | 'wade' | 'paddle' | 'catch' | 'popup' | 'ride' | 'wipeout' | 'climb';
 
 export interface PlayerService {
   mode: PlayerMode;
@@ -243,6 +247,16 @@ export interface PierService {
   /** Piling centres (x, z pairs) for wave interaction and collision. */
   pilings: Float32Array;
   pilingRadius: number;
+  /**
+   * [surf] Optional: the open end of the deck (the gap in the tip rail) — the deck edge x, the
+   * gap centre z and the half-width a body's centre can pass through, and the deck height.
+   */
+  exit?: { x: number; z: number; halfWidth: number; deckY: number };
+  /**
+   * [surf] Optional: the swim ladder at the open end — stile x, centre z, half the stile spacing,
+   * bottom and top of the stiles, tread heights (bottom first) and the stile radius.
+   */
+  ladder?: { x: number; z: number; halfWidth: number; bottom: number; top: number; rungs: Float32Array; stileR: number };
 }
 
 // ── Post (post/) ──

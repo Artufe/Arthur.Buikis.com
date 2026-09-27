@@ -70,8 +70,12 @@ export function bakeSprayAtlas(): DataTexture {
           d += Math.exp(-q * 1.6);
         }
         const n = fbm(px * 3 + v * 7.1, py * 3 + v * 3.3, 11 + v);
-        const edge = Math.max(0, 1 - Math.hypot(px, py) / 0.98);
-        dens[y * N + x] = Math.max(0, Math.min(1, (d * 0.9 + (n - 0.5) * 0.9 - 0.35) * 1.6)) * Math.min(1, edge * 4);
+        // [look] A long, soft radial falloff and no saturated plateau: a hard rim and a flat
+        // interior read as discs on big sprites.
+        const rr = Math.min(1, Math.hypot(px, py) / 0.98);
+        const t = Math.min(1, Math.max(0, (rr - 0.2) / 0.78));
+        const edge = 1 - t * t * (3 - 2 * t);
+        dens[y * N + x] = Math.max(0, Math.min(1, (d * 0.8 + (n - 0.5) * 1.1 - 0.28) * 1.15)) * edge * edge;
       }
     }
     for (let y = 0; y < N; y++) {

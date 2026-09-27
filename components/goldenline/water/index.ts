@@ -50,6 +50,7 @@ interface Params {
   varScale: NumberParam;
   reflection: NumberParam;
   horizonLift: NumberParam;
+  reflBlur: NumberParam;
   refraction: NumberParam;
   dispersion: NumberParam;
   caustics: NumberParam;
@@ -85,7 +86,7 @@ function registerParams(ctx: GLContext): Params {
     absorb: n('absorb', 'absorption ×', 0, 4, 1, 0.01),
     scatter: n('scatter', 'backscatter ×', 0, 6, 1, 0.01),
     turbidity: n('turbidity', 'turbidity /m', 0, 0.5, 0.012, 0.001),
-    throughPath: n('throughPath', 'light path through crests ×', 0.5, 6, 2.5, 0.05),
+    throughPath: n('throughPath', 'light path through crests ×', 0.5, 6, 1.4, 0.05),
     lagoon: n('lagoon', 'lagoon particles (shallows)', 0, 5, 1.5, 0.01),
     seabedGain: n('seabedGain', 'seabed interreflection', 0.5, 2, 1.15, 0.01),
     sss: n('sss', 'SSS strength', 0, 8, 3, 0.01),
@@ -101,6 +102,7 @@ function registerParams(ctx: GLContext): Params {
     varScale: n('varScale', 'filtered-slope roughness ×', 0, 3, 1, 0.01),
     reflection: n('reflection', 'reflection ×', 0, 1.5, 1, 0.01),
     horizonLift: n('horizonLift', 'rough horizon lift', 0, 4, 1, 0.01),
+    reflBlur: n('reflBlur', 'sky reflection blur (micro-slope rad)', 0, 0.15, 0.035, 0.001),
     refraction: n('refraction', 'refraction ×', 0, 2, 1, 0.01),
     dispersion: n('dispersion', 'dispersion (× physical)', 0, 8, 0.35, 0.01),
     caustics: n('caustics', 'caustics', 0, 3, 1, 0.01),
@@ -116,7 +118,7 @@ function registerParams(ctx: GLContext): Params {
     whitecaps: n('whitecaps', 'whitecaps (chop Jacobian)', 0, 2, 0, 0.01),
     boreFoam: n('boreFoam', 'bore foam (swell Jacobian)', 0, 1, 0, 0.01),
     slicks: n('slicks', 'wind slicks', 0, 1, 0.6, 0.01),
-    micro: n('micro', 'capillary normals', 0, 2, 1, 0.01),
+    micro: n('micro', 'capillary normals', 0, 2, 0.7, 0.01),
     ssrFade: n('ssrFade', 'SSR fade-out distance m', 20, 400, 90, 1),
     cull: p.toggle('water.cull', { label: 'deep-seabed culling', group: g, value: true }),
     deepCull: n('deepCull', 'seabed culled below (m)', 5, 60, 24, 0.5),
@@ -243,6 +245,7 @@ export function createWaterSystem(): GLSystem {
         slicks: uniform(0.6),
         micro: uniform(1),
         horizonLift: uniform(1),
+        reflBlur: uniform(0.035),
         time: timeArr.element(0),
         ssrFade: uniform(90),
         ssrGrazing: uniform(0.04),
@@ -299,6 +302,7 @@ export function createWaterSystem(): GLSystem {
             underReflect: inputs.underReflect, // [breaking]
             sssTexture: inputs.sssTexture, // [breaking]
             sssDiffuse: inputs.sssDiffuse, // [breaking]
+            aeration: inputs.aeration, // [look]
           }),
         renderOrder: WATER_RENDER_ORDER,
         sssProviders: gpu.waterSSS!,
@@ -430,6 +434,7 @@ export function createWaterSystem(): GLSystem {
     u.varScale.value = P.varScale.value;
     u.reflection.value = P.reflection.value;
     u.horizonLift.value = P.horizonLift.value;
+    u.reflBlur.value = P.reflBlur.value;
     u.refraction.value = P.refraction.value;
     u.dispersion.value = P.dispersion.value;
     u.foam.value = P.foam.value;
