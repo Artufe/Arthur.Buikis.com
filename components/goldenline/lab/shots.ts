@@ -29,7 +29,7 @@ export const yawToward = (dx: number, dz: number) => Math.atan2(-dx, -dz);
 export const SHOTS: Record<string, Shot> = {
   'beach-sun': { x: SPAWN.x - 6, y: 1.68, z: SPAWN.z - 8, lookAt: [PEAK.x, 2, PEAK.z + 40], t: 30, note: 'M2 gate: standing on the sand, looking out at the break with the sun low ahead' },
   'pier-silhouette': { x: PIER.rootX - 12, y: 1.5, z: PIER.z - 14, lookAt: [PIER.tipX, 3, PIER.z + 6], t: 30, note: 'Pier silhouetted against the sun from the sand' },
-  'wetsand-reflection': { x: 3, y: 1.1, z: PIER.z - 10, lookAt: [PIER.tipX * 0.6, 2, PIER.z + 4], t: 30, note: 'Low over wet sand: pier + sun reflected in the swash film' },
+  'wetsand-reflection': { x: 6, y: 1.9, z: PIER.z - 10, absY: true, lookAt: [PIER.tipX * 0.6, 2, PIER.z + 4], t: 30, note: 'Low over wet sand: pier + sun reflected in the swash film' },
   'shorebreak': { x: 10, y: 1.6, z: 0, lookAt: [-12, 0.4, -6], t: 42, note: 'Shore break dumping, swash sheeting up the sand' },
   'lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 36, note: 'Paddling eye line in the lineup, set approaching, backlit' },
   'pier-deck': { x: -70, y: PIER.deckHeight + 1.68, z: PIER.z, absY: true, lookAt: [-120, 0, -20], t: 30, note: 'Standing on the deck looking at the reef break' },
@@ -45,6 +45,7 @@ export const SHOTS: Record<string, Shot> = {
   'water-shallows': { x: 5, y: 1.7, z: -100, lookAt: [-9, -1.2, -104], t: 30, note: 'Water: standing at the waterline looking down into 0.3-1.5 m: turquoise over sand, caustics, refraction' },
   'water-glitter': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [-201, 0.2, -46.6], t: 36, note: 'Water: paddling eye line straight down the sun path: glitter roll-off and stability (use --seq)' },
   'water-foam': { x: -10, y: 1.9, z: 19.5, absY: true, lookAt: [-16, 0, 14], t: 34, params: { 'state.debugScene': true }, note: 'Water: the state debug foam patch shaded (fresh bubbly foam → lace → dissolving; use --seq)' },
+  'water-crest': { x: -115, y: 0.95, z: -95, absY: true, lookAt: [-134.8, 1.05, -91.9], t: 30, note: 'Water: backlit steep crest (boot with --p water.testCrest=1 until A8 breakers exist): SSS gold → green with thickness' },
   'water-foamtest': { x: -10.5, y: 3.2, z: 21, absY: true, lookAt: [-17, 0, 14], t: 30, params: { 'water.foamTest': true }, note: 'Water debug: foam coverage ramp (0 → 1 toward +X) × age ramp (fresh → old toward +Z)' },
   'beach-dry': { x: 40, y: 1.68, z: 0, lookAt: [18, 1.2, -120], t: 30, note: 'Dry upper beach looking along the shore toward the headland, sun to the right' },
   'beach-feet': { x: 38, y: 1.68, z: 6, yaw: Math.PI / 2, pitch: -1.05, t: 30, params: { 'beach.debugPrints': 12 }, note: 'Looking down at dry sand: ripples, grain, a debug footprint trail' },
@@ -78,6 +79,11 @@ export const SHOTS: Record<string, Shot> = {
   'atmosphere-sun-disc': { x: SPAWN.x - 6, y: 1.68, z: SPAWN.z - 8, lookAt: [SPAWN.x - 6 - 982, 1.68 + 191, SPAWN.z - 8 + 156], t: 30, params: { 'core.exposure': 0.004, 'post.bloom': false, 'atmosphere.sunSize': 3 }, note: 'Atmosphere: exposure-bracketed (-8 EV) sun, disc enlarged 3x to show the per-channel limb darkening' },
   'atmosphere-shadow-near': { x: 20.6, y: 1.7, z: 2.6, lookAt: [21.6, 0.05, 0.6], t: 30, params: { 'atmosphere.probes': true }, note: 'Atmosphere: fence (plank-gap sized slats) shadow ~2 m from the eye: near-cascade PCSS crispness' },
   'atmosphere-pier-shadow': { x: 12, y: 14, z: 26, absY: true, lookAt: [-150, 0, 44], t: 30, note: 'Atmosphere: the pier shadow on the water out to 150+ m (far cascades)' },
+  'breaking-peel': { x: 13, y: 1.7, z: 22, lookAt: [-112, 0.8, -40], t: 36, note: 'Breaking (M3 gate): from the sand at the waterline, the first set peeling down the reef toward the pier (use --seq 60 --interval 1)' },
+  'breaking-tube': { x: -116.4, y: 0.4, z: -45, absY: true, lookAt: [-117, 0.7, -28], t: 42, note: 'Breaking: inside the barrel looking down the line at the opening (use --advance 0.5)' },
+  'breaking-front': { x: -92, y: 2.2, z: -98, absY: true, lookAt: [-110, 1, -120], t: 39.5, note: 'Breaking: from the lagoon, the peak barrel and its whitewater explosion (use --advance 1.5)' },
+  'breaking-shoulder': { x: -100, y: 2, z: -8, absY: true, lookAt: [-118, 1.2, -45], t: 41.5, note: 'Breaking: on the shoulder, the set wave peeling toward the camera, veil streaming off the lip (use --advance 1.5)' },
+  'breaking-swash': { x: 6, y: 1.25, z: 2, lookAt: [-4, -0.3, -2], t: 41, note: 'Breaking: the shore break and the swash sheet running up the beach face (use --advance 2.8, or --seq 12 --interval 0.5)' },
 };
 
 export function applyShot(ctx: GLContext, s: Shot, hook: DebugHook) {

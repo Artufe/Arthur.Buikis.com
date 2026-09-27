@@ -254,3 +254,38 @@ export function swellSumGPU(g: SwellGPU, xz: TSLNode, sEff: TSLNode, withPrev = 
   }
   return { d, dPrev, dd, dxz, broken, depth, debug };
 }
+
+export interface TrainDisplacement {
+  /** Train state (theta, k, amplitudes, depth). */
+  tp: TrainNodes;
+  /** This train's displacement now and at the previous frame's phase (motion vectors). */
+  d: TSLNode;
+  dPrev: TSLNode;
+  /** (∂Dy/∂x, ∂Dy/∂z, ∂Dx/∂x, ∂Dz/∂z) and ∂Dx/∂z of this train alone. */
+  dd: TSLNode;
+  dxz: TSLNode;
+}
+
+/**
+ * [breaking] One train's Gerstner displacement and derivatives, same formulas as swellSumGPU():
+ * the breaker replaces train 0 near its breaking crests and keeps the others on top. Must run
+ * inside an Fn.
+ */
+export function swellTrainDisplacementGPU(g: SwellGPU, tr: number, xz: TSLNode, sEff: TSLNode): TrainDisplacement {
+  const f = fetchTrainGPU(g, tr, xz);
+  const tp = trainStateGPU(g, tr, f, g.uPhase, g.uTime);
+  const { B, ux, uz, s, c, dw, y, ys } = gerstnerGPU(g, tp, sEff);
+  const pp = gerstnerGPU(g, trainStateGPU(g, tr, f, g.uPhasePrev, g.uTimePrev), sEff);
+  return {
+    tp,
+    d: vec3(B.mul(ux).mul(s).negate(), y, B.mul(uz).mul(s).negate()),
+    dPrev: vec3(pp.B.mul(pp.ux).mul(pp.s).negate(), pp.y, pp.B.mul(pp.uz).mul(pp.s).negate()),
+    dd: vec4(
+      ys.mul(dw).mul(tp.kx).negate(),
+      ys.mul(dw).mul(tp.kz).negate(),
+      B.mul(ux).mul(c).mul(dw).mul(tp.kx).negate(),
+      B.mul(uz).mul(c).mul(dw).mul(tp.kz).negate(),
+    ),
+    dxz: B.mul(ux).mul(c).mul(dw).mul(tp.kz).negate(),
+  };
+}

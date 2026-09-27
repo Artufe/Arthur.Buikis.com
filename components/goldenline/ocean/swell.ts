@@ -45,7 +45,8 @@ export interface TrainDef {
 }
 
 export const TRAIN_DEFS: TrainDef[] = [
-  { period: SWELL.periodS, dirOffsetDeg: 0, amp: 0.66, sets: true, lull: 0.18, scheduleShift: 0 },
+  // [breaking] lull 0.42 (was 0.18): ~1.5 m faces between the overhead sets (user direction).
+  { period: SWELL.periodS, dirOffsetDeg: 0, amp: 0.66, sets: true, lull: 0.42, scheduleShift: 0 },
   { period: SWELL.periodS * 1.14, dirOffsetDeg: -6, amp: 0.22, sets: true, lull: 0.35, scheduleShift: 611 },
   { period: SWELL.periodS * 0.72, dirOffsetDeg: 12, amp: 0.09, sets: false, lull: 1, scheduleShift: 0 },
 ];
@@ -530,8 +531,14 @@ export function depthAt(field: SwellField, x: number, z: number, out: Float64Arr
   out[0] = (D[a] * (1 - fu) + D[a + 4] * fu) * (1 - fv) + (D[a + NX * 4] * (1 - fu) + D[a + NX * 4 + 4] * fu) * fv;
 }
 
-/** Bilinear sample of train `tr` at world (x, z) into ch[], extrapolating S and τ off-grid. */
-function fetchTrain(field: SwellField, tr: number, x: number, z: number) {
+// [breaking] fetchTrain is too big for V8 to inline, so doubles passed to it were boxed (two
+// HeapNumbers per trainAt call); the position travels through this scratch array instead.
+const fetchXZ = new Float64Array(2);
+
+/** Bilinear sample of train `tr` at world (fetchXZ[0], fetchXZ[1]) into ch[], extrapolating S and τ off-grid. */
+function fetchTrain(field: SwellField, tr: number) {
+  const x = fetchXZ[0];
+  const z = fetchXZ[1];
   const u = (x - FIELD.x0) / FIELD.texel - 0.5;
   const v = (z - FIELD.z0) / FIELD.texel - 0.5;
   const uc = u < 0 ? 0 : u > NX - 1 ? NX - 1 : u;
@@ -570,7 +577,9 @@ function fetchTrain(field: SwellField, tr: number, x: number, z: number) {
  * swell-gpu.ts line for line; keep them in sync.
  */
 export function trainAt(field: SwellField, env: Float32Array, tr: number, x: number, z: number, rt: SwellRuntime, out: TrainPoint) {
-  fetchTrain(field, tr, x, z);
+  fetchXZ[0] = x;
+  fetchXZ[1] = z;
+  fetchTrain(field, tr);
   const S = ch[0];
   const K = ch[1];
   const kx = ch[2];

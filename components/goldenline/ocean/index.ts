@@ -24,6 +24,7 @@ import {
   setSwellTime,
 } from './swell';
 import { createSwellGPU, type SwellGPU } from './swell-gpu';
+import { createBreaking, type Breaking } from './breaking'; // [breaking]
 
 interface OceanState {
   field: SwellField;
@@ -36,6 +37,7 @@ interface OceanState {
   mesh: Mesh;
   cpu: OceanCpu;
   probe: OceanProbe;
+  breaking: Breaking; // [breaking]
   unlisten: () => void;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -104,11 +106,13 @@ export function createOceanSystem(): GLSystem {
         probeCompare: (x: number, z: number, radius: number) => probeCompare(ctx, probe, cpu, x, z, radius),
       };
       ctx.services.ocean = createOceanService(cpu, heightAt, gpu);
+      // [breaking] breakers on the swell: registers its surface hook and wraps the service.
+      const breaking = createBreaking(ctx, { field, env, rt, swell, surface, heightAt });
 
       // Heavy rebuilds (spectrum, envelope, field) run off a debounced param listener, never
       // inside update().
       const heavy = new Set(['ocean.seaWind', 'ocean.windSea', 'ocean.chop', 'ocean.capillary', 'ocean.localWind', 'ocean.setInterval', 'ocean.lull', 'ocean.period', 'ocean.swellDir']);
-      const state: OceanState = { field, env, spec, fft, swell, surface, water, mesh, cpu, probe, unlisten: () => {}, timer: null };
+      const state: OceanState = { field, env, spec, fft, swell, surface, water, mesh, cpu, probe, breaking, unlisten: () => {}, timer: null };
       state.unlisten = ctx.params.onChange((param) => {
         if (!heavy.has(param.key)) return;
         if (state.timer) clearTimeout(state.timer);
@@ -117,6 +121,7 @@ export function createOceanSystem(): GLSystem {
           if (st !== state) return;
           if (param.key === 'ocean.period' || param.key === 'ocean.swellDir') {
             field.bake(heightAt, p.periodScale.value, p.dirOffset.value);
+            breaking.rebake(); // [breaking]
           }
           bakeEnvelope(env, field, p.setInterval.value, p.lull.value);
           swell.refreshField();
@@ -134,6 +139,7 @@ export function createOceanSystem(): GLSystem {
         this.update?.(ctx);
         st.fft.dispatch(ctx.renderer);
       }
+      st.breaking.warmup(ctx); // [breaking]
     },
 
     update(ctx: GLContext) {
@@ -157,6 +163,7 @@ export function createOceanSystem(): GLSystem {
       water.uView.value = P.view.value;
       water.uDbgGain.value = P.debugGain.value;
       if (on && cpu.fft) fft.dispatch(ctx.renderer);
+      st.breaking.update(ctx); // [breaking]
     },
 
     dispose(ctx: GLContext) {
@@ -165,6 +172,7 @@ export function createOceanSystem(): GLSystem {
       st = null;
       if (s.timer) clearTimeout(s.timer);
       s.unlisten();
+      s.breaking.dispose(ctx); // [breaking]
       ctx.scene.remove(s.mesh);
       s.mesh.geometry.dispose();
       s.water.material.dispose();
@@ -188,11 +196,14 @@ function registerParams(ctx: GLContext) {
   return {
     enabled: P.toggle('ocean.enabled', { label: 'ocean', group: g, value: true }),
     fft: P.toggle('ocean.fft', { label: 'FFT wind sea', group: g, value: true }),
-    swellHeight: P.number('ocean.swellHeight', { label: 'swell height', group: g, min: 0, max: 2.5, value: 1 }),
-    setInterval: P.number('ocean.setInterval', { label: 'set interval (s)', group: g, min: 40, max: 240, step: 1, value: SWELL.setIntervalS }),
+    // [breaking] overhead sets (user direction): 1.8 → ~3 m faces at the peak, ~1.5 m between sets.
+    swellHeight: P.number('ocean.swellHeight', { label: 'swell height', group: g, min: 0, max: 2.5, value: 1.8 }),
+    // [breaking] longer lulls between the (now bigger) sets.
+    setInterval: P.number('ocean.setInterval', { label: 'set interval (s)', group: g, min: 40, max: 240, step: 1, value: 90 }),
     lull: P.number('ocean.lull', { label: 'lull height', group: g, min: 0, max: 3, value: 1 }),
     periodScale: P.number('ocean.period', { label: 'swell period ×', group: g, min: 0.6, max: 1.5, value: 1 }),
-    dirOffset: P.number('ocean.swellDir', { label: 'swell dir offset (°)', group: g, min: -30, max: 30, step: 0.5, value: 0 }),
+    // [breaking] +18°: the crests meet the reef more obliquely, so the break peels at ~16 m/s, not ~23.
+    dirOffset: P.number('ocean.swellDir', { label: 'swell dir offset (°)', group: g, min: -30, max: 30, step: 0.5, value: 18 }),
     skew: P.number('ocean.skew', { label: 'face steepening', group: g, min: 0, max: 0.9, value: 0.45 }),
     windSea: P.number('ocean.windSea', { label: 'wind sea', group: g, min: 0, max: 1, value: 0.06 }),
     seaWind: P.number('ocean.seaWind', { label: 'wind-sea wind (m/s)', group: g, min: 1, max: 14, value: 5 }),
