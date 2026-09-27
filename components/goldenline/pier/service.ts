@@ -3,7 +3,7 @@
 
 import type { PierService } from '../core/contracts';
 import { PIER } from '../world/layout';
-import { DECK_TOP, HALF_W, POST, type PierPlan, STAIR } from './plan';
+import { DECK_TOP, GAP, HALF_W, LADDER, POST, type PierPlan, STAIR } from './plan';
 
 /** How far below a surface the feet may be and still be "on" it (step-up tolerance). */
 const REACH = 0.9;
@@ -45,8 +45,16 @@ export function createPierService(plan: PierPlan): PierService {
       const dz = z - PIER.z;
       if (x <= PIER.rootX + 0.6 && x >= PIER.tipX - 1 && y > DECK_TOP - 0.6 && Math.abs(dz) < HALF_W + 0.6) {
         // At deck level: the railings are walls, and so is the tip rail. At the root only the
-        // stair opening lets you through; the rest of the deck end is railed.
-        if (x < PIER.tipX + 0.1 + BODY) out[0] = PIER.tipX + 0.1 + BODY;
+        // stair opening lets you through; the rest of the deck end is railed. [surf] The tip rail
+        // has a gap: inside it the body walks on, off the end (and falls).
+        const gapHalf = GAP.half - POST.s / 2 - BODY;
+        const inGap = Math.abs(dz) < gapHalf + 0.02;
+        if (x < PIER.tipX + 0.1 + BODY && !inGap) out[0] = PIER.tipX + 0.1 + BODY;
+        if (inGap && x < PIER.tipX + 0.1 + BODY) {
+          // In the doorway (between the gap posts) the posts are walls; past it, open air.
+          if (x > PIER.tipX - 0.35) out[1] = PIER.z + Math.min(gapHalf, Math.max(-gapHalf, dz));
+          return;
+        }
         if (x > PIER.rootX - BODY && Math.abs(dz) > stairHalf) out[0] = PIER.rootX - BODY;
         const lim = out[0] > PIER.rootX ? stairHalf : deckHalf;
         out[1] = PIER.z + Math.min(lim, Math.max(-lim, dz));
@@ -58,5 +66,8 @@ export function createPierService(plan: PierPlan): PierService {
     },
     pilings,
     pilingRadius: n ? rSum / n : 0.17,
+    // [surf] The open end and its ladder (surf/pierexit.ts jumps and climbs with these).
+    exit: { x: PIER.tipX - 0.12, z: PIER.z, halfWidth: GAP.half - POST.s / 2 - BODY, deckY: DECK_TOP },
+    ladder: { x: LADDER.x, z: PIER.z, halfWidth: LADDER.half, bottom: LADDER.bottom, top: LADDER.top, rungs: Float32Array.from(plan.ladder), stileR: LADDER.r },
   };
 }

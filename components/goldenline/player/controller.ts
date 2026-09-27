@@ -6,6 +6,7 @@ import { Vector3 } from 'three/webgpu';
 import type { GLContext, OceanSample, PlayerMode, WaveInfo } from '../core/contracts';
 import { SPLAT_FOOTPRINT, SPLAT_WAKE, SPLAT_WET } from '../core/contracts';
 import { clamp, damp } from '../core/pool';
+import { type BreakerPoint, type BreakingApi, newBreakerPoint } from '../ocean/breaking/service';
 import { PIER, TERRAIN_BOUNDS } from '../world/layout';
 import type { RideDriver } from './api';
 import { Gait } from './gait';
@@ -26,6 +27,7 @@ const BLEND: Record<PlayerMode, number> = {
   popup: 0.12,
   ride: 0.25,
   wipeout: 0.3,
+  climb: 0.6, // [surf]
 };
 
 export interface Tunables {
@@ -78,10 +80,22 @@ export class PlayerCore {
   boardPitch = 0;
   boardRoll = 0;
   catchProgress = 0;
+  /** [surf] Seconds a pop-up request is held over while the face arrives. */
+  popWanted = 0;
+  /** [surf] Pier exit: jumped off the deck this fall; the climb's start and progress. */
+  jumped = false;
+  readonly climbFrom = new Vector3();
+  climbFromY = 0;
+  climbFromYaw = 0;
+  /** [surf] Climb pose inputs: 0..1 through the climb, and which hand leads (hand-over-hand). */
+  climbK = 0;
+  climbStep = 0;
   whitewater = 0;
 
   // Ride hand-off
   driver: RideDriver | null = null;
+  /** [surf] The breaker under the board while catching (its real crest speed). */
+  private readonly bp: BreakerPoint = newBreakerPoint();
   rideSpeed = 0;
   wipeT = 0;
 
@@ -156,6 +170,10 @@ export class PlayerCore {
     this.vy = 0;
     this.airborne = false;
     this.feetY = this.ctx.services.terrain.height(x, z);
+    // [surf] Teleporting onto the pier's footprint lands on the deck (the pier-run demo), not in
+    // the water under it.
+    const deck = mode === 'walk' ? this.ctx.services.pier.surfaceAt(x, z, 1e3) : NaN;
+    if (deck === deck && deck > this.feetY) this.feetY = deck;
     this.feetY = this.ground(x, z);
     this.gait.reset(x, z, yaw, this.ground);
     this.paddleW = 0;
@@ -261,6 +279,9 @@ export class PlayerCore {
       case 'wipeout':
         this.updateWipeout(dt, it);
         break;
+      case 'climb':
+        this.updateClimb(dt, it); // [surf]
+        break;
     }
     // Skin and board dry slowly out of the water; salt shows as they dry.
     const inWater = this.mode !== 'walk' || this.depth > 0.25;
@@ -327,7 +348,19 @@ export class PlayerCore {
     // Vertical: step up onto stairs/deck, fall off edges.
     const g = this.ground(nx, nz);
     this.groundY = g;
+    const wasOnPier = this.onPier;
     this.onPier = this.onPierAt(nx, nz);
+    // [surf] Space at the open end of the pier: a jump out, board under the arm (walking off the
+    // edge falls the same way, just without the spring).
+    const ex = this.ctx.services.pier.exit;
+    if (ex && !this.airborne && wasOnPier && it.action && Math.abs(nz - ex.z) < ex.halfWidth + 0.3 && nx < ex.x + 2.2) {
+      this.airborne = true;
+      this.vy = 3.1;
+      const push = Math.max(2.6, this.speed);
+      this.vel.x = -Math.sin(this.heading) * push;
+      this.vel.z = -Math.cos(this.heading) * push;
+      this.jumped = true;
+    }
     if (this.airborne) {
       this.vy -= G * dt;
       this.feetY += this.vy * dt;
@@ -336,13 +369,23 @@ export class PlayerCore {
         this.feetY = g;
         this.airborne = false;
         this.vy = 0;
-      } else if (this.feetY < water - 0.9 && water - g > 1.4) {
-        // Jumped into deep water: surface onto the board.
-        this.airborne = false;
-        this.vy = 0;
-        this.pos.y = water;
-        this.setMode('paddle', 1.1);
-        return;
+        this.jumped = false;
+      } else if (this.feetY < water && water - g > 1.4) {
+        // [surf] Into deep water: the body plunges and the water brakes it (the lens stays at the
+        // surface: the camera floor); once it has stopped, surface onto the board. Before, the
+        // fall stopped dead 0.9 m under and snapped to prone.
+        const k = Math.exp(-7.5 * dt);
+        this.vy = this.vy * k + 4 * dt;
+        this.vel.x *= Math.exp(-2.5 * dt);
+        this.vel.z *= Math.exp(-2.5 * dt);
+        if (this.vy > -0.9 || this.feetY < water - 1.45) {
+          this.airborne = false;
+          this.jumped = false;
+          this.vy = 0;
+          this.pos.y = water;
+          this.setMode('paddle', 1.25);
+          return;
+        }
       }
     } else if (g < this.feetY - 0.35) {
       this.airborne = true;
@@ -378,8 +421,8 @@ export class PlayerCore {
     // Board: floats alongside once the water is deep enough.
     this.boardFloat = damp(this.boardFloat, this.depth > 0.3 ? 1 : 0, 2.5, dt);
 
-    // Mode changes.
-    if (this.mode === 'walk' && this.depth > 0.14) this.setMode('wade');
+    // Mode changes. [surf] Not while falling or plunging from the pier.
+    if (this.mode === 'walk' && this.depth > 0.14 && !this.airborne) this.setMode('wade');
     else if (this.mode === 'wade') {
       if (this.depth < 0.07) this.setMode('walk');
       else if (this.depth > 1.05 || (this.depth > 0.62 && (it.action || (it.fwd > 0.3 && this.movingSeaward())))) {
@@ -433,7 +476,9 @@ export class PlayerCore {
     const rvz = this.vel.z - s.vz;
     const along = rvx * hx + rvz * hz;
     const lat = -rvx * hz + rvz * hx;
-    const aDrag = (0.42 + 0.3 * Math.abs(along)) * along * (1 - 0.6 * this.push);
+    // [surf] Once a wave has the board it starts to plane: the prone quadratic drag (tuned for
+    // 1–3 m/s paddling) would otherwise hold it under 4 m/s on an 8 m/s face.
+    const aDrag = (0.42 + 0.3 * Math.abs(along) * (catching ? 0.2 : 1)) * along * (1 - 0.6 * this.push);
     const lDrag = 3.2 * lat;
     let ax = -aDrag * hx + lDrag * hz;
     let az = -aDrag * hz - lDrag * hx;
@@ -443,9 +488,10 @@ export class PlayerCore {
     ax += hx * thrust;
     az += hz * thrust;
     // Gravity along the face: what lets a paddling board get picked up by a wave.
+    // [surf] Down the slope is +n (sample normals are (−∂h/∂x, 1, −∂h/∂z)); it pushed uphill before.
     const slopeK = catching ? 0.95 : 0.55;
-    ax += -G * s.nx * slopeK;
-    az += -G * s.nz * slopeK;
+    ax += G * s.nx * s.ny * slopeK;
+    az += G * s.nz * s.ny * slopeK;
 
     // Catch: position + paddle timing, with a generous assist once the wave has you.
     const w = this.waveAt();
@@ -455,15 +501,33 @@ export class PlayerCore {
     const onFace = w.stage > 0 && w.faceHeight > 0.5 && w.crestDistance > -w.faceHeight * 3.5 && w.crestDistance < 0.6;
     if (this.logModes && Math.floor(this.t * 2) !== Math.floor((this.t - dt) * 2))
       console.warn(`[player] prone t=${this.t.toFixed(1)} stage=${w.stage.toFixed(2)} crest=${w.crestDistance.toFixed(1)} face=${w.faceHeight.toFixed(2)} vW=${vAlongWave.toFixed(2)} c=${c.toFixed(2)} dot=${dirDot.toFixed(2)} pad=${paddling} lab=${this.lab.on}`);
+    // [surf] Speed through the water, not over the ground: ahead of a plunging face the trough
+    // drains seaward at 1–2 m/s, so a hard-paddling board barely moves over the ground there.
+    const vThrough = (this.vel.x - s.vx) * w.dirX + (this.vel.z - s.vz) * w.dirZ;
     if (!catching) {
-      if (onFace && dirDot > 0.55 && ((paddling && vAlongWave > 0.28 * c) || vAlongWave > 0.6 * c)) this.setMode('catch');
+      if (onFace && dirDot > 0.55 && ((paddling && (vAlongWave > 0.28 * c || vThrough > 0.9)) || vAlongWave > 0.6 * c)) this.setMode('catch');
     } else {
-      const assist = this.tune.catchAssist * (onFace ? 1 : 0.2) * Math.max(0, dirDot);
-      const deficit = Math.max(0, c - vAlongWave);
+      // [surf] The wave picks the board up: toward the breaker's real crest speed (8–9 m/s at the
+      // peak, not the 6 m/s cap above), harder as the face arrives under it. Ground frame, so the
+      // trough's drawback doesn't cancel it.
+      const brk = (this.ctx.services.ocean.gpu as { breaking?: BreakingApi }).breaking;
+      let cw = c;
+      if (brk) {
+        brk.breaker(this.pos.x, this.pos.z, this.bp);
+        if (this.bp.active > 0.2 && this.bp.c > c) cw = this.bp.c;
+      }
+      const q = clamp(1 + w.crestDistance / Math.max(1, 2.6 * w.faceHeight), 0, 1);
+      const assist = this.tune.catchAssist * (onFace ? 0.9 + 1.8 * q : 0.2) * Math.max(0, dirDot);
+      const deficit = Math.max(0, 0.62 * cw - vAlongWave);
       ax += w.dirX * deficit * assist;
       az += w.dirZ * deficit * assist;
-      this.catchProgress = clamp(this.catchProgress + (vAlongWave / c - 0.55) * dt * 2.2, 0, 1);
-      if (it.action && this.catchProgress > 0.25) {
+      this.catchProgress = clamp(this.catchProgress + (vAlongWave / cw - 0.4) * dt * 3, 0, 1);
+      // [surf] Space is held over until the face is actually under the board (plunging faces are
+      // only a metre or two wide): popping up in the trough ahead of it gets the rider run over.
+      if (it.actionHeld || it.action) this.popWanted = 0.6;
+      else this.popWanted = Math.max(0, this.popWanted - dt);
+      const faceUnder = w.crestDistance > -Math.max(0.8, 0.36 * w.faceHeight) || vAlongWave > 0.9 * cw;
+      if (this.popWanted > 0 && this.catchProgress > 0.25 && faceUnder) {
         this.setMode('popup');
       } else if (!onFace && this.modeTime > 0.6) {
         this.setMode('paddle', 0.6);
@@ -491,6 +555,22 @@ export class PlayerCore {
     // Wake from the board and the hands.
     const st = this.ctx.services.state;
     if (this.speed > 0.3) st.splat(SPLAT_WAKE, this.pos.x - hx * 0.9, this.pos.z - hz * 0.9, 0.35, Math.min(1, this.speed / 3), this.vel.x, this.vel.z);
+
+    // [surf] At the pier's swim ladder: Space (or paddling into it) climbs out.
+    const L = this.ctx.services.pier.ladder;
+    if (L && !catching && this.modeTime > 0.6) {
+      const ax = L.x - 0.35 - this.pos.x;
+      const az = L.z - this.pos.z;
+      const d = Math.hypot(ax, az);
+      const facing = (hx * ax + hz * az) / Math.max(1e-3, d);
+      if (d < 2.1 && Math.abs(az) < 1.3 && facing > 0.3 && (it.action || (it.fwd > 0.3 && d < 1.3))) {
+        this.climbFrom.copy(this.pos);
+        this.climbFromY = this.waterY;
+        this.climbFromYaw = this.heading;
+        this.setMode('climb', 0.6);
+        return;
+      }
+    }
 
     // Back to standing in the shallows.
     if (!catching && s.depth < 0.55 && this.modeTime > 0.8) {
@@ -526,7 +606,14 @@ export class PlayerCore {
   private updatePopup(dt: number, it: Intent) {
     this.yaw -= it.lookX;
     this.pitch = clamp(this.pitch - it.lookY, -1.2, 0.9);
-    this.glide(dt, 0.25);
+    // [surf] The ride driver can take the board over during the pop-up (index.ts syncs pos,
+    // heading and attitude back from the rig so the pop-up pose follows the board).
+    if (this.driver?.popup) {
+      const rig = this.ctx.services.player as unknown as { viewTurn: number };
+      this.yaw += rig.viewTurn;
+      rig.viewTurn = 0;
+      this.driver.popup(this.ctx, this.ctx.services.player as never, dt, this.modeTime <= dt + 1e-6);
+    } else this.glide(dt, 0.25);
     if (this.modeTime >= PlayerCore.POPUP_S) this.setMode('ride');
   }
 
@@ -542,8 +629,9 @@ export class PlayerCore {
     const lat = -rvx * hz + rvz * hx;
     const aDrag = dragK * along * (1 + 0.1 * Math.abs(along));
     const lDrag = 4 * lat;
-    this.vel.x += (-aDrag * hx + lDrag * hz - G * s.nx) * dt;
-    this.vel.z += (-aDrag * hz - lDrag * hx - G * s.nz) * dt;
+    // [surf] Down the slope is +n (was −n, uphill).
+    this.vel.x += (-aDrag * hx + lDrag * hz + G * s.nx * s.ny) * dt;
+    this.vel.z += (-aDrag * hz - lDrag * hx + G * s.nz * s.ny) * dt;
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
     this.collideBoard();
@@ -561,6 +649,10 @@ export class PlayerCore {
       // The view stays the player's (mouse); the driver shapes the camera through rig.cam.
       this.yaw -= it.lookX;
       this.pitch = clamp(this.pitch - it.lookY, -1.0, 1.0);
+      // [surf] The driver may carry the head round with a carve (A/D turns the view too).
+      const rig = this.ctx.services.player as unknown as { viewTurn: number };
+      this.yaw += rig.viewTurn;
+      rig.viewTurn = 0;
       const next = this.driver.update(this.ctx, this.ctx.services.player as never, dt);
       if (next !== 'ride' && !(next === 'wipeout' && this.driver.handlesWipeout && this.mode === 'wipeout')) this.setMode(next);
       return;
@@ -577,6 +669,85 @@ export class PlayerCore {
     else if (this.depth < 0.45) this.setMode('wade', 1.0);
   }
 
+  // ── [surf] Climb out: the pier's swim ladder ──────────────────────────────────────────
+
+  /** [surf] The pier's ladder (poses read it too). */
+  ladder() {
+    return this.ctx.services.pier.ladder ?? null;
+  }
+
+  private updateClimb(dt: number, it: Intent) {
+    const L = this.ctx.services.pier.ladder;
+    this.yaw -= it.lookX;
+    this.pitch = clamp(this.pitch - it.lookY, -1.1, 1.35);
+    const t = this.modeTime;
+    if (!L) {
+      this.setMode('paddle');
+      return;
+    }
+    // Facing the ladder (+X here: it hangs off the sea end), body centred on it.
+    const face = Math.atan2(-(L.x - this.climbFrom.x), -(L.z - this.climbFrom.z));
+    const bx = L.x - 0.34;
+    const bz = L.z;
+    const tread0 = L.rungs.length ? L.rungs[0] : L.bottom + 0.4;
+    const deck = L.top + 0.03;
+    const top = L.rungs.length ? L.rungs[L.rungs.length - 1] : deck - 0.3;
+    // Where the feet are: first tread under water, up the treads, then over onto the deck.
+    const water = this.climbFromY;
+    let x = bx;
+    let z = bz;
+    let y: number;
+    let heading = face;
+    if (t < CLIMB.grab) {
+      const u = t / CLIMB.grab;
+      const e = u * u * (3 - 2 * u);
+      x = this.climbFrom.x + (bx - this.climbFrom.x) * e;
+      z = this.climbFrom.z + (bz - this.climbFrom.z) * e;
+      // Turn square to the ladder while reaching for it (snapping the heading jolted the view).
+      let dh = (face - this.climbFromYaw) % (Math.PI * 2);
+      if (dh > Math.PI) dh -= Math.PI * 2;
+      else if (dh < -Math.PI) dh += Math.PI * 2;
+      heading = this.climbFromYaw + dh * e;
+      y = water - 1.35 + (Math.max(tread0 + 0.3, water - 0.9) - (water - 1.35)) * e;
+      this.climbK = 0;
+    } else if (t < CLIMB.top) {
+      const u = (t - CLIMB.grab) / (CLIMB.top - CLIMB.grab);
+      // Rung by rung: the rise comes in steps (each ~0.3 m) with the push of each leg.
+      const y0 = Math.max(tread0 + 0.3, water - 0.9);
+      const span = top - y0;
+      const steps = Math.max(1, Math.round(span / 0.3));
+      const f = u * steps;
+      const i = Math.floor(f);
+      const w = f - i;
+      const e = w * w * (3 - 2 * w);
+      y = y0 + ((Math.min(steps, i + e)) / steps) * span;
+      this.climbStep = i;
+      this.climbK = u;
+    } else {
+      const u = clamp((t - CLIMB.top) / (CLIMB.out - CLIMB.top), 0, 1);
+      const e = u * u * (3 - 2 * u);
+      y = top + (deck - top) * Math.min(1, e * 1.4);
+      x = bx + (L.x + 1.05 - bx) * e;
+      this.climbK = 1;
+    }
+    this.vel.set((x - this.pos.x) / Math.max(dt, 1e-4), 0, (z - this.pos.z) / Math.max(dt, 1e-4));
+    this.pos.set(x, y, z);
+    this.feetY = y;
+    this.heading = heading;
+    this.speed = 0;
+    this.depth = Math.max(0, water - y);
+    this.boardFloat = 0;
+    if (t >= CLIMB.out) {
+      this.feetY = deck;
+      this.pos.y = deck;
+      this.vel.set(0, 0, 0);
+      this.airborne = false;
+      this.onPier = true;
+      this.gait.reset(this.pos.x, this.pos.z, this.heading, this.ground);
+      this.setMode('walk', 0.55);
+    }
+  }
+
   private updateWipeout(dt: number, it: Intent) {
     if (this.driver?.handlesWipeout) {
       const next = this.driver.update(this.ctx, this.ctx.services.player as never, dt);
@@ -590,6 +761,12 @@ export class PlayerCore {
     if (this.modeTime > 1.7) this.setMode('paddle', 1.2);
   }
 }
+
+/**
+ * [surf] Climb timeline (s): off the board onto the bottom tread, up the ladder, over the deck
+ * edge onto the planks. See PlayerCore.updateClimb and poses.ts climbPose.
+ */
+export const CLIMB = { grab: 0.75, top: 3.9, out: 4.75 };
 
 /** Pull strength of one arm over its stroke cycle (0 outside the underwater pull). */
 export function strokePull(ph: number) {

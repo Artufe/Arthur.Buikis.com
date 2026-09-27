@@ -22,6 +22,15 @@ export const ROPE = { r: 0.0135, heights: [0.66, 0.33], sag: 0.035 };
 export const BRACE = { t: 0.05, w: 0.2 };
 export const STAIR = { halfW: 1.0, tread: 0.285, maxRise: 0.19 };
 export const LAMP = { top: DECK_TOP + 2.35, s: 0.12, arm: 0.42 };
+/**
+ * [surf] The open end: a gap in the tip rail (half-width, centred on the deck) with a timber swim
+ * ladder hanging off the deck end, down into the channel: round stiles (shaded like the pilings:
+ * tide band, algae, barnacles) topped just under the deck and bolted back to the tip cap, flat
+ * treads every `pitch`. Nothing stands above the deck in the gap (it's also the jump), so a
+ * climber steps up holding the gap posts.
+ */
+export const GAP = { half: 0.7 };
+export const LADDER = { x: PIER.tipX - 0.4, half: 0.3, r: 0.045, bottom: -1.9, top: DECK_TOP - 0.03, tread0: -1.5, pitch: 0.3 };
 
 /** Deterministic PRNG (mulberry32) so the pier is identical on every boot. */
 export function rng(seed: number) {
@@ -96,6 +105,8 @@ export interface PierPlan {
   hitches: number[];
   lamps: Lamp[];
   stair: { x0: number; x1: number; rise: number; steps: number; bottom: number };
+  /** [surf] Heights of the swim ladder's treads (bottom first). */
+  ladder: number[];
 }
 
 /** Spray exposure 0..1 from the break: the seaward end and the reef side see the most. */
@@ -120,6 +131,9 @@ export function buildPlan(height: (x: number, z: number) => number): PierPlan {
     const cx = px - PLANK.w / 2;
     const fresh = r() < 0.035; // the odd replacement plank: less bleached, warmer
     const g = height(cx, Z);
+    // [surf] Where people stand at the open end, drip after climbing out and jump: worn darker,
+    // less bleached, damp.
+    const worn = cx < PIER.tipX + 0.9 ? 1 - (cx - PIER.tipX) / 0.9 : 0;
     planks.push({
       x: cx,
       y: DECK_TOP - PLANK.t / 2 + rnd(-0.0025, 0.0015),
@@ -128,8 +142,8 @@ export function buildPlan(height: (x: number, z: number) => number): PierPlan {
       ry: rnd(-0.0035, 0.0035),
       rz: rnd(-0.004, 0.004),
       lenScale: rnd(0.992, 1.0),
-      seed: seed(fresh ? rnd(0.15, 0.35) : rnd(0.5, 1.0)),
-      env: [g, sprayExposure(cx), r(), fresh ? 1 : 0],
+      seed: seed((fresh ? rnd(0.15, 0.35) : rnd(0.5, 1.0)) * (1 - 0.55 * worn)),
+      env: [g, Math.max(sprayExposure(cx), worn), r(), fresh ? 1 : 0],
     });
     px -= PLANK.w + rnd(PLANK.gapMin, PLANK.gapMax);
   }
@@ -320,29 +334,85 @@ export function buildPlan(height: (x: number, z: number) => number): PierPlan {
       });
     }
   }
-  // Tip rail across the end of the deck, with its ropes.
+  // Tip rail across the end of the deck, with its ropes. [surf] Open in the middle: a gap
+  // between two posts (the jump and the ladder), each half railed and roped from its corner.
   {
     const x = PIER.tipX + 0.02;
     const za = Z - POST.z;
     const zb = Z + POST.z;
-    addPost(x, Z, false);
-    rails.push({
-      x,
-      y: POST.top + RAIL.h / 2,
-      z: Z,
-      rx: 0,
-      ry: 0,
-      rz: 0,
-      lenScale: (zb - za + 0.12) / 6,
-      seed: seed(0.9, (zb - za) / 6),
-      env: [height(x, Z), 1, r(), 0],
-    });
-    for (let h = 0; h < ROPE.heights.length; h++) {
-      const y = DECK_TOP + ROPE.heights[h];
-      ropes.push({ x0: x, y0: y, z0: za, x1: x, y1: y, z1: Z, sag: 0.03 });
-      ropes.push({ x0: x, y0: y, z0: Z, x1: x, y1: y, z1: zb, sag: 0.03 });
+    const ga = Z - GAP.half;
+    const gb = Z + GAP.half;
+    addPost(x, ga, false);
+    addPost(x, gb, false);
+    for (let k = 0; k < 2; k++) {
+      const z0 = k === 0 ? za : gb;
+      const z1 = k === 0 ? ga : zb;
+      rails.push({
+        x,
+        y: POST.top + RAIL.h / 2,
+        z: (z0 + z1) / 2,
+        rx: 0,
+        ry: 0,
+        rz: 0,
+        lenScale: (z1 - z0 + 0.12) / 6,
+        seed: seed(0.9, (z1 - z0) / 6),
+        env: [height(x, Z), 1, r(), 0],
+      });
+      for (let h = 0; h < ROPE.heights.length; h++) {
+        const y = DECK_TOP + ROPE.heights[h];
+        ropes.push({ x0: x, y0: y, z0, x1: x, y1: y, z1, sag: 0.018 });
+      }
     }
     lamps.push({ x: PIER.tipX + 0.02, z: Z + POST.z, side: 1 });
+  }
+
+  // [surf] Swim ladder off the tip bent's outer cap: two round stiles from below the tide line up
+  // past the deck as grab rails, flat treads between them.
+  const ladder: number[] = [];
+  {
+    const lx = LADDER.x;
+    for (let s = -1; s <= 1; s += 2) {
+      const lz = Z + s * LADDER.half;
+      piles.push({
+        x: lx,
+        z: lz,
+        r: LADDER.r,
+        bottom: LADDER.bottom,
+        top: LADDER.top,
+        ground: height(lx, lz),
+        seed: [r(), r(), r(), r()],
+      });
+    }
+    // Standoffs from each stile's head back to the tip cap (the ladder is bolted to the bent).
+    const capFace = PIER.tipX - 0.24;
+    for (let s = -1; s <= 1; s += 2) {
+      const len = capFace - lx + 0.06;
+      rails.push({
+        x: (lx + capFace) / 2,
+        y: DECK_TOP - 0.2,
+        z: Z + s * LADDER.half,
+        rx: 0,
+        ry: Math.PI / 2,
+        rz: 0,
+        lenScale: len / 6,
+        seed: seed(0.5, 0.1),
+        env: [height(lx, Z), 1, r(), 0],
+      });
+    }
+    for (let y = LADDER.tread0; y < DECK_TOP - 0.2; y += LADDER.pitch) {
+      ladder.push(y);
+      rails.push({
+        x: lx,
+        y,
+        z: Z,
+        rx: rnd(-0.01, 0.01),
+        ry: 0,
+        rz: rnd(-0.006, 0.006),
+        lenScale: (2 * LADDER.half + 0.06) / 6,
+        seed: seed(y > 0.8 ? rnd(0.4, 0.7) : 0.2, 0.1),
+        env: [height(lx, Z), 1, r(), 0],
+      });
+    }
   }
 
   // ── Stairs at the root: straight down from the deck onto the sand, landward (+X). ──
@@ -455,5 +525,6 @@ export function buildPlan(height: (x: number, z: number) => number): PierPlan {
     hitches,
     lamps,
     stair: { x0: PIER.rootX, x1: PIER.rootX + run, rise, steps, bottom },
+    ladder,
   };
 }

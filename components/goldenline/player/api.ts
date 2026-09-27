@@ -4,6 +4,7 @@
 
 import type { Quaternion, Vector3 } from 'three/webgpu';
 import type { GLContext, PlayerMode, PlayerService } from '../core/contracts';
+import type { Intent } from './intent';
 
 /**
  * Board frame: +X toward the nose, +Y out of the deck, +Z toward the rider's right when prone.
@@ -38,6 +39,22 @@ export interface Stance {
   fore: number;
   /** Arm spread for balance, 0..1. */
   arms: number;
+  /**
+   * [surf] The rider's lean axis (world, need not be unit): the hips, torso and eye tip onto it
+   * about the feet, which stay planted on the deck. bodyY ≤ 0 = stand along the deck normal.
+   */
+  bodyX?: number;
+  bodyY?: number;
+  bodyZ?: number;
+  /**
+   * [surf] Wipeout tumble (surf driver): when tumble ≥ 0 the 'wipeout' pose puts the eye at
+   * (eyeX, eyeY, eyeZ), tucks the limbs round the head and lets the board fly free; body* is
+   * the tumbling body's up axis.
+   */
+  tumble?: number;
+  eyeX?: number;
+  eyeY?: number;
+  eyeZ?: number;
 }
 
 /** Camera effects other systems can drive. All of them are no-ops under reduced motion except `roll`. */
@@ -66,6 +83,12 @@ export interface CameraFx {
  */
 export interface RideDriver {
   handlesWipeout?: boolean;
+  /**
+   * [surf] Optional: drive the board during the pop-up too (the drop starts while the rider gets
+   * to their feet). Called every pop-up frame; `first` on the frame it starts. Write the board
+   * like update(); the player syncs its prone state from it so the pop-up pose follows.
+   */
+  popup?(ctx: GLContext, rig: PlayerRig, dt: number, first: boolean): void;
   begin(ctx: GLContext, rig: PlayerRig): void;
   update(ctx: GLContext, rig: PlayerRig, dt: number): PlayerMode;
   end?(ctx: GLContext, rig: PlayerRig): void;
@@ -90,6 +113,16 @@ export interface PlayerRig extends PlayerService {
   setRideDriver(driver: RideDriver | null): void;
   /** True while a debug demo script drives the player (see player/script.ts). */
   demoActive: boolean;
+  /** [surf] This frame's input (keyboard/mouse or a script), for the ride driver. Read-only. */
+  intent: Intent;
+  /**
+   * [surf] A scripted input source (surf/script.ts): when set, it fills the intent every frame
+   * instead of the keyboard and mouse (set demoActive too so a locked shot camera doesn't hide the
+   * player).
+   */
+  externalIntent: ((out: Intent) => void) | null;
+  /** [surf] View yaw (rad) the driver turns the head by this frame (A/D carves carry the view). */
+  viewTurn: number;
 }
 
 export function isPlayerRig(p: PlayerService): p is PlayerRig {

@@ -7,7 +7,12 @@ import { clamp } from '../core/pool';
 import type { Stance } from './api';
 import { boardSpec } from './board/shape';
 import type { ArmTarget, HandShape, LegTarget } from './body/rig';
-import { EYE_H, PlayerCore } from './controller';
+import { CLIMB, EYE_H, PlayerCore } from './controller';
+import { PIER } from '../world/layout';
+import { GAP } from '../pier/plan';
+
+const PIER_TIP = PIER.tipX; // [surf]
+const GAP_HALF = GAP.half; // [surf]
 import type { Foot } from './gait';
 import { Frame, type Pose } from './pose';
 import { basisQuat, ease, TAU } from './rigmath';
@@ -25,6 +30,7 @@ const F = new Frame(); // body / board frame
 const S = new Frame(); // stabilised frame (head, shoulders) while prone
 const T = new Frame(); // torso frame while standing on the board
 const B = new Frame(); // board frame scratch
+const BD = new Frame(); // [surf] rider's body frame on the board (about the feet)
 
 function smooth01(x: number) {
   const t = x < 0 ? 0 : x > 1 ? 1 : x;
@@ -364,7 +370,7 @@ function standingBoardFrame(board: Vector3, boardQ: Quaternion, fr: Frame) {
   fr.q.copy(boardQ);
 }
 
-export function stancePose(board: Vector3, boardQ: Quaternion, st: Stance, out: Pose, o: PoseOptions, t: number) {
+export function stancePose(board: Vector3, boardQ: Quaternion, st: Stance, out: Pose, o: PoseOptions, t: number, viewYaw = NaN) {
   standingBoardFrame(board, boardQ, F);
   out.board.copy(F.o);
   out.boardQ.copy(F.q);
@@ -380,7 +386,17 @@ export function stancePose(board: Vector3, boardQ: Quaternion, st: Stance, out: 
   const mid = (st.frontX + st.rearX) / 2 + fore * 0.08;
   const hipH = 0.95 - 0.33 * cr;
   const deck = deckAt(mid);
-  F.p(mid - 0.02, deck + hipH, 0.02 + lean * 0.09, _a);
+  // [surf] Body frame: the board frame tipped about the feet so its up is the rider's lean axis
+  // (the ride driver writes it: vertical plus the turn's and the drop's accelerations).
+  BD.q.copy(F.q);
+  F.p(mid, deck, 0, BD.o);
+  if ((st.bodyY ?? 0) > 0) {
+    F.d(0, 1, 0, _c);
+    _d.set(st.bodyX ?? 0, st.bodyY ?? 1, st.bodyZ ?? 0).normalize();
+    _q.setFromUnitVectors(_c, _d);
+    BD.q.premultiply(_q);
+  }
+  BD.p(-0.02, hipH, 0.02 + lean * 0.09, _a);
   F.d(1, 0, 0, _b);
   legF.hip.copy(_a).addScaledVector(_b, 0.092);
   legR.hip.copy(_a).addScaledVector(_b, -0.092);
@@ -389,24 +405,48 @@ export function stancePose(board: Vector3, boardQ: Quaternion, st: Stance, out: 
   legF.pole.copy(legF.ankle).addScaledVector(_c, 1);
   F.d(Math.cos(st.rearAngle), 0.6, Math.sin(st.rearAngle), _c);
   legR.pole.copy(legR.ankle).addScaledVector(_c, 1);
-  // Pelvis: anatomical forward = +Z of the board, up = board up.
+  // Pelvis: anatomical forward = +Z of the board, up = the body's up. [surf]
   T.o.copy(_a);
-  F.d(0, 0, 1, _b);
-  F.d(0, 1, 0, _c);
+  BD.d(0, 0, 1, _b);
+  BD.d(0, 1, 0, _c);
   basisQuat(_b, _c, T.q);
   legF.pelvis.copy(T.q);
   legR.pelvis.copy(T.q);
   // Head over the front knee, looking up the board.
   const bob = o.reduced ? 0 : Math.sin(t * 2.1) * 0.004;
-  F.p(mid + 0.2 + fore * 0.06, deck + 1.6 - 0.42 * cr + bob, -0.05 + lean * 0.12, out.eye);
+  BD.p(0.2 + fore * 0.06, 1.6 - 0.42 * cr + bob, -0.05 + lean * 0.05, out.eye); // [surf] less toe-side head shift: kept the knees in view
   out.camPitch = 0;
   out.camRoll = 0;
   // The upper body turns to face the nose with the head (as surfers do), so the shoulders sit
   // behind and below the lens like when walking and never float into the frame.
   F.d(1, 0, 0, _b);
-  _b.y = 0;
+  BD.d(0, 1, 0, _c); // [surf] leaning with the body
+  _b.addScaledVector(_c, -_b.dot(_c));
+  if (_b.lengthSq() < 1e-6) F.d(1, 0, 0, _b);
   _b.normalize();
-  basisQuat(_b, UP, T.q);
+  // [surf] ...and with the head beyond ±0.45 rad of the nose: carving, the view leads the board by
+  // up to 90°, and a torso left facing the nose put the rear shoulder in front of the lens.
+  if (viewYaw === viewYaw) {
+    _d.set(-Math.sin(viewYaw), 0, -Math.cos(viewYaw));
+    _d.addScaledVector(_c, -_d.dot(_c));
+    if (_d.lengthSq() > 1e-6) {
+      _d.normalize();
+      const sn = _c.x * (_b.y * _d.z - _b.z * _d.y) + _c.y * (_b.z * _d.x - _b.x * _d.z) + _c.z * (_b.x * _d.y - _b.y * _d.x);
+      const a = Math.atan2(sn, _b.dot(_d));
+      const lim = 0.45;
+      if (a > lim || a < -lim) {
+        const th = a > 0 ? a - lim : a + lim;
+        const c = Math.cos(th);
+        const s = Math.sin(th);
+        // _b ← _b cos θ + (_c × _b) sin θ (rotation about the body axis; _b ⟂ _c)
+        const x = _b.x * c + (_c.y * _b.z - _c.z * _b.y) * s;
+        const y = _b.y * c + (_c.z * _b.x - _c.x * _b.z) * s;
+        const z = _b.z * c + (_c.x * _b.y - _c.y * _b.x) * s;
+        _b.set(x, y, z).normalize();
+      }
+    }
+  }
+  basisQuat(_b, _c, T.q);
   T.o.copy(out.eye);
   const ar = clamp(st.arms, 0, 1);
   T.p(-0.07, -0.235, -0.19, out.armL.shoulder);
@@ -435,14 +475,16 @@ function placeFoot(leg: LegTarget, x: number, z: number, angle: number, pad: num
 }
 
 export function popupPose(core: PlayerCore, st: Stance, out: Pose, o: PoseOptions, scratchA: Pose, scratchB: Pose) {
-  const u = clamp(core.modeTime / PlayerCore.POPUP_S, 0, 1);
+  // [surf] Evaluated as the outgoing pose of a blend (popup → ride), modeTime is the new mode's:
+  // the pop-up is complete by then (it restarted at prone and snapped the eye down 0.8 m).
+  const u = core.mode === 'popup' ? clamp(core.modeTime / PlayerCore.POPUP_S, 0, 1) : 1;
   // A: pushed up on the rails. B: the stance. The feet swing through between them.
   const savedPush = core.push;
   core.push = 1;
   pronePose(core, scratchA, o);
   core.push = savedPush;
   boardFrame(core, B);
-  stancePose(B.o, B.q, st, scratchB, o, core.t);
+  stancePose(B.o, B.q, st, scratchB, o, core.t, core.yaw); // [surf] view yaw
   const b = ease(clamp((u - 0.18) / 0.82, 0, 1));
   out.copy(scratchA);
   // The body rises in an arc while the hands stay planted.
@@ -470,6 +512,113 @@ export function wipeoutPose(core: PlayerCore, out: Pose, o: PoseOptions) {
   out.board.addScaledVector(_a, 1.6 * k);
 }
 
+/**
+ * [surf] Climbing the pier's swim ladder (PlayerCore.updateClimb): facing the ladder, the left hand
+ * goes hand-over-hand up the left stile (then onto the gap post to step out), the right arm keeps
+ * the board tucked under it, the feet stand on the treads.
+ */
+export function climbPose(core: PlayerCore, out: Pose, o: PoseOptions, lx: number, lz: number, half: number, deck: number) {
+  F.o.set(core.pos.x, core.feetY, core.pos.z);
+  yawQuat(core.heading, F.q);
+  const k = core.climbK;
+  const out_ = core.modeTime > CLIMB.top ? clamp((core.modeTime - CLIMB.top) / (CLIMB.out - CLIMB.top), 0, 1) : 0;
+  // Eye close to the ladder, rising with the steps; a little lean back to look up at the start.
+  F.p(0.1 - 0.06 * (1 - k), EYE_H - 0.06 + 0.04 * out_, 0, out.eye);
+  out.camPitch = 0;
+  out.camRoll = 0;
+  const hipY = 0.92;
+  F.p(-0.08, hipY, -0.092, out.legL.hip);
+  F.p(-0.08, hipY, 0.092, out.legR.hip);
+  // Feet on the treads (alternating which is higher), the toes on the tread's front edge.
+  const up = (core.climbStep & 1) === 0 ? 1 : 0;
+  for (let s = 0; s < 2; s++) {
+    const leg = s === 0 ? out.legL : out.legR;
+    const lift = (s === 0 ? up : 1 - up) * 0.3;
+    F.p(0.22 - 0.2 * out_, lift * (1 - out_), (s === 0 ? -1 : 1) * 0.12, _a);
+    yawQuat(core.heading, _q);
+    leg.foot.copy(_q);
+    leg.ankle.set(-0.06, 0.078, 0).applyQuaternion(leg.foot).add(_a);
+    leg.toe = 0.15;
+    F.p(0.9, 0.6, (s === 0 ? -1 : 1) * 0.2, leg.pole);
+    leg.pelvis.copy(F.q);
+  }
+  const shY = EYE_H - 0.225;
+  F.p(-0.03, shY, -0.185, out.armL.shoulder);
+  F.p(-0.03, shY, 0.185, out.armR.shoulder);
+  // Right arm: the board under it, as when carrying on the sand.
+  carryBoard(core, out, 0, 0);
+  // Left hand: on the left stile, re-gripping higher every 0.6 m of rise (a reach between
+  // grips); at the top it takes the gap post instead.
+  const eyeY = out.eye.y;
+  const grip = Math.floor((eyeY - 0.2) / 0.6) * 0.6 + 0.2;
+  const ph = clamp(((eyeY - 0.2) / 0.6) % 1, 0, 1);
+  const reach = ph > 0.72 ? (ph - 0.72) / 0.28 : 0;
+  const hy = Math.min(deck - 0.05, grip + 0.6 * reach * reach * (3 - 2 * reach) + 0.05);
+  const hand = _b.set(lx - 0.035, hy, lz - half + 0.02);
+  if (out_ > 0) {
+    // The gap post, a little above the deck, as the body steps out onto the planks.
+    _c.set(PIER_TIP + 0.03, deck + 0.75, lz - GAP_HALF + 0.07);
+    hand.lerp(_c, clamp(out_ * 1.6, 0, 1));
+  }
+  out.armL.wrist.copy(hand).addScaledVector(F.d(-1, 0, 0, _c), 0.05);
+  handQ(F, 0.2, 0.15, 1, -0.2, 0.3, -0.95, out.armL.hand);
+  F.p(-0.3, shY - 0.5, -0.55, out.armL.pole);
+  setShape(out.armL.shape, 0.78, 0.2, 0.6, 0.2);
+  void o;
+}
+
+/**
+ * [surf] The surf driver's wipeout: the body tumbles free of the board (both from the driver:
+ * eye + body axis in the stance, board in board/boardQ). Arms wrap the head, legs trail; all of
+ * it just outside the lens so the view is the tumble, the spray and the board flying.
+ */
+export function tumblePose(core: PlayerCore, board: Vector3, boardQ: Quaternion, st: Stance, out: Pose) {
+  out.board.copy(board);
+  out.boardQ.copy(boardQ);
+  out.eye.set(st.eyeX ?? board.x, st.eyeY ?? board.y + 0.5, st.eyeZ ?? board.z);
+  out.camPitch = 0;
+  out.camRoll = 0;
+  // Body frame: up = the tumbling body axis, forward = where the head looks (so the limbs, kept
+  // behind and round the head, stay out of a lens that rolls and pitches with the tumble).
+  _c.set(st.bodyX ?? 0, (st.bodyY ?? 1) > 1e-3 ? (st.bodyY as number) : 1e-3, st.bodyZ ?? 0).normalize();
+  _b.set(-Math.sin(core.yaw), 0, -Math.cos(core.yaw));
+  _b.addScaledVector(_c, -_b.dot(_c));
+  if (_b.lengthSq() < 1e-6) _b.set(1, 0, 0);
+  _b.normalize();
+  basisQuat(_b, _c, T.q);
+  T.o.copy(out.eye);
+  // Arms: hands clasped behind the head, elbows up and out beside the ears: ≥ 85° off every view
+  // axis the tumble reaches (it pitches down, and roll doesn't move the axis), so the lens never
+  // sees them however the eased camera lags the roll. (Elbows forward swung into the frame.)
+  T.p(-0.1, -0.2, -0.19, out.armL.shoulder);
+  T.p(-0.1, -0.2, 0.19, out.armR.shoulder);
+  T.p(-0.16, 0.12, -0.07, out.armL.wrist);
+  T.p(-0.16, 0.12, 0.07, out.armR.wrist);
+  T.p(-0.08, 0.35, -0.45, out.armL.pole);
+  T.p(-0.08, 0.35, 0.45, out.armR.pole);
+  handQ(T, 0.1, 0.2, 1, -1, 0, 0, out.armL.hand);
+  handQ(T, 0.1, 0.2, -1, -1, 0, 0, out.armR.hand);
+  setShape(out.armL.shape, 0.55, 0.3, 0.3, 0.1);
+  setShape(out.armR.shape, 0.55, 0.3, 0.3, 0.1);
+  // Legs: trailing behind the head (a body tumbling head-first through the soup), never in front.
+  T.p(-0.55, -0.35, -0.09, out.legL.hip);
+  T.p(-0.55, -0.35, 0.09, out.legR.hip);
+  T.p(-1.35, -0.45, -0.14, out.legL.ankle);
+  T.p(-1.32, -0.4, 0.16, out.legR.ankle);
+  T.p(-0.9, 0.1, -0.15, out.legL.pole);
+  T.p(-0.9, 0.1, 0.15, out.legR.pole);
+  T.d(-1, -0.3, 0, _a);
+  T.d(0, -1, 0, _d);
+  basisQuat(_a, _d, out.legL.foot);
+  out.legR.foot.copy(out.legL.foot);
+  out.legL.toe = 0.2;
+  out.legR.toe = 0.2;
+  T.d(0, -1, 0, _a);
+  T.d(1, 0, 0, _d);
+  basisQuat(_a, _d, out.legL.pelvis);
+  out.legR.pelvis.copy(out.legL.pelvis);
+}
+
 /** Pose for any mode. */
 export function poseFor(mode: PlayerMode, core: PlayerCore, st: Stance, board: Vector3, boardQ: Quaternion, out: Pose, o: PoseOptions, sa: Pose, sb: Pose) {
   switch (mode) {
@@ -487,11 +636,19 @@ export function poseFor(mode: PlayerMode, core: PlayerCore, st: Stance, board: V
       popupPose(core, st, out, o, sa, sb);
       return;
     case 'ride':
-      stancePose(board, boardQ, st, out, o, core.t);
+      stancePose(board, boardQ, st, out, o, core.t, core.yaw); // [surf] view yaw
       return;
     case 'wipeout':
-      wipeoutPose(core, out, o);
+      if ((st.tumble ?? -1) >= 0) tumblePose(core, board, boardQ, st, out); // [surf]
+      else wipeoutPose(core, out, o);
       return;
+    case 'climb': {
+      // [surf]
+      const L = core.ladder();
+      if (L) climbPose(core, out, o, L.x, L.z, L.halfWidth, L.top + 0.03);
+      else standingPose(core, out, o, 0);
+      return;
+    }
   }
 }
 

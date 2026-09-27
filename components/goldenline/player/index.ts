@@ -128,7 +128,9 @@ export function createPlayerSystem(): GLSystem {
   };
 
   const tick = (ctx: GLContext, dt: number, silent: boolean) => {
-    if (rig.demoActive) {
+    // [surf] A scripted input source (surf demos) replaces the keyboard, mouse and player demos.
+    if (rig.externalIntent) rig.externalIntent(intent);
+    else if (rig.demoActive) {
       runner.step(dt, core.pos.x, core.pos.z, core.yaw, core.pitch, intent);
       if (runner.labWave > 0) {
         core.startLabWave(runner.labWave);
@@ -146,13 +148,23 @@ export function createPlayerSystem(): GLSystem {
       film = damp(film, filmT * (wo >= 0 ? wo : 1), filmT > film ? 4 : 0.25, dt);
       flow += dt * (0.05 + core.speed * 0.35);
     }
-    if (core.mode === 'ride' && core.driver) {
+    // [surf] Also while it drives the pop-up (and its own wipeout): the prone and pop-up poses
+    // build the board from the core's position, water height, heading and attitude.
+    const driven =
+      !!core.driver && (core.mode === 'ride' || (core.mode === 'popup' && !!core.driver.popup) || (core.mode === 'wipeout' && !!core.driver.handlesWipeout));
+    if (driven) {
       // The surf system drives the board; keep the core's body state on it for the hand-back.
       core.pos.set(rig.boardPosition.x, core.pos.y, rig.boardPosition.z);
       core.vel.copy(rig.velocity);
       core.speed = rig.speed;
       _v.set(1, 0, 0).applyQuaternion(rig.boardQuat);
       core.heading = Math.atan2(-_v.x, -_v.z);
+      core.waterY = rig.boardPosition.y + 0.012;
+      if (core.mode !== 'ride') {
+        core.boardN.set(0, 1, 0).applyQuaternion(rig.boardQuat);
+        core.boardPitch = 0;
+        core.boardRoll = 0;
+      }
     }
     // Pitch limits per mode keep the torso-less body out of frame (see README).
     const lo = core.mode === 'paddle' || core.mode === 'catch' ? -0.62 : core.mode === 'walk' || core.mode === 'wade' ? -1.1 : -1.0;
@@ -200,7 +212,8 @@ export function createPlayerSystem(): GLSystem {
     if (p.inspect.value > 0) inspectCamera(ctx, p.inspect.value);
     else if (!locked) camRig.apply(ctx, pose.eye, core.yaw, core.pitch, pose.camPitch, pose.camRoll, dt, core.waterY);
     // Outputs for other systems. While a ride driver runs, it owns the board and velocity.
-    const driven = core.mode === 'ride' && !!core.driver;
+    const driven =
+      !!core.driver && (core.mode === 'ride' || (core.mode === 'popup' && !!core.driver.popup) || (core.mode === 'wipeout' && !!core.driver.handlesWipeout)); // [surf]
     rig.mode = core.mode;
     rig.modeTime = core.modeTime;
     rig.eye.copy(locked ? ctx.camera.position : camRig.final);
@@ -417,6 +430,9 @@ export function createPlayerSystem(): GLSystem {
         speed: 0,
         lookYaw: 0,
         demoActive: false,
+        intent, // [surf]
+        externalIntent: null, // [surf]
+        viewTurn: 0, // [surf]
         teleport(x: number, z: number, yaw: number, mode?: PlayerMode) {
           core.teleport(x, z, yaw, mode ?? 'walk');
           r.mode = core.mode;
