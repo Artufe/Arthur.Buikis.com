@@ -20,16 +20,18 @@ There is no lint script (no ESLint config in the repo) and no `start` script (`n
 
 ```
 app/            Routes: / (page.tsx), about/, building/, contact/, cv/, work/[slug]/,
-                subscribe/, snake/,
+                subscribe/, snake/, surf/,
                 plus sitemap.ts, robots.ts, llms.txt/, llms-full.txt/, opengraph-image.tsx
 components/     Page sections + global chrome; ui/ (Input, Textarea), mdx/ (MDX overrides),
-                snake/ (three.js 3D snake game)
+                snake/ (three.js 3D snake game), goldenline/ (WebGPU surf demo),
+                floating-window.tsx (shared game window)
 content/        site.ts, cv.ts, about.ts (typed data) + work/*.mdx, building/*.mdx
 lib/            Pure helpers: commands.ts (palette commands), fuzzy.ts, utils.ts (cn),
-                and window-event buses: palette-bus, plasma-bus, snake-bus, ide-bus
+                and window-event buses: palette-bus, plasma-bus, snake-bus, surf-bus, ide-bus
 public/         Static assets: CNAME, cv.pdf, favicons, site.webmanifest, hero-shader.js
-scripts/        dev.mjs, postbuild.mjs, gen-icons.py (favicons), mcp/ (image server for the Claude bot)
-docs/           hero-shader.md
+scripts/        dev.mjs, postbuild.mjs, gen-icons.py (favicons), goldenline-shot.mjs (GOLDENLINE
+                review shots / perf / boot timing), mcp/ (image server for the Claude bot)
+docs/           hero-shader.md, goldenline/ (brief, agent task list, decisions, perf, assets)
 tests/          vitest (app/, components/, lib/) + playwright (e2e/)
 .github/        workflows/, scripts/grok-imagine.mjs (PR image bot), agents/ (prompt library)
 ```
@@ -48,10 +50,11 @@ Direct `git push origin master` is blocked by the harness ("bypasses pull reques
 
 ## Global chrome (app/layout.tsx)
 
-Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav`, `Footer`, `SnakeWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
+Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav`, `Footer`, `SnakeWindowHost`, `GoldenlineWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
 
 - **Command palette** (`components/command-palette*.tsx`, commands in `lib/commands.ts`) — opens on `/` or `Ctrl/⌘+K`. The lazy wrapper listens for the keys and idle-prefetches the real palette.
 - **Snake** (`components/snake/`) — floating window opened via the palette (`snake-bus`), expandable to `/snake`. Engine (`engine/`) is pure and unit-tested; specs sit next to the code they cover.
+- **GOLDENLINE** (`components/goldenline/`): a first-person golden-hour reef-break surf demo on three.js `WebGPURenderer` + TSL. The palette's `go surfing` opens it in a `FloatingWindow` (`surf-bus`), expandable to the full-viewport `/surf` (the nav hides there). WebGPU only: without it the canvas shows one line of text. One directory per system, wired in `systems.ts` against `core/contracts.ts`; the engine chunk loads only when opened. Start at `docs/goldenline/TASKS.md` and each system's README. Review with `node scripts/goldenline-shot.mjs` (headless Chromium with real WebGPU; `--shot`, `--seq`, `--perf`, `--boot`) against the dev server. F1 opens the settings/perf overlay. Per-agent evidence shots under `docs/goldenline/shots/` are gitignored except `milestones/`.
 - **IDE overlay** (`components/ide-overlay.tsx`) — Zed-style "view source" easter egg built from `content/*` data. Opened by the header "open in zed" button, the footer `$EDITOR` link, or the palette (`ide-bus`).
 - **Reveal** — elements with a bare `reveal` class start at opacity 0. `RevealObserver` adds `vis` on intersection (including nodes added by client navigation); `ScrollReveal` wraps sections on the home page.
 
@@ -59,7 +62,7 @@ Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserv
 
 Full reference: `docs/hero-shader.md`.
 
-- Route-gated in `components/hero-shader.tsx`. The component returns `null` for anything in `SHADER_EXCLUDED_ROUTES` (`/cv`, `/contact`, `/snake`, plus nested children). Add new exclusions there.
+- Route-gated in `components/hero-shader.tsx`. The component returns `null` for anything in `SHADER_EXCLUDED_ROUTES` (`/cv`, `/contact`, `/snake`, `/surf`, plus nested children). Add new exclusions there.
 - Tunables live at the top of that file: `PALETTES` (per-theme colours + intensity), `BASE_SPEED`, `BASE_GRAIN`, `PEAK_OPACITY`, `CALM_FACTOR`. The fragment shader and standalone defaults live in `public/hero-shader.js`.
 - `lib/plasma-bus.ts` is a tiny localStorage + custom-event bus driving a `calm` / `vivid` toggle from the command palette; the shader subscribes via `onPlasmaModeChange`.
 - Opacity ties to scroll: it fades to 0 over the height of `[data-hero-region]` (set on the home hero `<section>`). Without that element the fade falls back to the viewport height.
