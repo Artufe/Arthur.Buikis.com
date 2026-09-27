@@ -372,22 +372,26 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
     const b = s * DATA_W;
     if (active) {
       // Distance (rays) to the nearest stage jump (the end of the reef), both ways; fade by it.
-      let dist = 1e9;
+      // [polish] the section's own ends (and holes where no crest was recorded) taper too,
+      // not only the stage jumps: a shore-break section used to stop in a vertical wall.
+      let dist = 0;
       for (let r = r0; r <= r1; r++) {
         const k = b + r;
-        const isCut = r > r0 && wS[k] > 0 && wS[k - 1] > 0 && Math.abs(phiS[k] - phiS[k - 1]) > 2.2;
+        const isCut = r > r0 && wS[k] > 0 && (wS[k - 1] <= 0 || Math.abs(phiS[k] - phiS[k - 1]) > 2.2);
         dist = isCut ? 0 : dist + 1;
         cut[r] = dist;
       }
-      dist = 1e9;
+      dist = 0;
       for (let r = r1; r >= r0; r--) {
         const k = b + r;
-        const isCut = r < r1 && wS[k] > 0 && wS[k + 1] > 0 && Math.abs(phiS[k] - phiS[k + 1]) > 2.2;
+        const isCut = r < r1 && wS[k] > 0 && (wS[k + 1] <= 0 || Math.abs(phiS[k] - phiS[k + 1]) > 2.2);
         dist = isCut ? 0 : dist + 1;
         if (dist < cut[r]) cut[r] = dist;
       }
       for (let r = r0; r <= r1; r++) {
-        let x = (cut[r] - 0.5) / 6.5;
+        // [polish] a wider taper (was 6.5 rays): the section's end lowers and softens over ~15 rays
+        // instead of stopping in a vertical wall (reef end, shore-break ends)
+        let x = (cut[r] - 0.5) / 16;
         x = x < 0 ? 0 : x > 1 ? 1 : x;
         wS[b + r] *= x * x * (3 - 2 * x);
       }

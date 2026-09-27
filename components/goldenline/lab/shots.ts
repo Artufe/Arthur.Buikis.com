@@ -31,7 +31,8 @@ export const SHOTS: Record<string, Shot> = {
   'pier-silhouette': { x: PIER.rootX - 12, y: 1.5, z: PIER.z - 14, lookAt: [PIER.tipX, 3, PIER.z + 6], t: 30, note: 'Pier silhouetted against the sun from the sand' },
   'wetsand-reflection': { x: 6, y: 1.9, z: PIER.z - 10, absY: true, lookAt: [PIER.tipX * 0.6, 2, PIER.z + 4], t: 30, note: 'Low over wet sand: pier + sun reflected in the swash film' },
   'shorebreak': { x: 10, y: 1.6, z: 0, lookAt: [-12, 0.4, -6], t: 42, note: 'Shore break dumping, swash sheeting up the sand' },
-  'lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 36, note: 'Paddling eye line in the lineup, set approaching, backlit' },
+  'lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 40, // [polish] 36 before ocean.swellDir 26
+    note: 'Paddling eye line in the lineup, set approaching, backlit' },
   'pier-deck': { x: -70, y: PIER.deckHeight + 1.68, z: PIER.z, absY: true, lookAt: [-120, 0, -20], t: 30, note: 'Standing on the deck looking at the reef break' },
   'pier-under': { x: 12, y: 1.4, z: PIER.z + 0.4, lookAt: [-40, 1.2, PIER.z], t: 30, note: 'Under the pier: plank-gap light stripes, caustics on the deck underside' },
   'aerial': { x: 80, y: 70, z: -60, absY: true, lookAt: [-90, 0, 10], t: 30, note: 'Layout overview (debug only, not a beauty shot)' },
@@ -66,7 +67,7 @@ export const SHOTS: Record<string, Shot> = {
   'pier-spray': { x: -50, y: 1.6, z: 39, absY: true, lookAt: [-63, 1.0, PIER.z], t: 16, params: { 'pier.surge': 1 }, note: 'Debug surge: whitewater bore hitting the pilings (use --advance 2); spray bursts + collars' },
   'pier-under-water': { x: -24, y: 1.3, z: PIER.z + 0.5, absY: true, lookAt: [-70, 1.6, PIER.z - 0.4], t: 30, note: 'Under the deck over the water: cool underside, dancing caustics, plank-gap stripes' },
   'pier-down': { x: -52, y: PIER.deckHeight + 1.68, z: PIER.z - 0.3, absY: true, yaw: Math.PI / 2, pitch: -1.2, t: 30, note: 'Looking down through the plank gaps at the water below' },
-  'player-lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 36, params: { 'player.follow': true }, note: 'Player: the lineup shot with the body under the camera: board nose and paddling hands' },
+  'player-lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 40, params: { 'player.follow': true }, note: 'Player: the lineup shot with the body under the camera: board nose and paddling hands' },
   'player-carry': { x: 20, y: 1.7, z: 4, t: 30, params: { 'player.demo': 6, 'player.demoAt': 3 }, note: 'Player (demo 6): walking the sand with the board under the arm' },
   'player-feet': { x: 22, y: 1.7, z: 16, t: 30, params: { 'player.demo': 5, 'player.demoAt': 2.6 }, note: 'Player (demo 5): looking down while walking: feet, footprints on the landing frame' },
   'player-wade': { x: 16, y: 1.7, z: 6, t: 30, params: { 'player.demo': 2, 'player.demoAt': 9 }, note: 'Player (demo 2): wading out, board floating alongside' },
@@ -80,7 +81,8 @@ export const SHOTS: Record<string, Shot> = {
   'atmosphere-shadow-near': { x: 20.6, y: 1.7, z: 2.6, lookAt: [21.6, 0.05, 0.6], t: 30, params: { 'atmosphere.probes': true }, note: 'Atmosphere: fence (plank-gap sized slats) shadow ~2 m from the eye: near-cascade PCSS crispness' },
   'atmosphere-pier-shadow': { x: 12, y: 14, z: 26, absY: true, lookAt: [-150, 0, 44], t: 30, note: 'Atmosphere: the pier shadow on the water out to 150+ m (far cascades)' },
   'breaking-peel': { x: 13, y: 1.7, z: 22, lookAt: [-112, 0.8, -40], t: 36, note: 'Breaking (M3 gate): from the sand at the waterline, the first set peeling down the reef toward the pier (use --seq 60 --interval 1)' },
-  'breaking-tube': { x: -116.4, y: 0.4, z: -45, absY: true, lookAt: [-117, 0.7, -28], t: 42, note: 'Breaking: inside the barrel looking down the line at the opening (use --advance 0.5)' },
+  'breaking-tube': { x: -116.4, y: 0.4, z: -45, absY: true, lookAt: [-117, 0.7, -28], t: 42.35, // [polish] 42 before ocean.swellDir 26
+    note: 'Breaking: inside the barrel looking down the line at the opening (use --advance 0.5)' },
   'breaking-front': { x: -92, y: 2.2, z: -98, absY: true, lookAt: [-110, 1, -120], t: 39.5, note: 'Breaking: from the lagoon, the peak barrel and its whitewater explosion (use --advance 1.5)' },
   'breaking-shoulder': { x: -100, y: 2, z: -8, absY: true, lookAt: [-118, 1.2, -45], t: 41.5, note: 'Breaking: on the shoulder, the set wave peeling toward the camera, veil streaming off the lip (use --advance 1.5)' },
   'breaking-swash': { x: 6, y: 1.25, z: 2, lookAt: [-4, -0.3, -2], t: 41, note: 'Breaking: the shore break and the swash sheet running up the beach face (use --advance 2.8, or --seq 12 --interval 0.5)' },
@@ -90,6 +92,10 @@ export const SHOTS: Record<string, Shot> = {
   'surf-wipeout': { x: -142, y: 0.6, z: -72, absY: true, yaw: -1.9, pitch: -0.1, t: 36.8, params: { 'surf.demo': 3 }, note: 'Surf (demo 3): the same takeoff, then a stall held too long in the barrel: caught inside, tumble, eased recovery to paddling (use --advance 4 --seq 30 --interval 0.15)' },
   'surf-fanshadow': { x: PIER.tipX + 5, y: PIER.deckHeight + 2.2, z: PIER.z - 1.2, absY: true, lookAt: [PIER.tipX + 3.5, PIER.deckHeight, PIER.z + 0.4], t: 30, params: { 'surf.fx.test': true }, note: 'Surf debug: a spray fan thrown over the pier tip, its shadow-only proxy cloud shadowing the sunlit planks (use --advance 0.6)' },
   'surf-ride': { x: -142, y: 0.6, z: -72, absY: true, yaw: -1.9, pitch: -0.1, t: 36.8, params: { 'surf.demo': 1 }, note: 'Surf (demo 1): paddle into a set wave at the peak, drop, bottom turn, the barrel down the reef, out onto the shoulder by the pier, cutback, rebound, a glance back along the foam trail, kick-out (use --advance 2.4 --seq 48 --interval 0.25)' },
+  // [polish] B2 ambient life
+  'vfx-birds': { x: -104, y: 0.6, z: -62, absY: true, lookAt: [-126, 9, -30], t: 36, note: 'VFX: gulls gliding along the break, seen from the lineup (use --seq 12 --interval 0.5)' },
+  'vfx-crabs': { x: 9.5, y: 1.2, z: 20.5, lookAt: [7.5, 0.75, 18], t: 30, note: 'VFX: ghost crabs on the damp sand above the swash (use --seq 10 --interval 0.4)' },
+  'vfx-mist': { x: 14, y: 1.7, z: -40, lookAt: [-110, 2.5, -60], t: 44, note: 'VFX: salt mist over the shore break and the impact zone, backlit' },
 };
 
 export function applyShot(ctx: GLContext, s: Shot, hook: DebugHook) {

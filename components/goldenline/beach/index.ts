@@ -7,7 +7,9 @@ import { Mesh as ThreeMesh } from 'three/webgpu';
 import { vec2 } from 'three/tsl';
 import { SPLAT_FOOTPRINT, type GLContext, type GLSystem, type SurfaceStateService, type TSLNode } from '../core/contracts';
 import type { NumberParam, ToggleParam } from '../core/params';
-import { bakeAux, bakeDryRipples, bakeFarHeight, bakeGrain, bakeMacro, bakeSwash, bakeWaveRipples, heightGradTexture } from './bake';
+import { heightGradTexture } from './bake';
+import { createReefBake } from './reef-bake';
+import { bake, yieldTask } from '../core/bakes';
 import { CdlodSelector, RANGE_K, createPatchGeometry } from './cdlod';
 import { createDebugSand } from './debug-sand';
 import { createDressing } from './dressing';
@@ -43,18 +45,23 @@ export function createBeachSystem(): GLSystem {
 
   return {
     name: 'beach',
-    init(ctx: GLContext) {
+    async init(ctx: GLContext) {
       const t0 = performance.now();
       const p = ctx.params;
-      tex = {
-        dryRipple: bakeDryRipples(),
-        waveRipple: bakeWaveRipples(),
-        swash: bakeSwash(),
-        grain: bakeGrain(),
-        macro: bakeMacro(),
-        far: bakeFarHeight(),
-        aux: bakeAux(),
-      };
+      // [polish] Baked in the boot workers (core/bakes.ts), started before the GPU device.
+      const [dryRipple, waveRipple, swash, grain, macro, farHeight, aux] = await Promise.all([
+        bake('beach.dryRipples'),
+        bake('beach.waveRipples'),
+        bake('beach.swash'),
+        bake('beach.grain'),
+        bake('beach.macro'),
+        bake('beach.far'),
+        bake('beach.aux'),
+      ]);
+      // [polish] reef: GPU-baked coral field, when the device allows a 17th fragment texture
+      const texLimit = (ctx.renderer.backend as unknown as { device?: GPUDevice }).device?.limits.maxSampledTexturesPerShaderStage ?? 16;
+      tex = { dryRipple, waveRipple, swash, grain, macro, far: farHeight, aux, reef: texLimit > 16 ? createReefBake() : undefined };
+      if (tex.reef) disposables.push(tex.reef);
       disposables.push(tex.dryRipple.texture, tex.waveRipple.texture, tex.swash.texture, tex.grain.texture, tex.macro.texture, tex.far, tex.aux);
       const tBake = performance.now();
 
@@ -105,9 +112,11 @@ export function createBeachSystem(): GLSystem {
       // Far field, palms, props, near vegetation.
       const tFar = performance.now();
       const far = createFarField();
+      await yieldTask(); // [polish] keep boot tasks short so the loading screen keeps painting
       const tPalm = performance.now();
       const palms = createPalms(ctx, sp.u.time);
       dressing = createDressing(ctx, ground);
+      await yieldTask();
       veg = createVegetation(ctx, ground, sp.u.time);
       const tEnd = performance.now();
       disposables.push(far, palms, dressing, veg);
@@ -161,23 +170,11 @@ export function createBeachSystem(): GLSystem {
     },
 
     warmup(ctx: GLContext) {
-      // compileAsync() frustum-culls and only targets the output context, so it misses the post
-      // chain's MRT scene pass and the shadow cascades. Render two real frames through the post
-      // service with every beach mesh visible and unculled: that creates every pipeline the
-      // beach will ever use (main MRT pass + each shadow cascade), wherever the camera starts.
+      // [polish] The engine's warmPipelines() renders every mesh through the post chain and the
+      // shadow cascades (all visible, unculled); here only the LOD selection needs priming.
       if (!terrain || !selector) return;
-      const all: Mesh[] = [terrain];
-      for (const g of groups) for (const m of g.meshes) all.push(m);
-      const culled: boolean[] = [];
-      for (let i = 0; i < all.length; i++) {
-        culled.push(all[i].frustumCulled);
-        all[i].frustumCulled = false;
-        all[i].visible = true;
-      }
       const cam = ctx.camera.position;
       selector.update(ctx.camera, ctx.services.terrain.height(cam.x, cam.z), false);
-      for (let f = 0; f < 2; f++) ctx.services.post.render(ctx);
-      for (let i = 0; i < all.length; i++) all[i].frustumCulled = culled[i];
     },
 
     update(ctx: GLContext) {

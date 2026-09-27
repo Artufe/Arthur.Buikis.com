@@ -2,6 +2,7 @@
 // with leaf-scar rings, a crown of pinnate fronds whose leaflets are V-folded strips (no alpha
 // cards), and a coconut cluster. Three variants, instanced; wind sway in the vertex stage.
 
+import { FAR_CASTER_LAYER } from '../atmosphere/shadows';
 import {
   BufferAttribute,
   BufferGeometry,
@@ -411,6 +412,7 @@ export function createPalms(ctx: GLContext, time: TSLNode) {
     }
     for (const m of [tm, fm]) {
       m.castShadow = true;
+      m.layers.enable(FAR_CASTER_LAYER); // [polish] palm shadows reach across the dunes
       m.receiveShadow = true;
       m.instanceMatrix.needsUpdate = true;
       m.computeBoundingSphere();

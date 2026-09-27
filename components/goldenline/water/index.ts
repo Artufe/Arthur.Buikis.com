@@ -15,7 +15,7 @@ import { SWELL } from '../world/layout';
 import { createHessian, type Hessian } from './hessian';
 import { createDeepOccluder } from './occluder';
 import { copyStats, createRefraction, type Refraction } from './refraction';
-import { bakeFoamTexture, bakeNoiseTexture } from './textures';
+import { bake } from '../core/bakes';
 import { createTestCrest } from './testcrest';
 import { createThicknessHook, type SSSProvider } from './thickness';
 import { slopeVarianceTable, VAR_LEVELS } from './variance';
@@ -208,7 +208,7 @@ export function createWaterSystem(): GLSystem {
 
   return {
     name: 'water',
-    init(ctx: GLContext) {
+    async init(ctx: GLContext) {
       P = registerParams(ctx);
       gpu = ctx.services.ocean.gpu as unknown as OceanGpu;
       if (!gpu || !gpu.surface) throw new Error('water: ocean.gpu.surface missing');
@@ -255,8 +255,8 @@ export function createWaterSystem(): GLSystem {
         debugGain: uniform(0.12),
         sunPath: uniform(1.45),
       };
-      foamTex = bakeFoamTexture();
-      noiseTex = bakeNoiseTexture();
+      // [polish] Baked in the boot workers (core/bakes.ts).
+      [foamTex, noiseTex] = await Promise.all([bake('water.foam'), bake('water.noise')]);
       refreshVariance();
       refraction = createRefraction();
       slopeSrc = { disp: gpu.fft.disp, deriv: gpu.fft.deriv, varTable: uniformArray(varVecs, 'vec4') };
@@ -303,6 +303,7 @@ export function createWaterSystem(): GLSystem {
             sssTexture: inputs.sssTexture, // [breaking]
             sssDiffuse: inputs.sssDiffuse, // [breaking]
             aeration: inputs.aeration, // [look]
+            sheet: inputs.sheet, // [polish]
           }),
         renderOrder: WATER_RENDER_ORDER,
         sssProviders: gpu.waterSSS!,

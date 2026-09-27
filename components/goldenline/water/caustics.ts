@@ -113,7 +113,9 @@ export function createSeabedCaustics(src: CausticSources) {
       const out = vec3(0).toVar();
       const D = max(worldPos.y.negate(), 0).toVar();
       const dist = length(cameraPosition.sub(worldPos));
-      If(D.greaterThan(0.02).and(D.lessThan(src.uMaxDepth)).and(dist.lessThan(180)).and(src.uStrength.greaterThan(0)), () => {
+      // [polish] 180 → 110 m: beyond ~80 m the focal network is sub-pixel through the water and the
+      // Hessian fetches were ≈ 1-2 ms of the lineup frame on the M3
+      If(D.greaterThan(0.02).and(D.lessThan(src.uMaxDepth)).and(dist.lessThan(110)).and(src.uStrength.greaterThan(0)), () => {
         const run = vec2(src.uRun.x, src.uRun.y);
         const xs = worldPos.xz.sub(run.mul(D)).toVar();
         // Blur: the sun disc and forward scattering widen the focus with depth; the pixel's own
@@ -131,7 +133,7 @@ export function createSeabedCaustics(src: CausticSources) {
         const eps = float(0.06).add(blur.mul(1.5));
         const I = float(1).div(max(abs(det), eps));
         const m = min(I, 5).sub(1).mul(src.uStrength).toVar();
-        const fade = smoothstep(0.02, 0.35, D).mul(exp(D.mul(-0.09))).mul(float(1).sub(smoothstep(110, 180, dist)));
+        const fade = smoothstep(0.02, 0.35, D).mul(exp(D.mul(-0.09))).mul(float(1).sub(smoothstep(60, 110, dist)));
         const lit = pierDeckLit(xs, src.sunDir);
         const NdL = max(normal.dot(src.sunDir), 0);
         out.assign(vec3(albedo).mul(vec3(src.sunColor)).mul(NdL.mul(1 / Math.PI)).mul(max(m, -0.75)).mul(fade).mul(lit));

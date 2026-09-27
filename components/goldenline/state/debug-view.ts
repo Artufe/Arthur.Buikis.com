@@ -114,12 +114,9 @@ export function createDebugView(
   let warmFrames = 4;
   return {
     async warmup(c) {
-      overlay.visible = true;
-      relief.visible = true;
-      await c.renderer.compileAsync(overlay, c.camera, c.scene);
-      await c.renderer.compileAsync(relief, c.camera, c.scene);
-      overlay.visible = false;
-      relief.visible = false;
+      // [polish] The engine's warmPipelines() renders both (all objects visible) through the real
+      // post chain; compileAsync's canvas-target builds were never used.
+      void c;
     },
     update(c) {
       const m = Math.round(mode.value);

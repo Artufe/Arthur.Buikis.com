@@ -103,9 +103,17 @@ export class SSR {
             const behind = S.z.sub(Q.z); // > 0: the ray went behind the depth buffer
             const stepLen = t.sub(prevT);
             If(behind.greaterThan(0).and(behind.lessThan(this.thickness.add(stepLen.mul(1.5)))), () => {
-              hitUV.assign(suv);
-              hit.assign(1);
-              travelled.assign(t);
+              // [polish] water reflecting water: a grazing ray from a water pixel that lands on
+              // another water pixel (the next crest, the swash's own lip) is a false hit in screen
+              // space (it showed as dark holes in the swash); give it the sky instead. Wet sand
+              // still reflects the waves.
+              const selfWater = m.z.greaterThan(0.5);
+              const hitWater = mask.sample(suv).z.greaterThan(0.5);
+              If(selfWater.and(hitWater).not(), () => {
+                hitUV.assign(suv);
+                hit.assign(1);
+                travelled.assign(t);
+              });
               Break();
             });
           });

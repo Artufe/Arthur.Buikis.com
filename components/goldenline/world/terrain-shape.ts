@@ -19,7 +19,8 @@ export function terrainHeight(x: number, z: number) {
   return seabedHeight(x, z) * (1 - s) + landHeight(x, z) * s;
 }
 
-export function createTerrainService(): TerrainService {
+/** The base heightfield grid (row-major, texel centres). Pure: also runs in the boot workers. */
+export function bakeTerrainGrid(): Float32Array {
   const [minX, minZ, maxX, maxZ] = TERRAIN_BOUNDS;
   const w = Math.round((maxX - minX) / TERRAIN_TEXEL);
   const h = Math.round((maxZ - minZ) / TERRAIN_TEXEL);
@@ -28,6 +29,15 @@ export function createTerrainService(): TerrainService {
     const z = minZ + (j + 0.5) * TERRAIN_TEXEL;
     for (let i = 0; i < w; i++) data[j * w + i] = terrainHeight(minX + (i + 0.5) * TERRAIN_TEXEL, z);
   }
+  return data;
+}
+
+/** [polish] `grid` = a prebaked bakeTerrainGrid() (from the boot workers); baked here if absent. */
+export function createTerrainService(grid?: Float32Array): TerrainService {
+  const [minX, minZ, maxX, maxZ] = TERRAIN_BOUNDS;
+  const w = Math.round((maxX - minX) / TERRAIN_TEXEL);
+  const h = Math.round((maxZ - minZ) / TERRAIN_TEXEL);
+  const data = grid ?? bakeTerrainGrid();
   const tex = new DataTexture(data, w, h, RedFormat, FloatType);
   tex.magFilter = LinearFilter;
   tex.minFilter = LinearFilter;

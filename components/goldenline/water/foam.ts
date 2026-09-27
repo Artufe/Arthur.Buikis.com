@@ -48,7 +48,7 @@ export function foamLayer(i: FoamInput): FoamLayer {
   const xz = i.xz;
   // [look] Decimetre-scale structure (was 2.6 / 0.65 m: metre-scale holes read as a cow print).
   const S1 = 1.15;
-  const S2 = 0.31;
+  const S2 = 0.24; // [polish] 0.31
   const cr = 0.8;
   const sr = 0.6;
   const rot = (v: TSLNode) => vec2(v.x.mul(cr).sub(v.y.mul(sr)), v.x.mul(sr).add(v.y.mul(cr)));
@@ -66,19 +66,29 @@ export function foamLayer(i: FoamInput): FoamLayer {
   const fresh = float(1).sub(smoothstep(0.0, 0.55, age)).toVar();
   // Holes open where the hole field is below t: dense fresh foam keeps only pinholes, ageing and
   // thinning grow them until only lace, then specks, remain.
-  const t = float(0.72).sub(cov.mul(0.55)).add(age.mul(0.22)).add(f1.z.sub(0.5).mul(0.25)).toVar();
-  const coarse = smoothstep(t.sub(0.05), t.add(0.13), f1.x);
-  const tf = t.mul(0.8);
-  const fine = smoothstep(tf.sub(0.06), tf.add(0.16), f2.w.mul(0.6).add(f1.x.mul(0.4)));
+  const t = float(0.72).sub(cov.mul(0.55)).add(age.mul(0.22)).toVar();
+  // [polish] Three regimes by coverage: a dense sheet with pinholes (fresh, thick), a web of bubble
+  // walls around irregular holes (the ridged network in .z, walls thinning as coverage drops), and
+  // at the thin end only broken filaments; big gaps from the coarse hole field open late. Wide ramps
+  // grade every edge softly (the old single disc-hole field read as a cow print, then leopard spots).
+  const pin = smoothstep(t.mul(0.9).sub(0.14), t.mul(0.9).add(0.22), f2.w.mul(0.75).add(f1.x.mul(0.25)));
+  const webN = f1.z.mul(0.65).add(f2.z.mul(0.35));
+  const tw = float(0.12).add(float(1).sub(cov).mul(0.62)).add(age.mul(0.1));
+  const web = smoothstep(tw.sub(0.1), tw.add(0.2), webN).mul(mix(float(1), pin, 0.35));
+  const sheetK = smoothstep(0.5, 0.92, cov.sub(age.mul(0.25)));
+  const gaps = smoothstep(t.mul(0.62).sub(0.12), t.mul(0.62).add(0.22), f1.x);
+  const coarse = gaps;
+  const fine = mix(web, pin, sheetK);
   // Far away the structure is sub-pixel (and the mips average the hole field): fade to the
   // mean coverage the threshold would leave.
   const fp = max(length(i.dx), length(i.dy));
   const far = smoothstep(0.04, 0.3, fp).toVar();
-  const mean = float(1).sub(smoothstep(0.1, 0.95, t));
-  const a0 = mix(coarse.mul(fine), mean, far);
+  const mean = float(1).sub(smoothstep(0.1, 0.95, t)).mul(0.85);
+  // [polish] fresh foam's holes still hold a thin bubbly veil (they were clean cut-outs)
+  const a0 = max(mix(coarse.mul(fine), mean, far), cov.mul(fresh).mul(0.28));
   const alpha = a0.mul(smoothstep(0.02, 0.12, cov)).mul(mix(float(0.55), float(1), fresh.mul(0.6).add(cov.mul(0.4)))).mul(i.gain.min(1)).toVar();
   // Bubbles shade it: rims bright, cores a touch darker; old lace is greyer and thinner.
-  const bub = mix(f2.y.mul(0.3).add(0.72), float(0.87), far);
+  const bub = mix(f2.y.mul(0.16).add(0.8), float(0.87), far); // [polish] softer bubble tint (read as a tiled disc pattern)
   // Old, thin lace lets the water through: greyer and a little teal; fresh foam is white.
   const tint = mix(vec3(0.74, 0.84, 0.85), vec3(0.97, 0.97, 0.96), fresh.mul(0.7).add(alpha.mul(0.3)));
   const albedo = tint.mul(bub).mul(i.gain.max(1).min(2)).toVar();

@@ -3,6 +3,7 @@
 // warmup / update / dispose), because it lives on the ocean's swell and surface.
 // See ocean/breaking/README.md.
 
+import { uploadFloatRGBA } from '../../core/upload';
 import { MeshBasicNodeMaterial, type Material, type Mesh } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import type { GLContext, TSLNode } from '../../core/contracts';
@@ -24,7 +25,7 @@ import { wrapOceanService, type BreakingApi } from './service';
 import { createSpray, SPRAY_MIST, type SprayService } from '../../vfx/spray';
 import { WIND } from '../../world/layout';
 
-const { float, uniform, uniformArray, vec3, mix, select, abs, fract, clamp } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
+const { float, uniform, uniformArray, vec3, mix, select, abs, fract, clamp, smoothstep } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
 
 const WARM_CLOCK = { dt: 1 / 60 };
 
@@ -61,6 +62,7 @@ interface Params {
   streaks: NumberParam;
   faceTexture: NumberParam;
   lipDiffuse: NumberParam;
+  lipSheet: NumberParam;
   wwAlbedo: NumberParam;
   wwTranslucency: NumberParam;
   wwRagged: NumberParam;
@@ -88,6 +90,7 @@ function registerParams(ctx: GLContext): Params {
     lipGlow: p.number('breaking.lipGlow', { label: 'lip / tube-ceiling glow', group: g, min: 0, max: 4, value: 1.8 }),
     streaks: p.number('breaking.streaks', { label: 'flow streaks on lip / face', group: g, min: 0, max: 1.5, value: 0.6 }),
     faceTexture: p.number('breaking.faceTexture', { label: 'chop texture in the backlit glow', group: g, min: 0, max: 2, value: 1 }),
+    lipSheet: p.number('breaking.lipSheet', { label: 'lip / tube-ceiling transmission (polish)', group: g, min: 0, max: 3, value: 1 }),
     lipDiffuse: p.number('breaking.lipDiffuse', { label: 'lip multiple scattering (tube ceiling)', group: g, min: 0, max: 20, value: 1.4 }),
     whitewater: p.toggle('breaking.whitewater', { label: 'whitewater shell', group: g, value: true }),
     wwAlbedo: p.number('breaking.wwAlbedo', { label: 'whitewater albedo', group: g, min: 0.2, max: 1.2, value: 0.9 }),
@@ -112,7 +115,7 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
   const tracker = createTracker(deps.field, rays, shoreRays);
   const gpu = createBreakGPU(tracker.data, rays, prof);
   const uHide = uniform(1);
-  const ru = { edgeDrop: uniform(0.06), enabled: uniform(1), warp: uniform(3), lipGlow: uniform(1.8), streaks: uniform(0.6), faceTexture: uniform(1), lipDiffuse: uniform(1.4) };
+  const ru = { edgeDrop: uniform(0.06), enabled: uniform(1), warp: uniform(3), lipGlow: uniform(1.8), streaks: uniform(0.6), faceTexture: uniform(1), lipDiffuse: uniform(1.4), lipSheet: uniform(1) };
   const hide = createHideHook(deps.swell, gpu, uHide);
   deps.surface.addHook(hide.hook);
   // The shared spray system (vfx/spray), published for B1 / A4 on ocean.gpu.spray.
@@ -148,6 +151,7 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
     ru.streaks.value = P.streaks.value;
     ru.faceTexture.value = P.faceTexture.value;
     ru.lipDiffuse.value = P.lipDiffuse.value;
+    ru.lipSheet.value = P.lipSheet.value;
     ru.enabled.value = P.enabled.value ? 1 : 0;
     uHide.value = P.enabled.value && P.hide.value ? 1 : 0;
     fx.rates[0] = P.fxSpray.value;
@@ -193,10 +197,15 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
           // (the barrel's water below is lit by the low sky through the opening and the lip)
           underReflect: vec3(c.services.atmosphere.skyRadiance(vec3(0.9, 0.12, 0.2).normalize())).mul(vec3(0.3, 0.52, 0.48)),
           sssTexture: ru.faceTexture,
-          sssDiffuse: select(v.vThick.y.greaterThan(0), ru.lipDiffuse, float(0)),
+          // [polish] faded in with the blend weight W (vBillow.x): the lip flag switches at W = 0.5
+          sssDiffuse: select(v.vThick.y.greaterThan(0), ru.lipDiffuse.mul(smoothstep(0.5, 0.9, v.vBillow.x)), float(0)),
+          // [polish] the lip / tube ceiling transmits the sun as a thin aerated sheet
+          sheet: select(v.vThick.y.greaterThan(0), ru.lipSheet.mul(smoothstep(0.5, 0.9, v.vBillow.x)), float(0)),
           // [look] A breaking wave over a reef is full of bubbles and sand: the reef mustn't show
           // crisply through the face (it read as stucco and dark ledges).
-          aeration: float(0.45).add(v.vSwX.y.mul(0.6)),
+          // [polish] × the blend weight: where the ribbon fades into the swell it must shade like the
+          // ocean (a milky W≈0 section showed as a flat pale rectangle with hard ends)
+          aeration: float(0.45).add(v.vSwX.y.mul(0.6)).mul(smoothstep(0.05, 0.6, v.vBillow.x)),
         });
         mat.positionNode = ribbon.positionNode;
         ribbon.mesh.material = mat;
@@ -246,7 +255,7 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
       // Disabled: no breaker anywhere (the hook, the ribbon and sample() all read the headers).
       if (!P.enabled.value) for (let s = 0; s < SLOTS; s++) tracker.data[(GLOBAL_ROW * DATA_W + s) * 4 + 3] = 0;
       timeVals[0] = c.time.t;
-      gpu.dataTex.needsUpdate = true;
+      uploadFloatRGBA(c.renderer, gpu.dataTex); // [polish] no version bump (core/upload.ts)
       if (P.enabled.value) fx.update(c.time, c.services.state);
       if (P.swash.value) swash.update(c, sp);
       swash.mesh.visible = swash.mesh.visible && P.swash.value;

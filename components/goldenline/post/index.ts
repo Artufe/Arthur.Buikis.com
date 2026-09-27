@@ -6,7 +6,7 @@
 // Every stage is a `post.*` toggle; toggles and quality changes rebuild the chain.
 // GPU time comes from timestamp queries, resolved at a throttled rate into ctx.perf.gpuMs.
 
-import { RenderPipeline, UnsignedByteType, type Texture } from 'three/webgpu';
+import { BlendMode, MaterialBlending, RenderPipeline, UnsignedByteType, type Texture } from 'three/webgpu';
 import {
   unpackRGBToNormal,
   convertToTexture,
@@ -279,7 +279,14 @@ export function createPostSystem(): GLSystem {
     if (needNormal) outputs.normal = packNormalToRGB(normalView);
     if (needVel) outputs.velocity = velocity;
     if (useSSR) outputs.ssr = SSR_DEFAULT();
-    scenePass.setMRT(mrt(outputs));
+    // [polish] The auxiliary targets blend like the colour target (MaterialBlending): opaque
+    // draws still overwrite them, and a transparent draw that outputs zero with zero alpha (spray,
+    // salt mist) leaves the opaque normal/velocity/SSR mask underneath intact. By default they
+    // were overwritten by every transparent pixel (GTAO/TRAA artefacts in rectangles).
+    const sceneMrt = mrt(outputs);
+    const matBlend = new BlendMode(MaterialBlending);
+    for (const k in outputs) if (k !== 'output') sceneMrt.setBlendMode(k, matBlend);
+    scenePass.setMRT(sceneMrt);
     if (needNormal) (scenePass.getTexture('normal') as Texture).type = UnsignedByteType;
     if (useSSR) (scenePass.getTexture('ssr') as Texture).type = UnsignedByteType;
 

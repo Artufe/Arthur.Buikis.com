@@ -22,6 +22,13 @@ export interface DebugHook {
   resetPerf(): void;
   /** Where startup time went: stage → ms (plus 'total'). */
   boot(): Array<{ stage: string; ms: number }>;
+  /**
+   * [polish] Serial frame cost: pauses the rAF loop, then n times updates + renders one frame
+   * and waits for the GPU to finish it (queue.onSubmittedWorkDone). CPU + GPU with no overlap,
+   * so it is conservative and immune to vsync quantisation; M3 timestamp queries are not usable
+   * (TBDR passes overlap). Returns ms statistics.
+   */
+  serialPerf(n: number): Promise<{ median: number; p99: number; max: number; overMedian4: number; spikes: string }>;
 }
 
 declare global {
@@ -32,7 +39,7 @@ declare global {
 
 export function installDebugHook(
   ctx: GLContext,
-  deps: { stepFrames(n: number, dt: number): void; renderFrame(): void; enabled: boolean },
+  deps: { stepFrames(n: number, dt: number): void; renderFrame(): void; enabled: boolean; restart?(): void },
 ) {
   if (!deps.enabled || typeof window === 'undefined') return () => {};
   const hook: DebugHook = {
@@ -84,6 +91,29 @@ export function installDebugHook(
       ctx.perf.reset();
     },
     boot: () => ctx.perf.boot.slice(),
+    async serialPerf(n) {
+      const dev = (ctx.renderer.backend as unknown as { device: GPUDevice }).device;
+      const wasFrozen = ctx.time.frozen;
+      ctx.time.frozen = true; // the rAF loop keeps rendering but no longer advances time
+      const raf = window.requestAnimationFrame;
+      window.requestAnimationFrame = () => 0; // and stops scheduling itself
+      await new Promise((r) => setTimeout(r, 50));
+      const ts: number[] = [];
+      for (let i = 0; i < n + 30; i++) {
+        const t0 = performance.now();
+        deps.stepFrames(1, 1 / 60);
+        await dev.queue.onSubmittedWorkDone();
+        if (i >= 30) ts.push(performance.now() - t0);
+      }
+      window.requestAnimationFrame = raf;
+      ctx.time.frozen = wasFrozen;
+      deps.restart?.();
+      const so = ts.slice().sort((a, b) => a - b);
+      const median = so[so.length >> 1];
+      const spikes: string[] = [];
+      ts.forEach((t, i) => { if (t > median + 4) spikes.push(`${i}:${t.toFixed(0)}`); });
+      return { median, p99: so[Math.floor(so.length * 0.99)], max: so[so.length - 1], overMedian4: spikes.length, spikes: spikes.join(' ') };
+    },
   };
   window.__goldenline = hook;
   return () => {

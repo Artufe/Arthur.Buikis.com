@@ -14,6 +14,7 @@
 // = the rendered base terrain + the sheet thickness at this point, shaded with the water graph
 // (A7): transparent over the sand, refraction, a thin shore fade, the foam front.
 
+import { uploadFloatRGBA } from '../../core/upload';
 import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, DataTexture, FloatType, LinearFilter, Mesh, RGBAFormat, Sphere, Vector3, type Material } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { SPLAT_FOAM, SPLAT_SMOOTH, SPLAT_WET, type GLContext, type SurfaceStateService, type TSLNode } from '../../core/contracts';
@@ -361,7 +362,7 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
           }
         }
       }
-      tex.needsUpdate = true;
+      uploadFloatRGBA(c.renderer, tex); // [polish] no version bump (core/upload.ts)
       mesh.visible = Math.abs(c.camera.position.x) < 260;
     },
     dispose(c) {

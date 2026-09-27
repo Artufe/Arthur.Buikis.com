@@ -13,6 +13,13 @@ import {
   Fn,
   If,
   attribute,
+  globalId,
+  ivec2,
+  floor,
+  textureLoad,
+  textureStore,
+  dFdx,
+  dFdy,
   cameraPosition,
   cameraViewMatrix,
   clamp,
@@ -50,6 +57,7 @@ import { MORPH_END, MORPH_START, RANGE_K, S0 } from './cdlod';
 import type { Ground } from './ground';
 import { getCausticsHook } from './hooks';
 import { voronoi2 } from './tsl-noise';
+import { REEF_BOUNDS, REEF_TEXEL, type ReefBake } from './reef-bake';
 
 export interface SandTextures {
   dryRipple: SandTile;
@@ -59,6 +67,8 @@ export interface SandTextures {
   macro: SandTile;
   far: DataTexture;
   aux: DataTexture;
+  /** [polish] GPU-baked reef field (reef-bake.ts); baked by the first createSandMaterial(). */
+  reef?: ReefBake;
 }
 
 export interface SandUniforms {
@@ -79,6 +89,7 @@ export interface SandUniforms {
   saturatedTop: TSLNode;
   filmTop: TSLNode;
   reefRelief: TSLNode;
+  printFill: TSLNode;
   contactShadow: TSLNode;
   vegetation: TSLNode;
   debugView: TSLNode;
@@ -138,7 +149,8 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
    * a rough pavement with sand pockets where no head grew.
    * vec4(height m, head mask, cell id, sand pocket).
    */
-  const reefField = (xz: TSLNode): TSLNode => {
+  /** The field without the fine knobbles and relief scale: (height m, head mask, cell id, pocket). */
+  const reefBase = (xz: TSLNode): TSLNode => {
     // Domain-warped cells (~1.7 m) so colonies don't sit on a visible lattice.
     const warp = vec2(mx_noise_float(vec3(xz.x.mul(0.45), xz.y.mul(0.45), 1.3)), mx_noise_float(vec3(xz.x.mul(0.45), xz.y.mul(0.45), 8.9))).mul(0.55);
     const v = voronoi2(xz.mul(0.6).add(warp));
@@ -151,16 +163,50 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
     // tapered to zero before the cell border so neighbouring cells never meet in a step.
     const dome = pow(max(float(1).sub(q.mul(q)), 0), 0.45).mul(smoothstep(1.0, 0.72, q)).mul(smoothstep(0.0, 0.18, v.y.sub(v.x)));
     const hh = v.z.mul(0.3).add(0.14);
-    // Brain/porites surface: fine meandering ridges and bumps on the colony.
-    const knob = mx_noise_float(vec3(xz.x.mul(5), xz.y.mul(5), 0.5)).mul(0.03).add(mx_noise_float(vec3(xz.x.mul(13), xz.y.mul(13), 3.1)).mul(0.012));
-    const head = dome.mul(hh).add(knob.mul(dome)).mul(isHead);
+    const head = dome.mul(hh).mul(isHead);
     // Between colonies: rubble pavement, and clean sand where the cell holds no colony.
-    const pave = mx_noise_float(vec3(xz.x.mul(0.9), xz.y.mul(0.9), 5.3)).mul(0.06).add(mx_noise_float(vec3(xz.x.mul(4), xz.y.mul(4), 6.1)).mul(0.02));
+    const pave = mx_noise_float(vec3(xz.x.mul(0.9), xz.y.mul(0.9), 5.3)).mul(0.06);
     // Sand pockets: continuous low-frequency patches (not per cell), where colonies don't grow.
     const pocket = smoothstep(0.1, 0.35, mx_noise_float(vec3(xz.x.mul(0.3), xz.y.mul(0.3), 4.7)));
-    const h: TSLNode = head.mul(float(1).sub(pocket)).add(pave.mul(float(1).sub(pocket))).sub(pocket.mul(0.06)).mul(u.reefRelief);
+    const h: TSLNode = head.mul(float(1).sub(pocket)).add(pave.mul(float(1).sub(pocket))).sub(pocket.mul(0.06));
     return (vec4 as TSLNode)(h, isHead.mul(smoothstep(0.0, 0.25, dome)).mul(float(1).sub(pocket)), v.z, pocket);
   };
+  /** Brain/porites surface and fine pavement: the sub-25 cm detail the bake can't hold. */
+  const reefFine = (xz: TSLNode, head: TSLNode, pocket: TSLNode): TSLNode => {
+    const knob = mx_noise_float(vec3(xz.x.mul(5), xz.y.mul(5), 0.5)).mul(0.03).add(mx_noise_float(vec3(xz.x.mul(13), xz.y.mul(13), 3.1)).mul(0.012));
+    const pave2 = mx_noise_float(vec3(xz.x.mul(4), xz.y.mul(4), 6.1)).mul(0.02);
+    return knob.mul(head).add(pave2.mul(float(1).sub(pocket)));
+  };
+  // [polish] Bake the base field on the GPU once (reef-bake.ts); sample it afterwards.
+  const rb = tx.reef;
+  const [rx0, rz0, rx1, rz1] = REEF_BOUNDS;
+  if (rb && !rb.baked) {
+    const kernel = (Fn as unknown as (f: () => void) => () => { compute(d: number[], w: number[]): { setName(n: string): unknown } })(() => {
+      const s = ivec2(globalId.xy);
+      const xz = vec2(float(rx0).add(vec2(s).x.add(0.5).mul(REEF_TEXEL)), float(rz0).add(vec2(s).y.add(0.5).mul(REEF_TEXEL)));
+      (textureStore as unknown as (...a: unknown[]) => { toWriteOnly(): void })(rb.tex, s, reefBase(xz)).toWriteOnly();
+    })().compute([rb.w / 8, rb.h / 8, 1], [8, 8, 1]).setName('gl.beach.bakeReef');
+    ctx.renderer.compute(kernel as never);
+    rb.baked = true;
+  }
+  const reefT = rb ? texture(rb.tex) : null;
+  // Manual bilinear from 4 loads: textureLoad needs no sampler (the fragment stage is at its 16).
+  const reefBilinear = (xz: TSLNode): TSLNode => {
+    const q = vec2(xz.x.sub(rx0).div(REEF_TEXEL).sub(0.5), xz.y.sub(rz0).div(REEF_TEXEL).sub(0.5));
+    const i0 = clamp(floor(q), vec2(0, 0), vec2(rb!.w - 2, rb!.h - 2)).toVar();
+    const f = clamp(q.sub(i0), 0, 1).toVar();
+    const i = ivec2(i0).toVar();
+    const L = (o: TSLNode) => (textureLoad as unknown as (...a: unknown[]) => TSLNode)(rb!.tex, i.add(o));
+    return mix(mix(L(ivec2(0, 0)), L(ivec2(1, 0)), f.x), mix(L(ivec2(0, 1)), L(ivec2(1, 1)), f.x), f.y);
+  };
+  /** vec4(height m, head mask, cell id, sand pocket), relief-scaled; `fine` adds the knobbles. */
+  const reefField = (xz: TSLNode, fine = true): TSLNode => {
+    const b = (reefT ? reefBilinear(xz) : reefBase(xz)).toVar();
+    const hF = fine ? b.x.add(reefFine(xz, b.y, b.w)) : b.x;
+    return (vec4 as TSLNode)(hF.mul(u.reefRelief), b.y, b.z, b.w);
+  };
+  void rx1;
+  void rz1;
 
   // Interaction relief, box-filtered over one state texel: the bilinear field convolved with a
   // texel-wide box is C1, so footprints get rounded walls instead of texel-aligned creases.
@@ -275,26 +321,53 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
     // Windrows: stretched along the shore (z), broken into strands and gaps.
     const wn = mx_noise_float(vec3(xz.x.mul(4.5), xz.y.mul(0.6), 1.9)).add(mx_noise_float(vec3(xz.x.mul(14), xz.y.mul(3), 4.4)).mul(0.45));
     const gaps = smoothstep(-0.15, 0.25, mx_noise_float(vec3(xz.x.mul(0.3), xz.y.mul(0.35), 7.7)));
-    const amount = smoothstep(0.25, 0.4, wn.add(wband.mul(0.4)).sub(0.45)).mul(wband).mul(gaps).mul(0.8);
+    // [polish] a lighter stain (0.8 → 0.5): up close the painted windrows read as blurred smudges
+    const amount = smoothstep(0.25, 0.4, wn.add(wband.mul(0.4)).sub(0.45)).mul(wband).mul(gaps).mul(0.5);
     const fib = mx_noise_float(vec3(xz.x.mul(60), xz.y.mul(22), 2.0)).mul(0.5).add(0.5);
-    return vec4(mix(vec3(0.07, 0.05, 0.028), vec3(0.3, 0.21, 0.1), smoothstep(0.35, 0.85, fib)), amount);
+    return vec4(mix(vec3(0.14, 0.1, 0.055), vec3(0.36, 0.26, 0.13), smoothstep(0.35, 0.85, fib)), amount);
   });
   const wrack = wrackOut.w;
   const wrackBump = branch(hasWrack, vec3(0, 0, 0), () => mx_noise_vec3(vec3(xz.x.mul(30), xz.y.mul(30), 6.6)).mul(0.6).mul(wrack));
 
   // Slopes (world XZ, dh/dx, dh/dz).
-  const dr1 = tDry.sample(toFrame(xz, wdx, wdz, tx.dryRipple.size));
+  // [polish] The dry-ripple and swash tiles only matter above the water: under it (most of the
+  // lineup's frame, fully shaded because the water's refraction copy breaks the render pass) they
+  // were four wasted taps per pixel. Sampled with explicit gradients inside branches.
+  const uvD1 = toFrame(xz, wdx, wdz, tx.dryRipple.size).toVar();
   const [w2x, w2z] = norm2(wdx * 0.99 - wdz * 0.14, wdz * 0.99 + wdx * 0.14);
-  const dr2 = tDry.sample(toFrame(xz.add(vec2(13.7, 5.1)), w2x, w2z, tx.dryRipple.size * 1.13));
+  const uvD2 = toFrame(xz.add(vec2(13.7, 5.1)), w2x, w2z, tx.dryRipple.size * 1.13).toVar();
+  const uvS1 = toFrame(xz, 1, 0, tx.swash.size).toVar();
+  const uvS2 = toFrame(xz.add(vec2(3.1, 7.7)), 0.96, 0.28, tx.swash.size * 1.37).toVar();
+  const gD1x = dFdx(uvD1).toVar();
+  const gD1y = dFdy(uvD1).toVar();
+  const gD2x = dFdx(uvD2).toVar();
+  const gD2y = dFdy(uvD2).toVar();
+  const gS1x = dFdx(uvS1).toVar();
+  const gS1y = dFdy(uvS1).toVar();
+  const gS2x = dFdx(uvS2).toVar();
+  const gS2y = dFdy(uvS2).toVar();
   const pick = smoothstep(0.42, 0.58, m2.r);
-  const sDry = mix(slopeWorld(dr1, tx.dryRipple.slopeRange, wdx, wdz), slopeWorld(dr2, tx.dryRipple.slopeRange, w2x, w2z), pick);
-  const cavity = mix(dr1.a, dr2.a, pick);
+  /** vec4(dry slope xz, ripple cavity, 0). */
+  const dryOut = branch(dry.greaterThan(0.001), vec4(0, 0, 0.5, 0), () => {
+    const dr1 = tDry.sample(uvD1).grad(gD1x, gD1y);
+    const dr2 = tDry.sample(uvD2).grad(gD2x, gD2y);
+    const sd = mix(slopeWorld(dr1, tx.dryRipple.slopeRange, wdx, wdz), slopeWorld(dr2, tx.dryRipple.slopeRange, w2x, w2z), pick);
+    return vec4(sd, mix(dr1.a, dr2.a, pick), 0);
+  });
+  const sDry = dryOut.xy;
+  const cavity = dryOut.z;
   // Ripples live on the flat, dry upper beach; the beach face and damp sand are trampled smooth.
   const rippleW = dry.mul(smoothstep(0.05, 0.6, m1.g.add(0.35))).mul(u.rippleAmp);
 
-  const sw = tSwash.sample(toFrame(xz, 1, 0, tx.swash.size));
-  const sw2 = tSwash.sample(toFrame(xz.add(vec2(3.1, 7.7)), 0.96, 0.28, tx.swash.size * 1.37));
-  const sSwash = mix(slopeWorld(sw, tx.swash.slopeRange, 1, 0), slopeWorld(sw2, tx.swash.slopeRange, 0.96, 0.28), smoothstep(0.4, 0.6, m1.r));
+  /** vec4(swash slope xz, chip mask, 0). */
+  const swOut = branch(aboveW.greaterThan(0.001), vec4(0, 0, 0.5, 0), () => {
+    const sw = tSwash.sample(uvS1).grad(gS1x, gS1y);
+    const sw2 = tSwash.sample(uvS2).grad(gS2x, gS2y);
+    const ss = mix(slopeWorld(sw, tx.swash.slopeRange, 1, 0), slopeWorld(sw2, tx.swash.slopeRange, 0.96, 0.28), smoothstep(0.4, 0.6, m1.r));
+    return vec4(ss, sw.a, 0);
+  });
+  const sSwash = swOut.xy;
+  const sw = { a: swOut.z };
   const wvS = tWave.sample(toFrame(xz, sdx, sdz, tx.waveRipple.size));
   const sWave = slopeWorld(wvS, tx.waveRipple.slopeRange, sdx, sdz);
 
@@ -303,18 +376,25 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
   const sGrain = slopeWorld(g1, tx.grain.slopeRange, 1, 0).add(slopeWorld(g2, tx.grain.slopeRange, 0.6, 0.8)).mul(0.5);
 
   // Footprints and other interaction relief: gradient of the box-filtered field (4 taps).
-  const r4 = relief4(xz);
-  const sFoot = vec2(r4.a.add(r4.b).sub(r4.c).sub(r4.d), r4.a.add(r4.c).sub(r4.b).sub(r4.d)).div(4 * ht);
+  // [polish] Only where there can be prints (above water, inside the state's sand window): under
+  // the lineup's water these 4 taps ran for every seabed pixel.
+  const sFoot = branch(aboveW.greaterThan(0.01).and(dist.lessThan(34)), vec2(0, 0), () => {
+    const r4 = relief4(xz);
+    return vec2(r4.a.add(r4.b).sub(r4.c).sub(r4.d), r4.a.add(r4.c).sub(r4.b).sub(r4.d)).div(4 * ht);
+  });
 
   // Reef (only where there is reef): the field, and its per-pixel gradient + coral knobbles.
-  const hasReef = reef.greaterThan(0.002);
+  const hasReef = reef.greaterThan(0.002).and(u.reefRelief.greaterThan(0.001));
   const rf = branch(hasReef, vec4(0, 0, 0, 0), () => reefField(xz));
-  const reefPert = branch(hasReef, vec3(0, 0, 0), () => {
+  // [polish] The finite-difference gradient (2 more reef-field evaluations: warped Voronoi + ~9
+  // noises each) only near the camera; beyond ~28 m, through the water, the knobbles are sub-pixel
+  // and the refraction blurs them. It was ≈ 5 ms of the lineup frame on the M3 at 720p.
+  const reefPert = branch(hasReef.and(dist.lessThan(28)), vec3(0, 0, 0), () => {
     const re = 0.05;
     const gx = reefField(xz.add(vec2(re, 0))).x.sub(rf.x).div(re);
     const gz = reefField(xz.add(vec2(0, re))).x.sub(rf.x).div(re);
     const coral = mx_noise_vec3(vec3(xz.x.mul(7), xz.y.mul(7), 2.1)).mul(0.3).mul(rf.y);
-    return vec3(gx.negate(), 0, gz.negate()).add(coral).mul(reef);
+    return vec3(gx.negate(), 0, gz.negate()).add(coral).mul(reef).mul(smoothstep(28, 20, dist));
   });
 
   const smoothBy = float(1).sub(film.mul(0.92));
@@ -425,7 +505,8 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
   // Contact shadows: march the interaction heightfield toward the sun (footprints self-shadow;
   // the shadow map can't resolve a 2 cm hollow). Near the camera only.
   const sun = atmos.sunDirNode;
-  const contact = branch(dist.lessThan(16).and(u.contactShadow.greaterThan(0)), float(1), () => {
+  // [polish] never under water (the seabed has no prints; 11 state taps per pixel there)
+  const contact = branch(dist.lessThan(16).and(u.contactShadow.greaterThan(0)).and(aboveW.greaterThan(0.01)), float(1), () => {
     const sd = normalize(vec2(sun.x, sun.z));
     const tanEl = sun.y.div(max(length(vec2(sun.x, sun.z)), 1e-3));
     const h0 = src.height(xz);
@@ -439,8 +520,14 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
   });
   (mat as unknown as { receivedShadowNode: unknown }).receivedShadowNode = Fn(([shadow]: [TSLNode]) => shadow.mul(contact));
 
+  // [polish] Sky fill in footprint hollows: the floor of a 2 cm print still sees most of the sky
+  // dome, but the IBL (one irradiance for the whole beach) and the contact shadow left it
+  // blue-black. A little lavender sky light on the depressed sand keeps it reading as shadowed sand.
+  const printFill = branch(aboveW.greaterThan(0.01).and(dist.lessThan(30)), float(0), () => smoothstep(0.002, 0.012, src.height(xz).negate()));
+  // (a uniform tint, not skyRadiance(): the fragment stage is at its 16-sampler limit)
+  const skyFill = vec3(0.5, 0.56, 0.8).mul(dot(vec3(atmos.sunColorNode), vec3(0.3, 0.5, 0.2))).mul(col).mul(printFill).mul(u.printFill);
   const caustics = getCausticsHook();
-  if (caustics) mat.emissiveNode = caustics(positionWorld, N, col).mul(under);
+  mat.emissiveNode = caustics ? caustics(positionWorld, N, col).mul(under).add(skyFill) : skyFill;
 
   return mat;
 }
@@ -458,6 +545,7 @@ export function makeSandUniforms(ctx: GLContext, stateIsStub: boolean): SandPara
   const sparkle = p.number('beach.sparkle', { label: 'grain sparkle', group: g, min: 0, max: 2, value: 1 });
   const ripple = p.number('beach.ripples', { label: 'wind ripples', group: g, min: 0, max: 2, value: 1 });
   const wetDarken = p.number('beach.wetDarken', { label: 'wet darkening', group: g, min: 0.2, max: 1, value: 0.3 });
+  const printFill = p.number('beach.printFill', { label: 'footprint sky fill (polish)', group: g, min: 0, max: 1, value: 0.1 });
   const alb = p.number('beach.albedo', { label: 'sand albedo', group: g, min: 0.2, max: 1, value: 0.62 });
   const highTide = p.number('beach.highTide', { label: 'high-tide mark (m)', group: g, min: 0.4, max: 3, value: 1.45 });
   const swashTop = p.number('beach.swashTop', { label: 'fake swash top (m)', group: g, min: 0, max: 2, value: 0.75 });
@@ -483,6 +571,7 @@ export function makeSandUniforms(ctx: GLContext, stateIsStub: boolean): SandPara
     saturatedTop: uniform(0),
     filmTop: uniform(0),
     reefRelief: uniform(0),
+    printFill: uniform(0.05),
     contactShadow: uniform(0),
     vegetation: uniform(0),
     debugView: uniform(0),
@@ -498,6 +587,7 @@ export function makeSandUniforms(ctx: GLContext, stateIsStub: boolean): SandPara
     u.saturatedTop.value = satTop.value;
     u.filmTop.value = filmTop.value;
     u.reefRelief.value = reefRelief.value;
+    u.printFill.value = printFill.value;
     u.contactShadow.value = contact.value;
     u.vegetation.value = vegetation.value;
     u.debugView.value = debugView.value;

@@ -152,7 +152,10 @@ export function bakeFoamTexture(): DataTexture {
       const r = 0.34 + 0.14 * hash2(Math.floor(u * 48), Math.floor(v * 48), 3);
       const t = Math.min(1, vo[0] / r);
       const bubble = t < 1 ? 0.55 + 0.45 * Math.pow(t, 3) : Math.max(0, 0.35 - (vo[0] - r) * 3);
-      const dens = fbm(u + w1u * 0.5, v + w1v * 0.5, 5, 4, 51);
+      // [polish] z: a ridged web (thin branching filaments on a warped domain) — the lace of
+      // ageing foam is a network of bubble walls around irregular holes, not a field of discs.
+      const web = Math.pow(ridged(wu * 1.0 + 0.19, wv * 1.0 + 0.53, 5, 3, 91), 1.6);
+      const dens = Math.min(1, web * 1.15);
       const o = (j * N + i) * 4;
       data[o] = Math.round(lace * 255);
       data[o + 1] = Math.round(Math.min(1, bubble) * 255);

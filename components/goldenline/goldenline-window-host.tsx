@@ -18,6 +18,22 @@ export function GoldenlineWindowHost() {
   const pathname = usePathname();
   const onSurfPage = pathname?.startsWith('/surf') ?? false;
 
+  // [polish] Warm the engine chunks when the command palette opens (its keys), so "go surfing"
+  // doesn't wait on the download. Only the JS: the bakes and the GPU device start on open.
+  useEffect(() => {
+    let done = false;
+    const onKey = (e: KeyboardEvent) => {
+      if (done) return;
+      if (e.key !== '/' && !((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
+      done = true;
+      window.removeEventListener('keydown', onKey);
+      void import('./goldenline-canvas');
+      void import('./core/engine');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     const offOpen = onSurfOpen(() => {
       if (window.location.pathname.startsWith('/surf')) return;

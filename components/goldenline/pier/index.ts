@@ -3,6 +3,7 @@
 // shading in wood.ts, rope in rope.ts, lanterns in lantern.ts, the water interaction (foam
 // wakes, collars, spray) in water-fx.ts + spray.ts. See pier/README.md.
 
+import { FAR_CASTER_LAYER } from '../atmosphere/shadows';
 import { Color, Euler, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three/webgpu';
 import type { GLContext, GLSystem, TSLNode } from '../core/contracts';
 import { boardGeometry, poleGeometry, WOOD_V } from './geometry';
@@ -53,7 +54,7 @@ export function createPierSystem(): GLSystem {
       const fxParams = {
         enabled: P.toggle('pier.fx', { label: 'piling interaction', group: g, value: true }),
         collars: P.toggle('pier.collars', { label: 'piling foam collars', group: g, value: true }),
-        foamRate: P.number('pier.foamRate', { label: 'piling foam rate', group: g, min: 0, max: 4, value: 1 }),
+        foamRate: P.number('pier.foamRate', { label: 'piling foam rate', group: g, min: 0, max: 4, value: 0.6 }), // [polish] 1: a 5-8 m blanket downstream
         wakeRate: P.number('pier.wakeRate', { label: 'piling wake rate', group: g, min: 0, max: 4, value: 1 }),
         sprayRate: P.number('pier.sprayRate', { label: 'piling spray', group: g, min: 0, max: 3, value: 1 }),
         current: P.number('pier.current', { label: 'longshore current m/s', group: g, min: 0, max: 1, value: 0.2 }),
@@ -94,6 +95,7 @@ export function createPierSystem(): GLSystem {
       };
       const add = (mesh: InstancedMesh, geo: Disposable, mat: Disposable) => {
         mesh.castShadow = true;
+        mesh.layers.enable(FAR_CASTER_LAYER); // [polish] the long pier shadow reaches the far cascades
         mesh.receiveShadow = true;
         mesh.computeBoundingSphere();
         mesh.matrixAutoUpdate = false;
@@ -175,8 +177,21 @@ export function createPierSystem(): GLSystem {
       lanterns = createLanterns(plan, tex);
       root.add(lanterns.metal, lanterns.glass);
 
-      spray = createSprayPool(atmos.sunDirNode, u.sunRadiance, u.bounceWater, tex.noise);
-      root.add(spray.sprite);
+      // [polish] Share A8's spray pool (ocean.gpu.spray, same burst signature) so all spray has one
+      // look and one pool; the pier's own pool is the fallback when the shared one is absent.
+      const shared = (ocean.gpu as { spray?: { burst(x: number, y: number, z: number, vx: number, vy: number, vz: number, count: number, spread: number, radius: number, mist: number): void } }).spray;
+      if (shared) {
+        spray = {
+          sprite: null as unknown as SprayPool['sprite'],
+          burst: (x, y, z, vx, vy, vz, count, spread, radius, mist) => shared.burst(x, y, z, vx, vy, vz, count, spread, radius, mist),
+          step() {},
+          wind: { x: 0, z: 0 },
+          dispose() {},
+        };
+      } else {
+        spray = createSprayPool(atmos.sunDirNode, u.sunRadiance, u.bounceWater, tex.noise);
+        root.add(spray.sprite);
+      }
       const fftDisp = (ocean.gpu as { surface?: { fftDisplacement?: Parameters<typeof createWaterFx>[5] } }).surface?.fftDisplacement ?? null;
       fx = createWaterFx(plan, tex, u, spray, fxParams, fftDisp);
       root.add(fx.collars);
@@ -186,22 +201,8 @@ export function createPierSystem(): GLSystem {
 
     async warmup(ctx: GLContext) {
       if (!root || !spray) return;
-      // Compile every pier pipeline regardless of where the loading camera looks.
-      const culled: boolean[] = [];
-      root.traverse((o) => {
-        culled.push(o.frustumCulled);
-        o.frustumCulled = false;
-      });
-      await ctx.renderer.compileAsync(root, ctx.camera, ctx.scene);
-      // compileAsync builds for a plain render context; the real frame goes through the post
-      // chain's MRT scene pass and the shadow cascades, which are separate render objects. Render
-      // one real frame with culling off so parts outside the loading view (the stairs, the far
-      // bents) never build on first sight.
-      ctx.services.post.render(ctx);
-      let i = 0;
-      root.traverse((o) => {
-        o.frustumCulled = culled[i++];
-      });
+      // [polish] Render pipelines: the engine's warmPipelines() draws every pier mesh unculled
+      // through the post chain and the shadow cascades.
       // Run the spray compute a few frames with a burst that dies at once (below the kill plane).
       for (let k = 0; k < 4; k++) {
         spray.burst(0, -50, 0, 0, 0, 0, 64, 1, 1, 0.5);

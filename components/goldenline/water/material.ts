@@ -122,6 +122,14 @@ export interface WaterSurfaceInputs {
    * multiple-scatters, so it glows seen from any side (the tube ceiling), not only toward the sun.
    */
   sssDiffuse?: TSLNode;
+  /**
+   * [polish] 0-~2: diffuse transmission through a thin, aerated sheet of water (a breaker's lip,
+   * the tube ceiling). Sun and sky light entering the far side leave this side nearly isotropically
+   * after many scattering events, attenuated by absorption along a path lengthened by the random
+   * walk: gold where the sheet is thin, green where it thickens. Unlike the single-scatter SSS it
+   * doesn't depend on looking toward the sun, which is why the ceiling glows from inside.
+   */
+  sheet?: TSLNode;
 }
 
 export interface WaterDeps {
@@ -155,6 +163,8 @@ interface Shading {
   sssGain: TSLNode;
   /** [breaking] extra isotropic SSS phase (see WaterSurfaceInputs.sssDiffuse). */
   sssIso: TSLNode;
+  /** [polish] thin-sheet diffuse transmittance × weight (vec3, see WaterSurfaceInputs.sheet). */
+  sheetT: TSLNode;
   shore: TSLNode;
   shadowFar: TSLNode;
   indirect: TSLNode;
@@ -272,6 +282,11 @@ class WaterLightingModel extends LightingModel {
     });
     input.reflectedLight.directSpecular.addAssign(specK.mul(water).mul(s.shore));
     input.reflectedLight.directDiffuse.addAssign(body.add(sss).mul(Ft).mul(water).add(foam.mul(s.foamA)));
+    // [polish] Diffuse transmission through a thin lip: sun on its far side, mildly forward.
+    // Seen edge-on, a thin lip is a light guide: the path runs along the sheet and the rim glows
+    // (instead of the dark underside mirror a grazing Fresnel would show there).
+    const sheetEdge = float(1).sub(smoothstep(0.0, 0.3, s.NdV));
+    input.reflectedLight.directDiffuse.addAssign(E.mul(s.sheetT).mul(mix(Ft, float(1.6), sheetEdge)).mul(hg(cosV, 0.45).mul(1.2).add(0.6 / PI)));
   }
 
   indirect(builder: unknown) {
@@ -548,13 +563,16 @@ function prepare(d: WaterDeps): Shading {
   const lagoon = float(1).sub(smoothstep(2.5, 10, max(colDepth, rr.hitDepth))).mul(u.lagoon);
   const bb = vec3(u.backscatter).add(lagoon.mul(0.006)).add(vec3(0.004, 0.009, 0.01).mul(bubbles)).add(vec3(0.006, 0.011, 0.01).mul(aer));
   const Rinf = bb.div(max(vec3(u.absorb).add(bb), 1e-5)).mul(0.33);
-  const bodyR = Rinf.mul(float(1).sub(Tseen)).mul(1 / PI).toVar();
+  // [polish] The bubble cloud a breaking wave leaves just under its foam: a milky turquoise layer
+  // that fills the lace holes (they read as black cut-outs over the dark seabed without it).
+  const cloud = saturate(cov.mul(fresh.mul(0.4).add(0.3)).mul(2.4)).mul(u.foam.min(1)).toVar();
+  const bodyR = Rinf.mul(float(1).sub(Tseen)).mul(1 / PI).mul(cloud.oneMinus()).add(vec3(0.42, 0.68, 0.66).mul(cloud).mul(0.7 / PI)).toVar();
 
   const waterK = foamA.oneMinus();
   const Ft = F.oneMinus();
   const reflected = sky.mul(F).mul(u.reflection);
   const indirect = reflected
-    .add(seabed.mul(Ft))
+    .add(seabed.mul(Ft).mul(cloud.oneMinus()))
     .add(Esky.mul(0.934).mul(bodyR).mul(Ft))
     .mul(waterK)
     .add(Esky.mul(foamAlb).mul(1 / PI).mul(1.25).mul(foamA)) // [look] foam is lit by the whole sky dome
@@ -575,6 +593,23 @@ function prepare(d: WaterDeps): Shading {
   // [breaking] optional facet modulation of the glow (breaker faces).
   const facet = sf.sssTexture ? clamp(float(1).add(dot(N, V).sub(dot(Nm, V)).mul(sf.sssTexture).mul(5)), 0.35, 2) : float(1);
   const sssGain = u.sss.mul(steep).mul(face).mul(facet).toVar();
+  // [polish] Thin-sheet transmission (breaker lips): the random walk through an aerated sheet runs
+  // several times its thickness, so even a thin lip filters the gold sun toward green. The chop's
+  // facets refract the exiting light (brighter where they turn toward the viewer), which keeps
+  // the ceiling reading as moving water, not a lampshade.
+  const sheetT = vec3(0).toVar();
+  if (sf.sheet) {
+    const w = sf.sheet;
+    If(w.greaterThan(1e-3), () => {
+      const sheetFacet = clamp(float(1).add(dot(N, V).sub(dot(Nm, V)).mul(6)), 0.3, 2.2);
+      // Full on a downward-facing sheet (the ceiling seen from under it); a lip seen from the front
+      // looks through more of the curling jet, so less of it makes it out unscattered-green.
+      const under = mix(float(0.3), float(1), smoothstep(0.15, -0.35, Nm.y));
+      sheetT.assign(exp(sigT.mul(thick.mul(5.5)).negate()).mul(w).mul(under).mul(sheetFacet).mul(foamA.oneMinus()));
+    });
+    // Sky light through the sheet from above.
+    indirect.addAssign(Esky.mul(sheetT).mul(0.3 / PI));
+  }
 
   // Debug views (water.debug).
   const dv = u.debug;
@@ -590,6 +625,7 @@ function prepare(d: WaterDeps): Shading {
     .add(pick(11, vec3(glint.div(20), sigma.div(u.glintSize).div(4), 0)))
     .add(pick(10, rr.dbg))
     .add(pick(12, vec3(seeBed, colDepth.div(30), depth.div(30))))
+    .add(pick(13, sheetT))
     .add(pick(9, vec3(F.mul(u.reflection).mul(foamA.oneMinus()).mul(float(1).sub(smoothstep(u.ssrFade.mul(0.6), u.ssrFade, dist))).mul(8), fract(dist.div(50)), 0)))
     .mul(u.debugGain)
     .toVar();
@@ -610,6 +646,7 @@ function prepare(d: WaterDeps): Shading {
     thick,
     sssGain,
     sssIso: sf.sssDiffuse ?? float(0),
+    sheetT,
     shore,
     shadowFar: smoothstep(220, 420, dist),
     indirect,

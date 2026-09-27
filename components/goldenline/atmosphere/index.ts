@@ -3,6 +3,7 @@
 // the reflection panorama + PMREM IBL, and the cascaded, PCSS-filtered sun shadows.
 // See atmosphere/README.md for how other materials use it.
 
+import { yieldTask } from '../core/bakes';
 import { BackSide, type Color, DirectionalLight, LessEqualDepth, Mesh, MeshBasicNodeMaterial, SphereGeometry, Vector3 } from 'three/webgpu';
 import { Fn, cameraProjectionMatrix, modelViewMatrix, normalize, output, positionLocal, positionWorld, select, varying, vec3, vec4 } from 'three/tsl';
 import type { AtmosphereService, GLContext, GLSystem, TSLNode } from '../core/contracts';
@@ -62,8 +63,8 @@ function registerParams(ctx: GLContext): AtmosParams {
     turbidity: p.number('atmosphere.turbidity', { label: 'aerosol turbidity', group: g, min: 0, max: 6, step: 0.05, value: 0.7 }),
     hazeAlbedo: p.number('atmosphere.hazeAlbedo', { label: 'haze scattering albedo', group: g, min: 0.5, max: 1, step: 0.005, value: 0.8 }),
     aerialScale: p.number('atmosphere.aerialScale', { label: 'aerial perspective', group: g, min: 0, max: 12, step: 0.1, value: 3 }),
-    mieG: p.number('atmosphere.mieG', { label: 'mie anisotropy', group: g, min: 0.5, max: 0.95, step: 0.005, value: 0.88 }),
-    sunGlow: p.number('atmosphere.sunGlow', { label: 'haze sun glow', group: g, min: 0, max: 3, step: 0.01, value: 1 }),
+    mieG: p.number('atmosphere.mieG', { label: 'mie anisotropy', group: g, min: 0.5, max: 0.95, step: 0.005, value: 0.9 }), // [polish] 0.88: the glow's bright core was ~20° wide
+    sunGlow: p.number('atmosphere.sunGlow', { label: 'haze sun glow', group: g, min: 0, max: 3, step: 0.01, value: 0.8 }), // [polish] was 1
     sunDisc: p.number('atmosphere.sunDisc', { label: 'sun disc radiance', group: g, min: 0, max: 60, step: 0.1, value: 15 }),
     sunSize: p.number('atmosphere.sunSize', { label: 'sun disc size', group: g, min: 0.5, max: 4, step: 0.01, value: 1.25 }),
     bank: p.number('atmosphere.bank', { label: 'cloud bank cover', group: g, min: 0, max: 1, step: 0.01, value: 0.48 }),
@@ -185,7 +186,7 @@ export function createAtmosphereSystem(): GLSystem {
 
   return {
     name: 'atmosphere',
-    init(ctx: GLContext) {
+    async init(ctx: GLContext) {
       prm = registerParams(ctx);
       sky = new SkyGPU();
       clouds = new Clouds(sky);
@@ -215,7 +216,19 @@ export function createAtmosphereSystem(): GLSystem {
       ctx.services.atmosphere = service;
 
       applyLive();
-      rebake(ctx, true);
+      // [polish] rebake(ctx, true), split with yields so the loading screen keeps painting.
+      applyMedium();
+      sky.model.bakeTransmittance();
+      sky.model.bakeMultiScatter();
+      await yieldTask();
+      applySun();
+      sky.model.bakeSkyView(prm.sunElevation.value * DEG);
+      products.circumsolar.value = prm.iblCircumsolar.value;
+      sky.uploadSkyView();
+      await yieldTask();
+      products.renderPano(ctx.renderer);
+      ctx.scene.environment = products.bakeEnv(ctx.renderer);
+      service.envTexture = ctx.scene.environment;
       ctx.scene.environmentIntensity = prm.envIntensity.value;
 
       if (prm.shadows.value) shadows.setup(ctx.renderer, ctx.camera, light, SHADOW_SIZE[ctx.quality]);

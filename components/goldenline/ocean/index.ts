@@ -1,6 +1,7 @@
 // GOLDENLINE ocean: depth-aware groundswell (swell.ts) + 4-cascade GPU FFT wind sea (fft.ts)
 // on a camera-centred clipmap (surface.ts). OceanService in service.ts. See ocean/README.md.
 
+import { bake, yieldTask } from '../core/bakes';
 import { HalfFloatType, Mesh, RenderTarget, Scene } from 'three/webgpu';
 import type { GLContext, GLSystem } from '../core/contracts';
 import { WIND, SWELL } from '../world/layout';
@@ -48,12 +49,20 @@ export function createOceanSystem(): GLSystem {
 
   return {
     name: 'ocean',
-    init(ctx: GLContext) {
+    async init(ctx: GLContext) {
       const p = registerParams(ctx);
       P = p;
       const heightAt = ctx.services.terrain.height;
       const field = new SwellField();
-      field.bake(heightAt, p.periodScale.value, p.dirOffset.value);
+      // [polish] Baked in a boot worker (core/bakes.ts) from the same terrainHeight(); param
+      // changes later rebake on the main thread as before.
+      const baked = await bake('ocean.swell', p.periodScale.value, p.dirOffset.value);
+      field.data.set(baked.data);
+      field.omega.set(baked.omega);
+      field.dirX.set(baked.dirX);
+      field.dirZ.set(baked.dirZ);
+      field.cgEdge.set(baked.cgEdge);
+      field.kEdge.set(baked.kEdge);
       const env = new Float32Array(ENV_W * N_TRAINS);
       bakeEnvelope(env, field, p.setInterval.value, p.lull.value);
       const spec = new Spectrum();
@@ -107,6 +116,7 @@ export function createOceanSystem(): GLSystem {
       };
       ctx.services.ocean = createOceanService(cpu, heightAt, gpu);
       // [breaking] breakers on the swell: registers its surface hook and wraps the service.
+      await yieldTask(); // [polish]
       const breaking = createBreaking(ctx, { field, env, rt, swell, surface, heightAt });
 
       // Heavy rebuilds (spectrum, envelope, field) run off a debounced param listener, never
@@ -203,7 +213,7 @@ function registerParams(ctx: GLContext) {
     lull: P.number('ocean.lull', { label: 'lull height', group: g, min: 0, max: 3, value: 1 }),
     periodScale: P.number('ocean.period', { label: 'swell period ×', group: g, min: 0.6, max: 1.5, value: 1 }),
     // [breaking] +18°: the crests meet the reef more obliquely, so the break peels at ~16 m/s, not ~23.
-    dirOffset: P.number('ocean.swellDir', { label: 'swell dir offset (°)', group: g, min: -30, max: 30, step: 0.5, value: 18 }),
+    dirOffset: P.number('ocean.swellDir', { label: 'swell dir offset (°)', group: g, min: -30, max: 30, step: 0.5, value: 26 }), // [polish] 18: crests met the reef at a flatter angle, peel p50 15 → 13 m/s (keep in sync with core/bake-jobs.ts PREFETCH)
     skew: P.number('ocean.skew', { label: 'face steepening', group: g, min: 0, max: 0.9, value: 0.45 }),
     windSea: P.number('ocean.windSea', { label: 'wind sea', group: g, min: 0, max: 1, value: 0.06 }),
     seaWind: P.number('ocean.seaWind', { label: 'wind-sea wind (m/s)', group: g, min: 1, max: 14, value: 5 }),

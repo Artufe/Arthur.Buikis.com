@@ -263,7 +263,10 @@ export function refractScene(r: Refraction, i: RefractInput, noDepth = false): R
     path: mix(float(200), path, hit),
     hitDepth: mix(float(60), Dm, hit),
     hit,
-    thin: select(d0.lessThan(0.999999), max(P.y.sub(S0.y), 0), float(100)),
+    // [polish] never thinner than the seabed bake says (less a bake-error margin): what is behind a
+    // water pixel can be a piling or the board just below the surface, which made the water there
+    // "thin shore water" (cyan streaks down every piling).
+    thin: select(d0.lessThan(0.999999), max(max(P.y.sub(S0.y), i.depthEst.sub(0.15)), 0), float(100)),
     scale,
     through: select(through, float(1), float(0)),
     dbg: vec3(select(d0.lessThan(0.999999), float(1), float(0)), select(through, float(1), float(0)), clamp(S0.y.sub(P.y).div(50).add(0.5), 0, 1)),

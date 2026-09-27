@@ -7,7 +7,7 @@
 //   node scripts/goldenline-shot.mjs --shot beach-sun,lineup --out shots/        (one file per shot)
 //   node scripts/goldenline-shot.mjs --cam -100,0.6,-60,1.7,0 --t 40 --out a.png
 //   node scripts/goldenline-shot.mjs --shot lineup --seq 8 --interval 0.25 --out seq/   (motion review)
-//   node scripts/goldenline-shot.mjs --shot beach-sun --perf 10 --size 1280x720       (prints JSON)
+//   node scripts/goldenline-shot.mjs --shot beach-sun --perf 10 --size 1280x720       (prints JSON; `serial` = CPU+GPU ms per frame, no overlap)
 //   node scripts/goldenline-shot.mjs --shot beach-sun --p ocean.swellHeight=1.8 --p post.bloom=0
 //   node scripts/goldenline-shot.mjs --list
 //   node scripts/goldenline-shot.mjs --boot                                   (startup timeline per stage)
@@ -104,7 +104,9 @@ try {
       await page.evaluate(() => window.__goldenline.resetPerf());
       await page.waitForTimeout(secs * 1000);
       const perf = await page.evaluate(() => window.__goldenline.perf());
-      console.log(JSON.stringify({ shot: label, size: `${W}x${H}`, q, ...perf }, null, 2));
+      // serial CPU+GPU frame cost (no vsync quantisation, no overlap): the M3 proxy budget number
+      const serial = await page.evaluate(() => window.__goldenline.serialPerf ? window.__goldenline.serialPerf(180) : null);
+      console.log(JSON.stringify({ shot: label, size: `${W}x${H}`, q, ...perf, serial }, null, 2));
       await page.evaluate(() => window.__goldenline.freeze(true));
       continue;
     }

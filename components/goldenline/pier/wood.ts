@@ -280,8 +280,13 @@ export function createWoodMaterial(o: WoodInputs): MeshPhysicalNodeMaterial {
   // Undersides see the water, not the bright sky: hold back their sky light (cool and dim).
   ao = ao.mul(mix(float(1), float(0.45), down.mul(overWater)));
 
+  // [polish] Below the water the sun's specular off wet timber and barnacles doesn't exist (the
+  // light arrives diffuse, through the surface); seen through the water it drew bright cyan
+  // edges down every piling.
+  const sub = above.oneMinus();
+  m.specularIntensityNode = mix(float(1), float(0.08), sub);
   m.colorNode = vec4(col.clamp(0, 1), 1);
-  m.roughnessNode = rough.clamp(0.08, 1);
+  m.roughnessNode = mix(rough, float(0.95), sub).clamp(0.08, 1);
   m.metalnessNode = metal;
   m.aoNode = ao;
   m.normalNode = normalMap(normalize(nT).mul(0.5).add(0.5));

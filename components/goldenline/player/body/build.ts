@@ -23,9 +23,11 @@ const _s = new Vector3(1, 1, 1);
  * Build a limb. With `mirrorOf`, the geometry is the Z-mirror of an already-built opposite
  * limb (same weights and attributes) and only the skeleton comes from `model`.
  */
-export function buildLimb(model: LimbModel, mirrorOf?: BuiltLimb): BuiltLimb {
+export function buildLimb(model: LimbModel, mirrorOf?: BuiltLimb, prebuilt?: BufferGeometry): BuiltLimb {
   const t0 = performance.now();
   if (mirrorOf) return mirrorLimb(model, mirrorOf, t0);
+  // [polish] The geometry meshed in a boot worker (core/bakes.ts); only the skeleton is built here.
+  if (prebuilt) return { geometry: prebuilt, ...buildSkeleton(model), ms: performance.now() - t0 };
   const { parts } = model;
   const lo = [1e9, 1e9, 1e9];
   const hi = [-1e9, -1e9, -1e9];

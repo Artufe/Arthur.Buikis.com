@@ -8,7 +8,7 @@ import {
   BufferGeometry,
   DoubleSide,
   InstancedBufferAttribute,
-  InstancedMesh,
+  Mesh,
   Matrix4,
   MeshPhysicalNodeMaterial,
   MeshStandardNodeMaterial,
@@ -145,7 +145,7 @@ function rubble(r: Rand) {
 function seaweed(r: Rand) {
   const g = newGeo();
   const tri = (a: number, b: number, c: number) => g.idx.push(a, b, c);
-  const STRANDS = 9;
+  const STRANDS = 13; // [polish] denser, tangled clumps (9 thin strands read as scribbles)
   const p = new Vector3();
   const d = new Vector3();
   const side = new Vector3();
@@ -157,7 +157,7 @@ function seaweed(r: Rand) {
     let pitch = range(r, -0.1, 0.6);
     const len = range(r, 0.1, 0.3);
     const S = 5;
-    const rad = range(r, 0.003, 0.0055);
+    const rad = range(r, 0.004, 0.007);
     const ring: number[] = [];
     for (let s = 0; s <= S; s++) {
       d.set(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
@@ -177,8 +177,8 @@ function seaweed(r: Rand) {
       // Leaves every other segment, bladders now and then.
       if (s > 0 && s % 2 === 0) {
         const lb = g.pos.length / 3;
-        const ll = range(r, 0.02, 0.04);
-        const lw = ll * 0.28;
+        const ll = range(r, 0.03, 0.055);
+        const lw = ll * 0.34;
         const la = yaw + (r() < 0.5 ? 1 : -1) * range(r, 0.6, 1.2);
         const lx = Math.cos(la);
         const lz = Math.sin(la);
@@ -273,9 +273,10 @@ function seaweedMaterial(ground: Ground) {
   const tint = attribute('iTint', 'vec3');
   // Per-strand tone: from near-black fresh weed to sun-bleached golden brown.
   const tone = uv().x;
-  const col = mix(vec3(0.07, 0.05, 0.025), vec3(0.3, 0.2, 0.09), smoothstep(0.35, 1.0, tone));
+  // [polish] mostly sun-dried: tan to umber, the odd fresh dark strand (all-dark read as ink scribbles)
+  const col = mix(vec3(0.13, 0.09, 0.045), vec3(0.44, 0.32, 0.16), smoothstep(0.15, 0.9, tone));
   m.colorNode = vec4(col.mul(tint), 1);
-  m.roughnessNode = float(0.5);
+  m.roughnessNode = float(0.72);
   m.specularIntensityNode = float(0.6);
   m.positionNode = seated(ground);
   return m;
@@ -334,7 +335,7 @@ export function createDressing(ctx: GLContext, ground: Ground) {
     new ChunkedInstances('goldenline.cones', coneGeo, sMat, items(350, () => ({ d: shellD(), size: range(r, 0.03, 0.065), tint: shellTint(), flat: true })), 24, 45, true),
     new ChunkedInstances('goldenline.rubble', rubbleGeo, rMat, items(500, () => ({ d: shellD(), size: range(r, 0.04, 0.12), tint: r() < 0.8 ? [0.74, 0.7, 0.62] : [0.6, 0.52, 0.45], flat: false })), 24, 55, true),
   ];
-  const meshes: InstancedMesh[] = [];
+  const meshes: Mesh[] = [];
   for (const c of sets) meshes.push(...c.meshes);
 
   return {

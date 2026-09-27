@@ -69,7 +69,7 @@ export function createSurfSystem(): GLSystem {
     railRate: 7,
     bank: 0.4,
     fov: 9,
-    pocket: 12,
+    pocket: 9, // [polish] 12: the slower peel (ocean.swellDir 26) needs less drag; 6 gets caught inside
   };
   const fxTune: FxTune = { fan: 1, trail: 1, sheet: 1 };
   let fx: RideFx | null = null;

@@ -196,20 +196,22 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   const vs = vec2(vView.x, vView.y);
   const speed = length(vs);
   // Streak length = screen speed × an effective exposure (droplets short, veils long and wispy).
-  const streak = speed.mul(select(isVeil, float(0.35), float(0.028)));
-  const stretch = select(isDrop.or(isVeil), clamp(streak.div(max(r.mul(2), 1e-3)).add(1), 1, 7), float(1));
+  const streak = speed.mul(select(isVeil, float(0.6), float(0.028)));
+  // [polish] veils are always streaks (min 2.6:1, up to 10:1): round veil puffs read as a row of cotton balls along the lips
+  const stretch = select(isVeil, clamp(streak.div(max(r.mul(2), 1e-3)).add(2.6), 2.6, 10), select(isDrop, clamp(streak.div(max(r.mul(2), 1e-3)).add(1), 1, 7), float(1)));
   mat.positionNode = pa.xyz;
   // Streaks follow their screen motion; puffs keep a near-upright random tilt (their baked
   // self-shading is lit from above).
   const seed = ma.w;
   mat.rotationNode = select(isDrop.or(isVeil), atan(vs.y, vs.x.add(1e-5)), seed.sub(0.5).mul(select(isFoam, float(0.8), float(6.28))));
-  mat.scaleNode = select(alive, vec2(r.mul(2).mul(stretch), r.mul(2)), vec2(0, 0));
+  mat.scaleNode = select(alive, vec2(r.mul(2).mul(stretch), r.mul(2).mul(select(isVeil, float(0.62), float(1)))), vec2(0, 0));
   mat.sizeAttenuation = true;
   // Screen motion for TRAA / motion blur (sprites have no usable positionPrevious).
   const vp = cameraProjectionMatrix.mul(cameraViewMatrix);
   const cur = vp.mul(vec4(pa.xyz, 1));
   const prv = vp.mul(vec4(pa.xyz.sub(va.xyz.mul(1 / 60)), 1));
-  mat.mrtNode = mrt({ velocity: cur.xy.div(cur.w).sub(prv.xy.div(prv.w)) });
+  // [polish] normal/ssr outputs zero with zero alpha: the blend keeps the opaque pass's values (GTAO/SSR ignore sprites)
+  mat.mrtNode = mrt({ velocity: cur.xy.div(cur.w).sub(prv.xy.div(prv.w)), normal: vec4(0), ssr: vec4(0) });
   mat.alphaTest = 0.003;
 
   // Puff atlas: density, self-shading from above, thin edges.
@@ -236,7 +238,7 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   const q = uv().sub(0.5).mul(2);
   const r2 = q.dot(q);
   // [look] Mist fades well inside its quad (its big sprites showed their rim as a disc).
-  const disc = select(isMist, puff.r.mul(exp(r2.mul(-2.6))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), float(1).sub(smoothstep(0.25, 1, r2)))));
+  const disc = select(isMist, puff.r.mul(exp(r2.mul(-2.6))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), exp(r2.mul(-4.5)).mul(float(1).sub(smoothstep(0.6, 1, r2)))))); // [polish] droplets: soft-ended streaks, not pills
   const fadeIn = smoothstep(0, select(isMist, float(0.18), float(0.05)), tAge);
   const fadeOut = float(1).sub(smoothstep(select(isFoam, float(0.45), float(0.55)), 1, tAge));
   // Hide the hard line where a big soft sprite meets the water it came from.
@@ -250,7 +252,8 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   // intercept forward, so they barely dim what's behind them (a mist puff in front of the bright
   // aureole must never read as a dark disc); droplets and clumps occlude.
   const a = disc.mul(fadeIn).mul(fadeOut).mul(waterFade).mul(opacity).mul(nearFade).mul(select(alive, float(1), float(0))).toVar();
-  const ext = select(isMist, float(0.3), select(isVeil, float(0.4), select(isFoam, float(0.85), float(0.9))));
+  // [polish] a droplet is a tiny clear lens: it glints and refracts more than it blocks (0.9 read as tan pills)
+  const ext = select(isMist, float(0.3), select(isVeil, float(0.4), select(isFoam, float(0.85), float(0.4))));
   mat.colorNode = vec4(light.mul(a), 1);
   mat.opacityNode = a.mul(ext);
   mat.blending = CustomBlending;

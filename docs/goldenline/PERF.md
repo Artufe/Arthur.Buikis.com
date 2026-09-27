@@ -2,7 +2,7 @@
 
 Target: 90 FPS sustained at 2560×1440 on an RTX 5070 Ti (11.1 ms), 60 FPS floor, no frame above
 median + 4 ms. Dev proxy: Apple M3 (base), 1280×720, preset `high`, median ≤ 22 ms.
-Measure with `node scripts/goldenline-shot.mjs --shot <name> --perf 10 --size 1280x720`.
+Measure with `node scripts/goldenline-shot.mjs --shot <name> --perf 10 --size 1280x720`; its `serial` block is the M3 proxy number (B2): each frame updated, rendered and waited for (`queue.onSubmittedWorkDone`), CPU + GPU without overlap, immune to vsync quantisation. It is conservative (a real frame overlaps CPU encode with the previous frame's GPU work).
 
 ## Budget (5070 Ti ms)
 
@@ -17,7 +17,7 @@ Measure with `node scripts/goldenline-shot.mjs --shot <name> --perf 10 --size 12
 | surface state | 0.4 | GPU (isolated timestamps): 0.9–1.0 ms typical (far 0.35–0.42, near 0.45–0.5, sand 0.23–0.25), 1.8 ms worst case (92 % foam cover + 100 moving wakes); CPU update 0.1–0.17 ms | | est. 0.1–0.2 ms on the 5070 Ti (bandwidth/texture-bound, ~9× the M3); 3 dispatches in 1 compute pass; sand on an active-tile schedule; statics + lace/value noise baked at boot |
 | player + board + arms | 0.6 | CPU 0.38–0.44 ms update; GPU below noise (see log) | | 245 k skinned tris + 120 k board, casts into 4 CSM cascades |
 | surf (ride, wake, fans) | 0.8 | CPU: ride driver 0.21–0.25 ms/frame (≈ 0.18 ms of it is A8's `sample()` ×6 + `breaker()` + `wave()`), effects 0.007–0.02 ms; GPU: shadow proxies ≤ 384 instanced icospheres (80 tris) into the CSM only while a fan flies, below noise | | shares spray (a full fan: ≤ 150 droplets + 13 clumps + ≤ 1 mist puff per frame, plus ≤ 26 speed-sheet droplets; bulk `reserve()`); ≤ 8 state splats/frame via `reserve()`; 0 pipelines after loading |
-| ambient vfx | 0.3 | | | |
+| ambient vfx | 0.3 | CPU `systemMs.vfx` 0.004-0.035 ms (crab sim + 1 uniform); GPU: birds + crabs below noise (≈ 2 k tris), salt mist ≈ 0.3 ms serial @720p after the texture-noise rewrite (was 1.4 ms with 3-D noise) | | 3 draws: birds (9 instances), crabs (16), mist (≈ 25 curtains), all warmed; zero pipelines after load |
 | post chain | 1.9 | CPU update 0.01 ms; A/B wall time per stage 0.2–0.4 ms (TRAA ≈0.4, SSR ≈0.3, GTAO ≈0.3 @720p), rest below noise | | GTAO ½ res, SSR 24 steps opted-in pixels only, bloom 5 mips, sharpen + grade/grain fused into the last two passes; DOF + shafts off by default |
 | **total / headroom** | 10.6 / 0.5 | | | |
 
@@ -43,3 +43,49 @@ Measure with `node scripts/goldenline-shot.mjs --shot <name> --perf 10 --size 12
 - [surf] CPU (M3, `surf-ride` stepped 600 frames through the ride × 4 passes in one page, wrapped `Ride.update/popup` and `RideFx.update`): ride 0.21–0.25 ms/frame, effects 0.007–0.02 ms/frame; `systemMs.player` incl. the ride 0.31–0.38 ms. Most of the ride is A8's `sample()` (6 calls: 3 substeps, nose/tail, the eye probe; ≈ 27–33 µs each per PERF above). No pipeline compiles after the loading screen across the ride, wipeout, pier run and fan-shadow shots (wrapped `GPUDevice.create*Pipeline*` / `createShaderModule`: 0); the shadow proxies are warmed in `warmup()`. 0 console errors.
 - [surf] Allocations (CDP sampling heap profiler, 64 B interval incl. objects collected by minor/major GC; `surf-ride`, an 800-frame warm pass, surf functions tiered up with `%PrepareFunctionForOptimization` + `%OptimizeFunctionOnNextCall`, then 480 frames through drop, barrel and shoulder, still TurboFan at the end): `surf/ride.ts` 157 B/frame, `surf/sim.ts` 77, `surf/fx.ts` 7 — all V8 boxing of the doubles passed to A8's `sample()`/`breaker()`/`wave()` and of the contract writes into three `Vector3`/`Quaternion` fields of the rig (tagged in this app); the demo playback (tooling) ~95 B/frame. No `new`, closures, arrays or strings. Before the pass it was 10–13 KB/frame in the ride (Vector3 state and non-inlined eases). Caveat for B2: a per-frame function needs ~400 calls for Maglev and ~3000 for TurboFan; until then (the first ~7 s of the first ride) baseline code boxes every double intermediate (~10 KB/frame). A cold branch's first run deopts it back (the numeric fields start at -0 so a first fractional value doesn't change the object's map).
 
+
+## B2 · final M3 proxy (1280×720, `high`, quiet machine, dev server)
+
+`serial` = CPU+GPU per frame without overlap (180 frames); `rAF` = vsync-paced loop (headless 60 Hz) median / p99.
+
+| shot | serial median | p99 | max | > median+4 | rAF med / p99 | draws | Mtris | CPU render | ocean | player | pier | state | vfx |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| beach-sun | 16.9 | 20.3 | 24.8 | 1/180 | 16.6 / 18.4 | 157 | 5.33 | 2.66 | 0.87 | 0.00 | 0.27 | 0.09 | 0.000 |
+| lineup | 19.6 | 24.9 | 25.3 | 4/180 | 16.6 / 25.0 | 80 | 4.11 | 1.51 | 0.83 | 0.00 | 0.25 | 0.11 | 0.009 |
+| breaking-front | 19.1 | 22.0 | 22.1 | 0/180 | 16.5 / 25.0 | 69 | 3.74 | 1.32 | 0.71 | 0.00 | 0.19 | 0.10 | 0.015 |
+| breaking-tube | 19.7 | 23.5 | 24.6 | 1/180 | 16.4 / 25.5 | 106 | 4.63 | 1.67 | 0.79 | 0.00 | 0.20 | 0.09 | 0.014 |
+| pier-deck | 17.9 | 19.0 | 20.3 | 0/180 | 16.3 / 24.5 | 118 | 4.89 | 1.80 | 0.76 | 0.00 | 0.21 | 0.11 | 0.012 |
+| pier-under-water | 19.7 | 26.0 | 26.7 | 6/180 | 16.0 / 32.0 | 136 | 5.06 | 2.28 | 0.84 | 0.01 | 0.26 | 0.12 | 0.008 |
+| beach-dune | 14.8 | 16.8 | 18.5 | 0/180 | 16.4 / 18.5 | 149 | 5.48 | 2.63 | 1.00 | 0.00 | 0.22 | 0.10 | 0.004 |
+| shorebreak | 22.0 | 29.3 | 29.8 | 11/180 | 16.7 / 25.9 | 157 | 5.35 | 4.13 | 1.29 | 0.00 | 0.26 | 0.11 | 0.015 |
+| surf-ride (paddle → drop) | 25.8 | 31.3 | 32.3 | 6/180 | 24.5 / 33.3 | 133 | 5.86 | 4.37 | 1.29 | 0.82 | 0.23 | 0.18 | 0.023 |
+| pierexit-run | 18.1 | 23.6 | 24.2 | 2/180 | 16.7 / 25.4 | 139 | 5.82 | 2.61 | 0.92 | 0.25 | 0.15 | 0.11 | 0.013 |
+
+Uncapped rAF (`--disable-gpu-vsync --disable-frame-rate-limit`, pipelined like a real frame): lineup 18.5, beach-sun 15.0, breaking-front 18.7, pier-deck 16.2, breaking-tube 19.4, surf-ride 21.4 ms median; frames alternate short/long there (the CPU runs ahead), so its p99 is not a hitch measure — the serial > median+4 count is.
+
+Per-system cost on `lineup`, serial A/B in one page (ms saved by turning it off): shadows 2.7, caustics 2.2-2.9 (2.2 after the 110 m range cut), breaking 2.7, terrain/seabed 3.3, water 6.5, state 1.3, GTAO 1.0, TRAA 1.0, sharpen 1.7, fog 1.2, mist 1.4 → ~0.3 (after), SSR/bloom/motion blur/clouds/pier within ±0.6 noise. Render scale 0.5: −6.3 ms (GPU-bound). During the ride: shadows 4.5, terrain 3.1, motion blur 1.6, board 0.6.
+
+- [polish] Before/after: lineup 23.2 → 19.6, breaking-front 24.0 → 19.1, beach-sun 17.8 → 16.9, surf-ride 25.4 → 21-26 (depends on the phase sampled) serial ms. Wins: reef field GPU bake (−3.8 on lineup), sand dry/swash/footprint/contact taps branched off under water (−0.7), caustics 180 → 110 m, mist texture noise, far cascades on a caster layer, body/board into cascade 0 only.
+- [polish] Why the seabed dominates: the water's refraction copy ends the scene render pass mid-way, and on the M3's tile GPU every opaque pixel before it is fully shaded (no hidden-surface removal across the break), so every seabed pixel under the lineup's water runs the sand shader.
+- [polish] Garbage (CDP sampling heap profiler, 256 B interval incl. collected objects, lineup, 260 frames): 176 → 120 KB/frame. Fixed: the lighting cache key recomputed per render call (−25 KB, `cacheLightsKeyPerFrame`), per-frame DataTexture `needsUpdate` rebuilding bind groups (−12 KB, `core/upload.ts`), crab sim height calls. Remaining is three's renderer internals: state ping-pong textures swapping bind groups (`Bindings._update` 12 KB), `updateSampler` 7 KB, render-pass descriptors, timestamp-query resolve strings (5 KB, only with `trackTimestamp`), render-list sorting. Minor GC ≈ 1-3 ms every ~2 s; no major GC in a 3 s trace.
+- [polish] `perf.gpuMs`: three stamps timestamp queries with `info.frame`, which only its own rAF loop advances, so all frames shared one key and gpuMs summed the resolve interval. The engine now sets `info.frame` per frame; on the M3 the per-pass split is still inflated by TBDR pass overlap, so `serial` is the budget number here (use gpuMs on the 5070 Ti). `renderer.info` draw/triangle counts: checked, the engine resets them once per frame (`autoReset` false) and nothing in the post chain resets them (157 draws / 5.3 M tris on beach-sun); the low counts seen before came from reading them while three's own rAF loop was stopped.
+- [polish] Pipelines after the loading screen: 0 across a full playthrough on the dev server (walk + feet + wade + paddle demos, pier deck, pier run: jump, paddle, climb, the ride with barrel, the wipeout, the catch demo, then a 33-shot tour), wrapped `GPUDevice.create{Render,Compute}Pipeline{,Async}` / `createShaderModule` (`scratch tools/plcount.js`). Changing the quality preset in the F1 overlay rebuilds the post chain and does compile (an explicit user action, like any post toggle).
+- [polish] Quality presets (`QUALITY_PARAMS` in core/engine.ts + owners' `setQuality`): low (0.6 render scale, 1 k shadow maps, 12 SSR steps, no GTAO, LOD 2.1, no dune plants, no mist, caustics 0.7), medium (0.8, 2 k, 18, LOD 2.3), high (1.0, 2 k, 24, LOD 2.5), ultra (1.0, 4 k, 32, LOD 3). The floating window defaults to medium.
+
+## B2 · startup (user request)
+
+Stages from `--boot` (ms). Before = the orchestrator's baseline (dev server, shared GPU); after = this pass.
+
+| stage | before (dev) | after (dev) | after (production, warm cache) |
+|---|---|---|---|
+| dev route compile | ~19,000 | (Turbopack, first visit only) | — |
+| webgpu device | 10 | 3-10 | 3-12 |
+| terrain bake | 94 | 330-430 (waits on the worker, overlapped) | 120-235 |
+| init (all systems) | 3,500 | 900-1,100 (bakes in workers) | 800-900 |
+| warmup (all systems) | 21,000 (beach 13.5 s + pier 1.2 s …) | 180 | 170 |
+| compileAsync / pipelines | 1,260 | 1,600-1,800 (batched real frames, 307 pipelines) | 1,580-1,740 |
+| warm frames | 56 | 20-50 | 40-50 |
+| **engine total** | **19,600-25,000** | **3,400-3,800** | **2,960-3,200** |
+| navigation → ready (wall) | ~40,000 | 4,000-4,700 | **3.4-3.7 s** warm, **3.6 s** cold context |
+
+Longest main-thread tasks during a production boot: ≈ 330-350 ms parsing/evaluating the engine chunk (three.js, 685 KB) at navigation, then one 180-250 ms task (the water material's first TSL build, not splittable) and the rest under 200 ms; the loading bar moves between every system and every ~60 ms of pipeline warm-up. Chunk sizes: engine 685 KB + 467 KB + 357 KB + 324 KB (three core/tsl, systems), bake worker chunk separate. The palette keys (`/`, Ctrl/⌘+K) prefetch the engine chunks, so "go surfing" doesn't wait for the download. Boot hang: 12 dev + 15 production boots in a row, 0 hangs (the compileAsync promise path is gone; bake workers have a 12 s inline fallback).

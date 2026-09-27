@@ -13,6 +13,24 @@ import type { TSLNode } from '../core/contracts';
 const reference = referenceTyped as unknown as (name: string, type: string, object: unknown) => TSLNode;
 const vogelDiskSample = vogelTyped as unknown as (i: number, n: number, phi: TSLNode) => TSLNode;
 
+/**
+ * [polish] Layer for casters that matter beyond the second cascade (26 m+): the pier's long
+ * shadow over the water, the palms'. The far cascades render only this layer, so the player,
+ * props, grass and spray proxies (all small, all near the camera) aren't re-drawn into maps
+ * whose texels are metres wide. Casters opt in with `mesh.layers.enable(FAR_CASTER_LAYER)`.
+ */
+export const FAR_CASTER_LAYER = 2;
+
+/**
+ * [polish] Layer for casters that only matter in the nearest cascade (0-7 m): the first-person
+ * body and board (365 k skinned/board triangles) were re-drawn into the 7-26 m cascade too, where
+ * their shadow is at most a few texels. Such objects live on this layer only; the main camera and
+ * cascade 0 see it, cascade 1 doesn't. (Cascade 1's mask carries an unused bit so three doesn't
+ * replace it with the main camera's mask: ShadowNode copies it when only layer 0 is set.)
+ */
+export const NEAR_CASTER_LAYER = 3;
+const SPARE_LAYER = 5;
+
 /** Cascade far edges (m). The last one is maxFar. */
 export const CASCADE_SPLITS = [7, 26, 95, 420];
 
@@ -26,6 +44,7 @@ export class SunShadows {
 
   setup(renderer: WebGPURenderer, camera: PerspectiveCamera, light: DirectionalLight, mapSize: number) {
     renderer.shadowMap.enabled = true;
+    camera.layers.enable(NEAR_CASTER_LAYER); // [polish]
     renderer.shadowMap.type = PCFShadowMap;
     light.castShadow = true;
     const s = light.shadow;
@@ -54,6 +73,9 @@ export class SunShadows {
       ls.normalBias = normalBias[i];
       ls.bias = bias[i];
       ls.filterNode = i < 2 ? this.pcss() : this.pcf();
+      if (i >= 2) ls.camera.layers.set(FAR_CASTER_LAYER); // [polish]
+      else if (i === 0) ls.camera.layers.enable(NEAR_CASTER_LAYER);
+      else ls.camera.layers.enable(SPARE_LAYER);
     }
     this.csm = csm;
     this.lastAspect = camera.aspect;

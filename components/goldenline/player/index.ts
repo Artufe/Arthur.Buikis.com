@@ -11,10 +11,11 @@ import type { NumberParam, ToggleParam } from '../core/params';
 import { clamp, damp } from '../core/pool';
 import { SPAWN } from '../world/layout';
 import type { PlayerRig, RideDriver, Stance } from './api';
-import { buildBoardGeometry, buildPadGeometry } from './board/geometry';
 import { createBoardLook, createBoardMaterial, createPadMaterial } from './board/material';
 import { boardSpec } from './board/shape';
 import { buildLimb } from './body/build';
+import { bake } from '../core/bakes';
+import { NEAR_CASTER_LAYER } from '../atmosphere/shadows';
 import { buildArm, buildLeg } from './body/models';
 import { ArmRig, LegRig } from './body/rig';
 import { createSkinLook, createSkinMaterial } from './body/skin';
@@ -25,7 +26,6 @@ import { Pose } from './pose';
 import { poseFor, proneBoard } from './poses';
 import { ease, wrapAngle } from './rigmath';
 import { SCRIPTS, ScriptRunner } from './script';
-import { bakeBeads, bakeNoise, bakeSkin, bakeWax } from './tex';
 import { Drips } from './drips';
 
 const _v = new Vector3();
@@ -385,7 +385,7 @@ export function createPlayerSystem(): GLSystem {
 
   return {
     name: 'player',
-    init(ctx: GLContext) {
+    async init(ctx: GLContext) {
       const P = ctx.params;
       const g = 'player';
       p = {
@@ -452,10 +452,15 @@ export function createPlayerSystem(): GLSystem {
       ctx.services.player = r;
 
       // Detail maps.
-      const noise = bakeNoise();
-      const wax = bakeWax();
-      const beads = bakeBeads();
-      const skin = bakeSkin();
+      // [polish] Detail maps, board and pad geometry are baked in the boot workers (core/bakes.ts).
+      const [noise, wax, beads, skin, boardGeo, padGeo] = await Promise.all([
+        bake('player.noise'),
+        bake('player.wax'),
+        bake('player.beads'),
+        bake('player.skin'),
+        bake('player.board'),
+        bake('player.pad'),
+      ]);
       disposables.push(noise, wax, beads, skin);
 
       group = new Group();
@@ -465,8 +470,6 @@ export function createPlayerSystem(): GLSystem {
       boardLook = createBoardLook(ctx.services.atmosphere.sunDirNode);
       const boardMat = createBoardMaterial(boardLook, { wax, beads, noise });
       const padMat = createPadMaterial(boardLook, { noise });
-      const boardGeo = buildBoardGeometry();
-      const padGeo = buildPadGeometry();
       disposables.push(boardMat, padMat, boardGeo, padGeo);
       boardGroup = new Group();
       boardGroup.matrixAutoUpdate = false;
@@ -484,9 +487,10 @@ export function createPlayerSystem(): GLSystem {
       skinLook = createSkinLook();
       const skinMat = createSkinMaterial(skinLook, { skin, beads, noise });
       disposables.push(skinMat);
-      const armR = buildLimb(buildArm(1));
+      const [armGeo, legGeo] = await Promise.all([bake('player.arm'), bake('player.leg')]); // [polish] worker bakes
+      const armR = buildLimb(buildArm(1), undefined, armGeo);
       const armL = buildLimb(buildArm(-1), armR);
-      const legR = buildLimb(buildLeg(1));
+      const legR = buildLimb(buildLeg(1), undefined, legGeo);
       const legL = buildLimb(buildLeg(-1), legR);
       for (const l of [armR, armL, legR, legL]) disposables.push(l.geometry, l.skeleton);
       arms = [new ArmRig(armL, skinMat, -1), new ArmRig(armR, skinMat, 1)];
@@ -515,6 +519,8 @@ export function createPlayerSystem(): GLSystem {
       disposables.push(drips);
       // Drips fall within a metre of the body: one water height per frame is plenty.
       waterAt = () => dripWater;
+      // [polish] the body and board cast into the nearest shadow cascade only (atmosphere/shadows.ts)
+      group.traverse((o) => o.layers.set(NEAR_CASTER_LAYER));
       ctx.scene.add(group);
       console.info(`[goldenline] player limbs built in ${(armR.ms + armL.ms + legR.ms + legL.ms).toFixed(0)} ms`);
 
