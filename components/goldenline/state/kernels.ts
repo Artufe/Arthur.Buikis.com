@@ -26,9 +26,26 @@ export interface KernelDeps {
   st: Static;
   noise: Noise;
   active: ActiveTiles;
+  /** Optional: (worldXZ, edge m) => 0-1, where a swash sheet covers the sand right now (wets it to a film). */
+  wetSrc?: (xz: TSLNode, edge?: number) => TSLNode;
 }
 
 const WG = 8;
+
+/**
+ * Wetness after `dt` s of drying at base height `h` (m above still water), down to `floor`.
+ * Three stages: the standing film (> 0.9, a mirror) drains off, the saturated surface
+ * (0.5-0.9, a sheen) drains into the sand, then damp sand dries slowly. At the waterline the
+ * water table is at the surface, so film and sheen hold there several times longer than high on
+ * the beach face: after a run-up the shine retreats down the beach toward the water.
+ */
+function dryWet(wet: TSLNode, dt: TSLNode, h: TSLNode, floor: TSLNode, tn: Tunables) {
+  const up = smoothstep(0.0, 0.9, h);
+  const tFilm = tn.filmTime.mul(mix(float(2.4), float(0.45), up));
+  const tSat = tn.satTime.mul(mix(float(2.5), float(0.5), up));
+  const rate = wet.greaterThan(0.9).select(float(0.1).div(tFilm), wet.greaterThan(0.5).select(float(0.4).div(tSat), float(1).div(tn.dryTime)));
+  return max(floor, wet.sub(dt.mul(rate)));
+}
 
 /** Common per-texel window bookkeeping. */
 function texelFrame(f: Field) {
@@ -296,7 +313,12 @@ export function createKernels(k: KernelDeps) {
       If(c.greaterThan(0), () => {
         foamSim(c, age, Pf.sub(tn.laceOrigin), fl, 0.24, true);
       });
-      wet.assign(max(st.wetFloor(sA), wet.sub(tn.dt.mul(smoothstep(0.86, 1.0, wet).div(tn.filmTime).mul(0.15).add(float(1).div(tn.dryTime))))));
+      wet.assign(dryWet(wet, tn.dt, hS, st.wetFloor(sA), tn));
+      // Under the swash sheet (the beach face only: most of the window is sea or dune).
+      const wetSrc = k.wetSrc;
+      if (wetSrc) If(hS.greaterThan(-1).and(hS.lessThan(2.5)), () => {
+        wet.assign(max(wet, wetSrc(Pw, t)));
+      });
       sm.assign(decay(sm, float(18)));
 
       forEachSplat(queue, 0, s, (a, b) => {
@@ -429,9 +451,15 @@ export function createKernels(k: KernelDeps) {
       // Above the floor it dries (fast while a standing film drains, then slowly); below it (a
       // pressed halo) it soaks back up to the floor in ~1.5 s.
       const floorS = st.wetFloor(sA).toVar();
-      const dried = max(floorS, wet.sub(dtS.mul(smoothstep(0.86, 1.0, wet).div(tn.filmTime).mul(0.15).add(float(1).div(tn.dryTime)))));
+      const dried = dryWet(wet, dtS, hgt, floorS, tn);
       const soaked = mix(floorS, wet, exp(dtS.negate().div(1.5)));
       wet.assign(wet.lessThan(floorS).select(soaked, dried));
+      // Under the swash sheet. Not in the dt = 0 sync pass: the sheet has moved since the update
+      // pass, and re-wetting would leave the two ping-pong textures different.
+      const wetSrc = k.wetSrc;
+      if (wetSrc) If(dtS.greaterThan(0).and(hgt.greaterThan(-1)).and(hgt.lessThan(2.5)), () => {
+        wet.assign(max(wet, wetSrc(P, 0.04)));
+      });
       sm.assign(sm.mul(exp(dtS.negate().div(18))));
       // Refill: dry footprints stay put; damp sand slumps slowly; under water they wash out fast.
       const under = rev(0.0, -0.15, hgt);

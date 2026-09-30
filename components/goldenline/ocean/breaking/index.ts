@@ -126,6 +126,8 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
   (ctx.services.ocean.gpu as { spray?: SprayService }).spray = spray;
   const fx = createWhitewaterFx(tracker, prof, spray);
   const swash = createSwash(ctx, tracker);
+  // Where the swash sheet covers the sand, for the state's wetness (state/ reads it at init).
+  (ctx.services.ocean.gpu as { swash?: { wet(xz: TSLNode, edge?: number): TSLNode } }).swash = { wet: swash.wetAt };
   // sample() / wave() with the breakers in them (B1 rides this), plus the richer breaker query.
   const wrapped = wrapOceanService(ctx.services.ocean, tracker, prof, deps.field, deps.env, deps.rt);
   ctx.services.ocean = wrapped.service;

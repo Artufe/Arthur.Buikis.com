@@ -19,9 +19,14 @@ export interface Tunables {
   wakeDamping: TSLNode;
   /** 0-0.9: fraction of the stable maximum biharmonic dispersion. */
   wakeDispersion: TSLNode;
-  /** Damp-sand drying time (s), standing-film drain time (s), swash-band wetness floor. */
+  /**
+   * Damp-sand drying time (s), standing-film drain time (s), saturated-sheen drain time (s),
+   * swash-band wetness floor. Film and sheen times are mid-beach-face values: they run longer at
+   * the waterline (water table at the surface) and shorter high up the face (see dryWet()).
+   */
   dryTime: TSLNode;
   filmTime: TSLNode;
+  satTime: TSLNode;
   swashFloor: TSLNode;
   /** Footprint refill time on saturated sand (s). */
   refillWet: TSLNode;

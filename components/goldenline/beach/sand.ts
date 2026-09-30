@@ -4,9 +4,10 @@
 //
 // Surface states (brief §3.4), keyed to state.sand().x as documented in state/README.md:
 // 0 dry (rippled, sparkling) · ~0.5 damp (dark, matte) · ~0.88 saturated (dark, glossy) ·
-// >0.95 standing film right after a run-up (near mirror, SSR opt-in). A physical baseline is
-// always applied on top: the saturated effluent strip at the water line and the damp band up to
-// the high-tide mark. With the state stub, a fake swash band stands in (beach.fakeWet).
+// >0.95 standing film right after a run-up (near mirror, SSR opt-in). The gloss comes only from
+// the state: the swash wets the sand where its sheet runs and the state dries it, fastest high on
+// the beach face. A matte damp band up to the high-tide mark is always applied on top. With the
+// state stub, painted bands stand in (beach.fakeWet): a swash band, the saturated strip and film.
 
 import { MeshPhysicalNodeMaterial, Vector3, type DataTexture } from 'three/webgpu';
 import {
@@ -290,12 +291,13 @@ export function createSandMaterial(ctx: GLContext, tx: SandTextures, u: SandUnif
   const under = float(1).sub(smoothstep(-0.3, 0.02, y.add(wob.mul(0.08))));
   const aboveW = float(1).sub(under);
   const sandS = src.sand(xz);
-  const satBase = float(1).sub(smoothstep(u.saturatedTop.sub(0.25), u.saturatedTop, y.add(wob.mul(0.22)))).mul(0.9);
-  // Post-swash film: a sheet up to filmTop, draining first in patches (the upper half breaks
-  // into glossy pools and dull drying islands).
+  // Stub only (no state): a painted saturated strip and a post-swash film up to filmTop, draining
+  // first in patches. With the real state these never show: they don't move with the water.
+  const satBase = float(1).sub(smoothstep(u.saturatedTop.sub(0.25), u.saturatedTop, y.add(wob.mul(0.22)))).mul(0.9).mul(u.fakeWet);
   const drain = mx_noise_float(vec3(xz.x.mul(0.35), xz.y.mul(0.22), 3.7)).mul(0.6).add(m2.a.sub(0.5).mul(0.5));
-  const filmBase = float(1).sub(smoothstep(u.filmTop.sub(0.1), u.filmTop, y.add(wob.mul(0.08)).add(drain.max(0).mul(u.filmTop).mul(0.6))));
-  const dampBase = float(1).sub(smoothstep(u.highTide.sub(0.35), u.highTide, y.add(wob.mul(0.35)))).mul(0.5);
+  const filmBase = float(1).sub(smoothstep(u.filmTop.sub(0.1), u.filmTop, y.add(wob.mul(0.08)).add(drain.max(0).mul(u.filmTop).mul(0.6)))).mul(u.fakeWet);
+  // Matte damp up to the high-tide mark, below full damp so freshly wetted sand reads darker.
+  const dampBase = float(1).sub(smoothstep(u.highTide.sub(0.35), u.highTide, y.add(wob.mul(0.35)))).mul(0.3);
   const fake = float(1).sub(smoothstep(u.swashTop.sub(0.45), u.swashTop, y.add(wob.mul(0.3)))).mul(0.9).mul(u.fakeWet);
   const wAll = max(max(sandS.x, satBase), max(max(dampBase, fake), filmBase));
   const w = max(wAll, under);

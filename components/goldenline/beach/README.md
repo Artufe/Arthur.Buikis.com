@@ -32,12 +32,13 @@ Owner: A3. Everything is procedural; no third-party assets (nothing in `public/g
   sun's shadow term through `material.receivedShadowNode`, within 16 m of the camera
   (`beach.contactShadow`).
 - **Wetness:** state semantics (`state/README.md`): 0 dry · 0.5 damp · 0.88 saturated · > 0.95 film.
-  The material applies `max(state wetness, physical baseline)`, where the baseline is the
-  saturated effluent strip below `beach.saturatedTop` (0.65 m), a post-swash film up to
-  `beach.filmTop` (0.62 m) that drains in patches, and the damp band up to the high-tide mark
-  `beach.highTide` (1.45 m). Once the swash writes wetness for real, lower `saturatedTop` and
-  `filmTop` so the bands breathe with the run-up. The film's normal is levelled toward +Y (a water
-  film is flatter than the sand under it), so it mirrors the sky, sun and pier instead of the sea.
+  All gloss comes from the state: the swash wets the sand exactly where its sheet runs, and the
+  state dries it (film, then sheen, faster high on the beach face), so the shine follows each
+  run-up and retreats toward the water. The material only adds a matte damp band (0.3) up to the
+  high-tide mark `beach.highTide` (1.45 m). With the state stub (`beach.fakeWet`) painted bands
+  stand in: the fake swash band, a saturated strip below `beach.saturatedTop` and a film up to
+  `beach.filmTop` that drains in patches. The film's normal is levelled toward +Y (a water film is
+  flatter than the sand under it), so it mirrors the sky, sun and pier instead of the sea.
 - Damp sand darkens (×0.45, more saturated) and loses its ripples; saturated sand darkens
   further (`beach.wetDarken`) and turns glossy (roughness 0.42); the film is a near mirror
   (roughness 0.045). Dry grains get `specularIntensity` 0.18 (sand back-scatters; GGX's grazing
@@ -79,8 +80,8 @@ waterline at d ≈ 2.5.
 
 ## Params (group `beach`)
 
-Look: `sparkle`, `ripples`, `wetDarken`, `albedo`, `highTide`, `saturatedTop`, `filmTop`,
-`reefRelief`, `contactShadow`, `vegetation`, `fakeWet` + `swashTop` (only with the state stub).
+Look: `sparkle`, `ripples`, `wetDarken`, `albedo`, `highTide`, `reefRelief`, `contactShadow`,
+`vegetation`, and `fakeWet` + `swashTop`, `saturatedTop`, `filmTop` (these four only with the state stub).
 Perf / A-B toggles: `terrain`, `terrainShadow` (off), `lodRange`, `farField`, `palms`, `props`,
 `plants`. Debug: `debugPrints` (stamps N footprints ahead of the camera via `state.splat`),
 `debugView` (1 wetness bands, 2 reef).

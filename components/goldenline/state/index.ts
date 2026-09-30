@@ -97,6 +97,7 @@ class StateSim {
     wakeDispersion: { value: number };
     dryTime: { value: number };
     filmTime: { value: number };
+    satTime: { value: number };
     swashFloor: { value: number };
     refillWet: { value: number };
     debugScene: { value: boolean };
@@ -105,6 +106,7 @@ class StateSim {
   private readonly uT0 = uniform(new Vector4());
   private readonly uT1 = uniform(new Vector4());
   private readonly uT2 = uniform(new Vector4());
+  private readonly uT3 = uniform(new Vector4());
   private readonly debugScene = new DebugScene();
   private debugWasOn = false;
   private readonly view: DebugView;
@@ -124,7 +126,8 @@ class StateSim {
       wakeDispersion: P.number('state.wakeDispersion', { label: 'wake dispersion', group: g, min: 0, max: 0.9, value: 0.7 }),
       dryTime: P.number('state.dryTime', { label: 'sand drying (s)', group: g, min: 10, max: 900, value: 260 }),
       filmTime: P.number('state.filmTime', { label: 'swash film drain (s)', group: g, min: 0.5, max: 20, value: 5 }),
-      swashFloor: P.number('state.swashFloor', { label: 'swash-band dampness', group: g, min: 0, max: 0.9, value: 0.5 }),
+      satTime: P.number('state.satTime', { label: 'wet sheen drain (s)', group: g, min: 1, max: 120, value: 12 }),
+      swashFloor: P.number('state.swashFloor', { label: 'swash-band dampness', group: g, min: 0, max: 0.9, value: 0.3 }),
       refillWet: P.number('state.refillWet', { label: 'wet footprint refill (s)', group: g, min: 5, max: 600, value: 140 }),
       debugScene: P.toggle('state.debugScene', { label: 'debug writer scene', group: g, value: false }),
       debugDolly: P.number('state.debugDolly', { label: 'debug camera dolly (m/s, -Z)', group: g, min: -4, max: 4, value: 0 }),
@@ -139,6 +142,7 @@ class StateSim {
     const T0 = this.uT0;
     const T1 = this.uT1;
     const T2 = this.uT2;
+    const T3 = this.uT3;
     this.tn = {
       foamLife: T0.x,
       lace: T0.y,
@@ -150,6 +154,7 @@ class StateSim {
       wakeDispersion: T1.w,
       dryTime: T2.x,
       filmTime: T2.y,
+      satTime: T3.x,
       swashFloor: T2.z,
       refillWet: T2.w,
       laceOrigin: this.fc.vec2(FC_LACE),
@@ -180,6 +185,8 @@ class StateSim {
       st: this.st,
       noise: this.noise,
       active: this.active,
+      // The swash's coverage (ocean/breaking/swash.ts; the ocean initialises before the state).
+      wetSrc: (ctx.services.ocean.gpu as { swash?: { wet?(xz: TSLNode, edge?: number): TSLNode } }).swash?.wet,
     }).lists;
     for (let p = 0; p < 2; p++) {
       for (let m = 0; m < 8; m++) {
@@ -285,6 +292,8 @@ class StateSim {
     if (c.y !== p.filmTime.value) c.y = p.filmTime.value;
     if (c.z !== p.swashFloor.value) c.z = p.swashFloor.value;
     if (c.w !== p.refillWet.value) c.w = p.refillWet.value;
+    const e = this.uT3.value;
+    if (e.x !== p.satTime.value) e.x = p.satTime.value;
   }
 
 

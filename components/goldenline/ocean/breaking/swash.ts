@@ -7,8 +7,10 @@
 // the local slope, x = x0 + u0·τ − a·τ²/2 (gravity along the slope + friction), stalls, and the
 // sheet drains back more slowly, thinning to a film. Neighbouring samples launch with slightly
 // different speeds and times, so the front is lobed and fingered, never a straight line. Along
-// the front the swash writes SPLAT_WET (the glossy film), SPLAT_SMOOTH (erases footprints) and
-// SPLAT_FOAM (the bubble line) into the surface state.
+// the front the swash writes SPLAT_SMOOTH (erases footprints) and SPLAT_FOAM (the bubble line)
+// into the surface state. The wetting itself is not splatted: `wetAt()` (published on
+// ocean.gpu.swash) tells the state kernels where the sheet covers the sand, texel by texel, so
+// the wet film is exactly where the water was.
 //
 // GPU: a camera-centred sheet mesh (world-snapped, so it never swims) draped on the sand: height
 // = the rendered base terrain + the sheet thickness at this point, shaded with the water graph
@@ -17,14 +19,14 @@
 import { uploadFloatRGBA } from '../../core/upload';
 import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, DataTexture, FloatType, LinearFilter, Mesh, RGBAFormat, Sphere, Vector3, type Material } from 'three/webgpu';
 import * as TSL from 'three/tsl';
-import { SPLAT_FOAM, SPLAT_SMOOTH, SPLAT_WET, type GLContext, type SurfaceStateService, type TSLNode } from '../../core/contracts';
+import { SPLAT_FOAM, SPLAT_SMOOTH, type GLContext, type SurfaceStateService, type TSLNode } from '../../core/contracts';
 import type { WaterApi } from '../../water';
 import { bspline } from '../../beach/height';
 import { TERRAIN_BOUNDS, TERRAIN_TEXEL, shoreX } from '../../world/layout';
 import { stageTimes } from './profile';
 import { DATA_W, GLOBAL_ROW, REEF_SLOTS, ROWS, SLOTS, type Tracker } from './tracker';
 
-const { Fn, abs, clamp, float, max, mix, mx_noise_float, normalize, positionGeometry, positionPrevious, pow, select, sin, smoothstep, texture, uniformArray, varyingProperty, vec2, vec3, vec4 } =
+const { Fn, If, abs, clamp, float, max, mix, mx_noise_float, normalize, positionGeometry, positionPrevious, pow, select, sin, smoothstep, texture, uniformArray, varyingProperty, vec2, vec3, vec4 } =
   TSL as unknown as Record<string, any>;
 
 /** Along-shore samples: z from Z0 in steps of DZ. */
@@ -32,6 +34,13 @@ const Z0 = -260;
 const DZ = 0.5;
 const NS = 880;
 const G = 9.81;
+/**
+ * Along-shore smoothing of what the GPU sees (binomial, sigma ~0.7 m). Each sample launches
+ * with its own random speed, so neighbours 0.5 m apart can differ by a metre of reach: drawn
+ * raw, the front (and the wet line it leaves) was a sawtooth, and a swash ended in a straight
+ * cut. Smoothed, the reach varies in rounded lobes and each run-up tapers at its ends.
+ */
+const SMOOTH_W = [1 / 256, 8 / 256, 28 / 256, 56 / 256, 70 / 256, 56 / 256, 28 / 256, 8 / 256, 1 / 256];
 
 /** Sheet mesh: along-shore span (m) around the camera and its spacing; cross-shore samples. */
 const SPAN = 120;
@@ -49,6 +58,12 @@ export interface SwashParams {
 
 export interface Swash {
   mesh: Mesh;
+  /**
+   * TSL: (worldXZ: vec2, edge m) => float, 1 where the sheet covers the sand right now (the same
+   * lobed front the mesh draws, softened over `edge`: about a texel of the field it wets), else 0.
+   * Works in compute (explicit LOD).
+   */
+  wetAt(xz: TSLNode, edge?: number): TSLNode;
   warmup(ctx: GLContext, water: WaterApi | undefined): void;
   update(ctx: GLContext, P: SwashParams): void;
   dispose(ctx: GLContext): void;
@@ -82,6 +97,8 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
   const xf = new Float32Array(NS).fill(-3);
   const lastN = new Int32Array(rays.nr).fill(-99999);
   const splatAcc = new Float32Array(NS);
+  /** This frame's unsmoothed (front x, sheet depth, foam, drain) per sample. */
+  const raw = new Float32Array(NS * 4);
   // GPU texture: row 0 dynamic (front x, sheet depth, foam, drain), row 1 static (shoreD, slope).
   const data = new Float32Array(NS * 2 * 4);
   for (let k = 0; k < NS; k++) {
@@ -142,6 +159,11 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
   const th = Math.round((bz1 - bz0) / TERRAIN_TEXEL);
   const hAt = (xz: TSLNode) => bspline(terrain.heightTexture, xz.sub(vec2(bx0, bz0)).div(vec2(bx1 - bx0, bz1 - bz0)), tw, th).x;
   const shoreXGPU = (z: TSLNode) => sin(z.div(85)).mul(4).add(sin(z.div(31).add(1.3)).mul(2));
+  /** The front is lobed and fingered along the shore, more so as it slows (m, added to front x). */
+  const lobe = (z: TSLNode, fx: TSLNode) =>
+    mx_noise_float(vec3(z.div(2.6), uTime.mul(0.08), 1.7)).mul(0.45).add(mx_noise_float(vec3(z.div(0.9), uTime.mul(0.15), 4.1)).mul(0.18)).mul(smoothstep(0.5, 3, fx));
+  /** Largest |lobe| (m): beyond front + this, nothing can be covered. */
+  const LOBE_MAX = 0.64;
 
   const vRest = varyingProperty('vec2', 'vSwRest');
   const vDepth = varyingProperty('float', 'vSwDepth');
@@ -159,9 +181,7 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
     const s = mix(float(S_MIN), float(S_MAX), pow(c, 1.35)).toVar();
     const x = shoreXGPU(z).add(st.x).add(s).toVar();
     const xz = vec2(x, z);
-    // The front is lobed and fingered along the shore, more so as it slows.
-    const lob = mx_noise_float(vec3(z.div(2.6), uTime.mul(0.08), 1.7)).mul(0.45).add(mx_noise_float(vec3(z.div(0.9), uTime.mul(0.15), 4.1)).mul(0.18));
-    const front = dyn.x.add(lob.mul(smoothstep(0.5, 3, dyn.x))).toVar();
+    const front = dyn.x.add(lobe(z, dyn.x)).toVar();
     // Sheet depth: thickest at the bore behind the front, a thin rounded edge at the front.
     const rel = clamp(s.div(max(front, 0.1)), -1, 2);
     const wedge = pow(clamp(float(1).sub(rel), 0, 1), 0.55);
@@ -235,8 +255,26 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
     }
   };
 
+  const zLo = Z0;
+  const zHi = Z0 + (NS - 1) * DZ;
+  const wetAt = (xz: TSLNode, edge = 0.04) =>
+    Fn(() => {
+      const z = xz.y.toVar();
+      const tu = z.sub(Z0).div(DZ).add(0.5).div(NS);
+      const fx = texture(tex, vec2(tu, 0.25)).level(0).x.toVar();
+      const s = xz.x.sub(shoreXGPU(z)).sub(texture(tex, vec2(tu, 0.75)).level(0).x).toVar();
+      const w = float(0).toVar();
+      // The lobe noise only near a live sheet: an idle sample parks its front at -3 (< S_MIN).
+      If(s.greaterThan(S_MIN).and(s.lessThan(fx.add(LOBE_MAX))).and(z.greaterThan(zLo)).and(z.lessThan(zHi)), () => {
+        const front = fx.add(lobe(z, fx));
+        w.assign(float(1).sub(smoothstep(front.sub(edge), front, s)));
+      });
+      return w;
+    })();
+
   return {
     mesh,
+    wetAt,
     warmup(_c, water) {
       if (!water) return;
       const mat = water.createMaterial({
@@ -286,9 +324,7 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
           triggerAt();
         }
       }
-      // Advance the fronts and write the texture; splat along the fronts.
-      const state = c.services.state;
-      const sd = state.splatData;
+      // Advance the fronts.
       for (let k = 0; k < NS; k++) {
         const tau = t - t0[k];
         const a = G * slope[k] * 1.1;
@@ -322,43 +358,59 @@ export function createSwash(ctx: GLContext, tracker: Tracker): Swash {
         }
         xf[k] = x;
         const o = k * 4;
+        raw[o] = x;
+        raw[o + 1] = depth;
+        raw[o + 2] = foam;
+        raw[o + 3] = drain;
+      }
+      // Smooth along the shore into the texture; splat along the smoothed fronts.
+      const state = c.services.state;
+      const sd = state.splatData;
+      for (let k = 0; k < NS; k++) {
+        let x = 0;
+        let depth = 0;
+        let foam = 0;
+        let drain = 0;
+        for (let j = -4; j <= 4; j++) {
+          const q = k + j < 0 ? 0 : k + j > NS - 1 ? NS - 1 : k + j;
+          const w = SMOOTH_W[j + 4];
+          x += w * raw[q * 4];
+          depth += w * raw[q * 4 + 1];
+          foam += w * raw[q * 4 + 2];
+          drain += w * raw[q * 4 + 3];
+        }
+        const o = k * 4;
         data[o] = x;
         data[o + 1] = depth;
         data[o + 2] = foam * P.foam;
         data[o + 3] = drain;
-        // State: wet film + smoothing over the reach of the uprush, foam on the front.
+        // State: smoothing over the reach of the uprush, foam on the front. (The wetting is
+        // wetAt(), evaluated by the state kernels; these splats also wake the sand tiles along
+        // the front, see state/active.ts.)
         if (dt > 0 && drain < 1 && x > 0 && (k & 3) === 0 && ((k >> 2) & 3) === (c.time.frame & 3)) {
           splatAcc[k] += dt * 4;
-          const off = state.reserve ? state.reserve(3) : -1;
+          const off = state.reserve ? state.reserve(2) : -1;
           if (off >= 0 && sd) {
             const z = Z0 + k * DZ;
             const xw = 4 * Math.sin(z / 85) + 2 * Math.sin(z / 31 + 1.3) + shoreD[k] + x;
             const acc = splatAcc[k];
             splatAcc[k] = 0;
-            sd[off] = SPLAT_WET;
-            sd[off + 1] = xw - 0.4;
+            sd[off] = SPLAT_SMOOTH;
+            sd[off + 1] = xw - 0.3;
             sd[off + 2] = z;
-            sd[off + 3] = 1.1;
-            sd[off + 4] = drain < 0.3 ? 1 : 0.9;
+            sd[off + 3] = 1.0;
+            sd[off + 4] = 1 - Math.exp(-6 * acc);
             sd[off + 5] = 1;
             sd[off + 6] = 0;
             sd[off + 7] = 1;
-            sd[off + 8] = SPLAT_SMOOTH;
-            sd[off + 9] = xw - 0.3;
+            sd[off + 8] = SPLAT_FOAM;
+            sd[off + 9] = xw;
             sd[off + 10] = z;
-            sd[off + 11] = 1.0;
-            sd[off + 12] = 1 - Math.exp(-6 * acc);
+            sd[off + 11] = 0.45;
+            sd[off + 12] = 0.3 * (1 - Math.exp(-2 * acc)) * foam * P.foam;
             sd[off + 13] = 1;
             sd[off + 14] = 0;
             sd[off + 15] = 1;
-            sd[off + 16] = SPLAT_FOAM;
-            sd[off + 17] = xw;
-            sd[off + 18] = z;
-            sd[off + 19] = 0.45;
-            sd[off + 20] = 0.3 * (1 - Math.exp(-2 * acc)) * foam * P.foam;
-            sd[off + 21] = 1;
-            sd[off + 22] = 0;
-            sd[off + 23] = 1;
           }
         }
       }

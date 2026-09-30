@@ -2,8 +2,10 @@
 // 0.5 m: the base height, the wetness floor (water table + where run-ups regularly reach), the
 // initial "last big run-up" dampness and the masks of the residual current. Recomputing these
 // per texel per frame was most of the kernels' cost; now each is one filtered tap.
+// The floors are deliberately low: the glossy wetness above the waterline comes from the swash
+// itself (ocean/breaking/swash.ts wetAt), so it moves and dries with the water.
 //
-//   A: (height m, saturated floor 0-0.88 (1 under water), swash-band shape 0-1, recent run-up 0-0.72)
+//   A: (height m, saturated floor 0-0.88 (1 under water), swash-band shape 0-1, recent run-up 0-0.55)
 //   B: (surf-zone mask x toward-channel, channel rip mask, 0, 0)
 
 import { ClampToEdgeWrapping, HalfFloatType, LinearFilter, RGBAFormat, StorageTexture, type WebGPURenderer } from 'three/webgpu';
@@ -46,10 +48,11 @@ export function createStatic(renderer: WebGPURenderer, terrain: TerrainService, 
     // as a regular sine from above.
     const cuspPhase = p.y.mul(0.2856).add(noise.value(p.mul(0.02), 2).mul(3.6)).add(noise.value(p.mul(0.061), 3).mul(1.2)).toVar();
     const cuspAmp = noise.value(p.mul(0.013).add(vec2(5.3, 1.1)), 1).mul(0.6).add(0.75).toVar();
-    const sat = max(float(1).sub(smoothstep(0.18, 0.52, hgt.add(n1))).mul(0.88), rev(0.02, -0.08, hgt));
+    // Saturated only in a narrow strip where the water table meets the surface at the waterline.
+    const sat = max(float(1).sub(smoothstep(0.0, 0.1, hgt.add(n1.mul(0.4)))).mul(0.88), rev(0.02, -0.08, hgt));
     const band = float(1).sub(smoothstep(0.85, 1.4, hgt.add(sin(cuspPhase).mul(cuspAmp).mul(0.14)).add(n1.mul(2))));
     const lobe = noise.value(p.mul(0.11), 3).mul(0.07);
-    const recent = float(1).sub(smoothstep(0.7, 1.2, hgt.add(sin(cuspPhase).mul(cuspAmp).mul(0.16)).add(lobe))).mul(0.72);
+    const recent = float(1).sub(smoothstep(0.7, 1.2, hgt.add(sin(cuspPhase).mul(cuspAmp).mul(0.16)).add(lobe))).mul(0.55);
     textureStore(A, s, vec4(hgt, sat, band, recent)).toWriteOnly();
 
     const surf = smoothstep(-4.0, -1.4, hgt).mul(float(1).sub(smoothstep(-0.3, 0.25, hgt)));
