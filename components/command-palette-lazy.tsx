@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { openPalette } from '@/lib/palette-bus';
 
 const Palette = dynamic(
   () => import('./command-palette').then((m) => ({ default: m.CommandPalette })),
@@ -16,19 +15,16 @@ type RICWindow = Window & {
 };
 
 export function CommandPaletteLazy() {
-  const [load, setLoad] = useState(false);
+  // The query to open with, or null until something first asks for the palette.
+  // The palette mounts ~300ms after that (chunk import plus React's Suspense
+  // reveal throttle, even when prefetched), too late to hear a palette:open
+  // event, so the request goes in as props and it opens itself on mount.
+  const [request, setRequest] = useState<string | null>(null);
 
   useEffect(() => {
-    if (load) return;
+    if (request !== null) return;
 
-    const trigger = (initialQuery = '') => {
-      setLoad(true);
-      // Two animation frames — give the dynamic import time to resolve and
-      // the Palette component time to mount its onPaletteOpen listener.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => openPalette(initialQuery));
-      });
-    };
+    const trigger = (initialQuery = '') => setRequest(initialQuery);
 
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -49,7 +45,8 @@ export function CommandPaletteLazy() {
       }
     };
 
-    const onCustomOpen = () => trigger();
+    const onCustomOpen = (e: Event) =>
+      trigger((e as CustomEvent<{ initialQuery?: string }>).detail?.initialQuery ?? '');
 
     window.addEventListener('keydown', onKey);
     window.addEventListener('palette:open', onCustomOpen);
@@ -81,8 +78,8 @@ export function CommandPaletteLazy() {
         }
       }
     };
-  }, [load]);
+  }, [request]);
 
-  if (!load) return null;
-  return <Palette />;
+  if (request === null) return null;
+  return <Palette openOnMount initialQuery={request} />;
 }
