@@ -56,9 +56,15 @@ function Highlight({ text, indices }: { text: string; indices: number[] }) {
   );
 }
 
-export function CommandPalette() {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+type CommandPaletteProps = {
+  /** Open as soon as it mounts; CommandPaletteLazy mounts it on the first open request. */
+  openOnMount?: boolean;
+  initialQuery?: string;
+};
+
+export function CommandPalette({ openOnMount = false, initialQuery = '' }: CommandPaletteProps) {
+  const [open, setOpen] = useState(openOnMount);
+  const [query, setQuery] = useState(openOnMount ? initialQuery : '');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [inline, setInline] = useState<Inline>(null);
   const [hintVisible, setHintVisible] = useState(false);
@@ -144,6 +150,11 @@ export function CommandPalette() {
     },
     [router, setTheme, close]
   );
+
+  useEffect(() => {
+    if (openOnMount) inputRef.current?.focus();
+    // Mount only: later opens focus the input from the bus and key handlers.
+  }, []);
 
   useEffect(() => {
     const unsubOpen = onPaletteOpen((initial) => {
