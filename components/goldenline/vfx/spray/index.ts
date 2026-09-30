@@ -198,12 +198,18 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   // Streak length = screen speed × an effective exposure (droplets short, veils long and wispy).
   const streak = speed.mul(select(isVeil, float(0.6), float(0.028)));
   // [polish] veils are always streaks (min 2.6:1, up to 10:1): round veil puffs read as a row of cotton balls along the lips
-  const stretch = select(isVeil, clamp(streak.div(max(r.mul(2), 1e-3)).add(2.6), 2.6, 10), select(isDrop, clamp(streak.div(max(r.mul(2), 1e-3)).add(1), 1, 7), float(1)));
+  // [water-v2] mist is a drifting wisp (≥ 1.8:1 along its motion), not a ball: round mist puffs lit by
+  // the forward-scattered sun read as a row of out-of-focus lights.
+  const stretch = select(
+    isVeil,
+    clamp(streak.div(max(r.mul(2), 1e-3)).add(2.6), 2.6, 10),
+    select(isDrop, clamp(streak.div(max(r.mul(2), 1e-3)).add(1), 1, 7), select(isMist, clamp(streak.div(max(r.mul(2), 1e-3)).add(1.8), 1.8, 4), float(1))),
+  );
   mat.positionNode = pa.xyz;
   // Streaks follow their screen motion; puffs keep a near-upright random tilt (their baked
   // self-shading is lit from above).
   const seed = ma.w;
-  mat.rotationNode = select(isDrop.or(isVeil), atan(vs.y, vs.x.add(1e-5)), seed.sub(0.5).mul(select(isFoam, float(0.8), float(6.28))));
+  mat.rotationNode = select(isDrop.or(isVeil).or(isMist), atan(vs.y, vs.x.add(1e-5)), seed.sub(0.5).mul(select(isFoam, float(0.8), float(6.28))));
   mat.scaleNode = select(alive, vec2(r.mul(2).mul(stretch), r.mul(2).mul(select(isVeil, float(0.62), float(1)))), vec2(0, 0));
   mat.sizeAttenuation = true;
   // Screen motion for TRAA / motion blur (sprites have no usable positionPrevious).
@@ -238,7 +244,7 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   const q = uv().sub(0.5).mul(2);
   const r2 = q.dot(q);
   // [look] Mist fades well inside its quad (its big sprites showed their rim as a disc).
-  const disc = select(isMist, puff.r.mul(exp(r2.mul(-2.6))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), exp(r2.mul(-4.5)).mul(float(1).sub(smoothstep(0.6, 1, r2)))))); // [polish] droplets: soft-ended streaks, not pills
+  const disc = select(isMist, pow(puff.r, 1.6).mul(exp(r2.mul(-3.2))), select(isFoam, puff.r, select(isVeil, exp(r2.mul(-2.4)), exp(r2.mul(-4.5)).mul(float(1).sub(smoothstep(0.6, 1, r2)))))); // [polish] droplets: soft-ended streaks, not pills
   const fadeIn = smoothstep(0, select(isMist, float(0.18), float(0.05)), tAge);
   const fadeOut = float(1).sub(smoothstep(select(isFoam, float(0.45), float(0.55)), 1, tAge));
   // Hide the hard line where a big soft sprite meets the water it came from.
@@ -247,7 +253,7 @@ export function createSpray(atmos: AtmosphereService): SprayService {
   // fade them within a couple of their own radii.
   // [look] …and always gone within ~1 m of the lens (B1: fans and tube drips pass close to it).
   const nearFade = smoothstep(r.mul(1.5).add(0.15), r.mul(4).add(0.6), dist).mul(smoothstep(0.45, 1.2, dist));
-  const opacity = select(isDrop, float(0.55).mul(cover), select(isMist, float(0.09), select(isFoam, float(0.24), float(0.11)))).div(pow(farK, 1.6));
+  const opacity = select(isDrop, float(0.55).mul(cover), select(isMist, float(0.075), select(isFoam, float(0.24), float(0.11)))).div(pow(farK, 1.6));
   // Premultiplied by hand with a separate extinction: mist and veils scatter most of what they
   // intercept forward, so they barely dim what's behind them (a mist puff in front of the bright
   // aureole must never read as a dark disc); droplets and clumps occlude.

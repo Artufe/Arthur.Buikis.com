@@ -89,3 +89,6 @@ Stages from `--boot` (ms). Before = the orchestrator's baseline (dev server, sha
 | navigation → ready (wall) | ~40,000 | 4,000-4,700 | **3.4-3.7 s** warm, **3.6 s** cold context |
 
 Longest main-thread tasks during a production boot: ≈ 330-350 ms parsing/evaluating the engine chunk (three.js, 685 KB) at navigation, then one 180-250 ms task (the water material's first TSL build, not splittable) and the rest under 200 ms; the loading bar moves between every system and every ~60 ms of pipeline warm-up. Chunk sizes: engine 685 KB + 467 KB + 357 KB + 324 KB (three core/tsl, systems), bake worker chunk separate. The palette keys (`/`, Ctrl/⌘+K) prefetch the engine chunks, so "go surfing" doesn't wait for the download. Boot hang: 12 dev + 15 production boots in a row, 0 hangs (the compileAsync promise path is gone; bake workers have a 12 s inline fallback).
+
+- [water-v2] Surf zone (`ocean/surfzone`, `__bench`): 0.22 ms GPU per substep + 0.30 ms foam/pack, 0.74 ms at 60 fps (2 substeps); spin-up ≈ 0.9 s GPU at boot and per time jump. It replaced the shore ribbons (3 of 9 ribbon slots) and the swash sheet. Serial (720p, M3): beach-sun 15.1, lineup 19.0, breaking-front 18.1, pier-deck 16.7, shorebreak 17.0 ms (0 frames over median + 4; was 22.0 with 11).
+

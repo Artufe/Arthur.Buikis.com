@@ -93,5 +93,21 @@ Phase 3 — regression shots, perf, tests, docs (READMEs, DECISIONS), commit + p
   stable over a 10-minute run; 0.74 ms GPU at 60 fps; the shore fan, shore slots, ribbons and swash
   are gone. Tuning found on the way (DECISIONS.md `[surfzone]`): incident volume flux, lagoon gain,
   conservative breaking viscosity with a depth ramp, infiltration, vertex band-limiting.
-- [ ] Phase 2 — bug sweep (R1–R5).
-- [ ] Phase 3 — regression, perf, commit.
+- [x] **Phase 2 — bug sweep.**
+  - S1–S3 (swash pop-in, square ends, staircase patches; waves flattening at the shore; lagoon seams):
+    gone with the old shore system (Phase 1).
+  - R2 (dark band ahead of a bore): the ribbon aerated its whole surface, veiling the reef in the flat
+    trough ahead of the bore; aeration now only on the face and in the whitewater. Fixed.
+  - R1 (clay whitewater): the shell's sky fill used the orange sunward sky on every side, and the
+    ragged dissolve punched holes through dense whitewater (dark stains). Fill now by facing (blue
+    anti-solar sky on the shaded side), dense whitewater solid. Better; it still reads warm-beige
+    when backlit rather than glowing (open: a proper translucency pass).
+  - R3 (whitewater filling the first frame after a time jump): not a bug, a bore passing the camera.
+  - Mist (found in the sweep): round mist sprites lit by the forward-scattered sun read as rows of
+    out-of-focus lights; mist is now a wisp stretched along its motion (≥ 1.8:1), softer and fainter.
+  - The foam lattice (surf zone): domain-warped foam tiles (Phase 1).
+  - Open: R5 on the reef, the far end of a breaker section in `breaking-front` shades as a flat pale
+    tongue (the ribbon's bore foam averaged at distance); radial glitter streaks (R4) are mild.
+- [x] **Phase 3 — regression and perf.** `surf-ride` still paddles, drops and rides the barrel.
+  Serial frame (M3, 720p, vs PERF.md): beach-sun 16.9 → 15.1 ms, lineup 19.6 → 19.0, breaking-front
+  19.1 → 18.1, pier-deck 17.9 → 16.7, shorebreak 22.0 → 17.0 (hitches 11 → 0). 101 unit tests pass.

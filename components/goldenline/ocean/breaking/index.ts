@@ -25,7 +25,7 @@ import { wrapOceanService, type BreakingApi } from './service';
 import { createSpray, SPRAY_MIST, type SprayService } from '../../vfx/spray';
 import { WIND } from '../../world/layout';
 
-const { float, uniform, uniformArray, vec3, mix, select, abs, fract, clamp, smoothstep } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
+const { float, uniform, uniformArray, vec3, mix, max, select, abs, fract, clamp, smoothstep } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
 
 const WARM_CLOCK = { dt: 1 / 60 };
 
@@ -191,7 +191,12 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
           // crisply through the face (it read as stucco and dark ledges).
           // [polish] × the blend weight: where the ribbon fades into the swell it must shade like the
           // ocean (a milky W≈0 section showed as a flat pale rectangle with hard ends)
-          aeration: float(0.45).add(v.vSwX.y.mul(0.6)).mul(smoothstep(0.05, 0.6, v.vBillow.x)),
+          // [water-v2] only on the face and in the whitewater: the flat trough ahead of a bore is
+          // clear lagoon water, and aerating it veiled the reef into a hard-edged dark band.
+          aeration: float(0.45)
+            .add(v.vSwX.y.mul(0.6))
+            .mul(smoothstep(0.05, 0.6, v.vBillow.x))
+            .mul(max(smoothstep(0.04, 0.25, float(1).sub(vec3(v.vN).y)), smoothstep(0.05, 0.4, v.vFoam.x))),
         });
         mat.positionNode = ribbon.positionNode;
         ribbon.mesh.material = mat;

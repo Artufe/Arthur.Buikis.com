@@ -164,12 +164,19 @@ export function createWhitewaterMaterial(part: RibbonPart, u: WhitewaterUniforms
   // under the orange 11° sun). Same irradiance estimate as the water's foam.
   if (atmos) {
     const sd = atmos.sunDirNode;
-    const Esky = vec3(atmos.skyRadiance(vec3(0, 1, 0))).add(vec3(atmos.skyRadiance(normalize(vec3(sd.x, 0.45, sd.z))))).mul(0.5);
-    mat.emissiveNode = alb.mul(u.albedo).mul(Esky).mul(mix(float(0.55), float(0.85), top));
+    // [water-v2] The side facing away from the sun is lit by the blue anti-solar sky, not the orange
+    // sunward one: a single sunward fill turned every shaded bore face into beige clay.
+    const skySun = vec3(atmos.skyRadiance(normalize(vec3(sd.x, 0.45, sd.z))));
+    const skyAnti = vec3(atmos.skyRadiance(normalize(vec3(sd.x.negate(), 0.45, sd.z.negate()))));
+    const facing = clamp(dot(normalize(vec3(Nb.x, 0, Nb.z)), normalize(vec3(sd.x, 0, sd.z))).mul(0.5).add(0.5), 0, 1);
+    const Esky = vec3(atmos.skyRadiance(vec3(0, 1, 0))).add(mix(skyAnti, skySun, facing)).mul(0.5);
+    mat.emissiveNode = alb.mul(u.albedo).mul(Esky).mul(mix(float(0.62), float(0.9), top));
   }
   mat.normalNode = Fn(() => normalize(cameraViewMatrix.mul(vec4(Nb, 0)).xyz))();
   // Dissolve the edges into ragged clumps and lace.
-  const keep = foam.mul(float(0.7).add(cluster.sub(0.45).mul(u.ragged))).add(hB.mul(0.1));
+  // [water-v2] Dense whitewater stays solid: holes punched through it showed the dark water behind
+  // as brown stains. Only the thinning edges tear.
+  const keep = foam.mul(float(0.7).add(cluster.sub(0.45).mul(u.ragged).mul(float(1).sub(smoothstep(0.55, 0.9, foam))))).add(hB.mul(0.1));
   mat.maskNode = keep.greaterThan(0.4);
   return mat;
 }

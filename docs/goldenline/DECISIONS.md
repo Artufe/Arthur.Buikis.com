@@ -117,4 +117,7 @@ One line per deviation from BRIEF.md, prefixed with the area. Newest at the bott
 - [surfzone] Infiltration 4 mm/s above sea level: without it a 2 cm swash film took 20+ s to drain by sheet flow and the beach stayed covered.
 - [surfzone] The CPU reads a 32 m window around the camera back (two ReadbackBuffers, ~2 frames late) for ocean.sample(); no CPU copy of the simulation.
 - [look] The water material's foam tiles are domain-warped: surf-zone foam sits in the lace range and the web's 1.15 m tile read as a lattice of crosses with straight seams.
+- [water-v2] Breaker ribbon aeration only on the face (1 − N.y) and in its whitewater: over the flat trough ahead of a bore it veiled the reef into a hard-edged dark band.
+- [water-v2] Whitewater shell sky fill chosen by facing (anti-solar sky on the shaded side), and dense whitewater never torn by the ragged dissolve: a sunward-only fill and holes to the dark water behind read as beige clay with stains.
+- [water-v2] Mist sprites are wisps stretched along their screen motion (≥ 1.8:1) with an irregular profile: round mist lit by the forward-scattered sun read as out-of-focus lights.
 
