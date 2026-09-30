@@ -1,18 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { closeSnake } from '@/lib/snake-bus';
-
-const POS_KEY = 'snake.window.pos';
-const WIN_W = 560;
-const WIN_H = 640;
+// A draggable, docked-right window for the site's easter-egg games (snake, surf).
 
 type Pos = { x: number; y: number };
 
-function readPos(): Pos | null {
+function readPos(key: string): Pos | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(POS_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const p = JSON.parse(raw);
     if (typeof p?.x === 'number' && typeof p?.y === 'number') return p;
@@ -20,9 +16,9 @@ function readPos(): Pos | null {
   return null;
 }
 
-function writePos(p: Pos) {
+function writePos(key: string, p: Pos) {
   try {
-    window.localStorage.setItem(POS_KEY, JSON.stringify(p));
+    window.localStorage.setItem(key, JSON.stringify(p));
   } catch {}
 }
 
@@ -38,15 +34,28 @@ function defaultPos(w: number, h: number): Pos {
   return clamp({ x, y: (window.innerHeight - h) / 2 }, w, h);
 }
 
-export function SnakeWindow({
+export function FloatingWindow({
+  title,
+  posKey,
+  width,
+  height,
+  onClose,
   onExpand,
   children,
 }: {
+  title: string;
+  /** localStorage key for the remembered position. */
+  posKey: string;
+  width: number;
+  height: number;
+  onClose: () => void;
   onExpand: () => void;
   children: React.ReactNode;
 }) {
+  const WIN_W = width;
+  const WIN_H = height;
   const [pos, setPos] = useState<Pos>(() =>
-    typeof window === 'undefined' ? { x: 0, y: 0 } : readPos() ?? defaultPos(WIN_W, WIN_H),
+    typeof window === 'undefined' ? { x: 0, y: 0 } : readPos(posKey) ?? defaultPos(WIN_W, WIN_H),
   );
   const [isMobile, setIsMobile] = useState(false);
   const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number } | null>(null);
@@ -64,7 +73,7 @@ export function SnakeWindow({
     const onResize = () => setPos((p) => clamp(p, WIN_W, WIN_H));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [WIN_W, WIN_H]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -87,7 +96,7 @@ export function SnakeWindow({
       WIN_H,
     );
     setPos(next);
-  }, []);
+  }, [WIN_W, WIN_H]);
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current) return;
@@ -95,21 +104,21 @@ export function SnakeWindow({
     dragRef.current = null;
     setDragging(false);
     setPos((p) => {
-      writePos(p);
+      writePos(posKey, p);
       return p;
     });
-  }, []);
+  }, [posKey]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        closeSnake();
+        onClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onClose]);
 
   const baseStyle: React.CSSProperties = isMobile
     ? { position: 'fixed', inset: 0, zIndex: 90 }
@@ -135,7 +144,7 @@ export function SnakeWindow({
       }}
       className="flex flex-col font-mono"
       role="dialog"
-      aria-label="snake"
+      aria-label={title}
     >
       <div
         onPointerDown={onPointerDown}
@@ -147,7 +156,7 @@ export function SnakeWindow({
         }`}
         style={{ borderBottom: '2px solid var(--border)' }}
       >
-        <span className="text-[12px] tracking-[0.2em]">snake</span>
+        <span className="text-[12px] tracking-[0.2em]">{title}</span>
         <div className="flex items-center gap-1" data-no-drag>
           <button
             type="button"
@@ -159,7 +168,7 @@ export function SnakeWindow({
           </button>
           <button
             type="button"
-            onClick={closeSnake}
+            onClick={onClose}
             aria-label="close"
             className="px-2 py-0.5 text-[11px] dim hover:text-[var(--accent)]"
           >

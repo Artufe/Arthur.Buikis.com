@@ -7,6 +7,7 @@ import { ScanLine } from '@/components/scan-line';
 import { RevealObserver } from '@/components/reveal-observer';
 import { HeroShader } from '@/components/hero-shader';
 import { CommandPaletteLazy } from '@/components/command-palette-lazy';
+import { GoldenlineWindowHost } from '@/components/goldenline/goldenline-window-host';
 import { SnakeWindowHost } from '@/components/snake/snake-window-host';
 import { IdeOverlay } from '@/components/ide-overlay';
 import { site } from '@/content/site';
@@ -125,6 +126,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main" className="relative z-10 pt-16">{children}</main>
           <Footer />
           <SnakeWindowHost />
+          <GoldenlineWindowHost />
           <CommandPaletteLazy />
           <IdeOverlay />
         </ThemeProvider>

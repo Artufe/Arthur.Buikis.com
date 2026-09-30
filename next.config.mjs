@@ -10,6 +10,8 @@ const nextConfig = {
   // Next 16.3+ appends a managed block to CLAUDE.md whenever `next dev` runs
   // under an AI agent. CLAUDE.md is hand-maintained here, so opt out.
   agentRules: false,
+  // The dev badge lands in every GOLDENLINE review screenshot.
+  devIndicators: false,
 };
 
 const withMDX = createMDX({});

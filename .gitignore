@@ -46,3 +46,7 @@ playwright-report/
 
 # Cursor / Claude Code local project state
 .claude/
+
+# GOLDENLINE: per-agent review/evidence shots stay local; only the curated milestones are committed.
+docs/goldenline/shots/*
+!docs/goldenline/shots/milestones/
