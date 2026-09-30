@@ -67,8 +67,9 @@ out, a bore front drew as a staircase. The FFT sea stays on top, faded by depth 
   steeply ahead of fast water (a bore) and at the thin leading edge of an uprush, carried by the
   simulated velocity (semi-Lagrangian), ~6 s on the water, ~2 s stranded on sand, aged over 12 s
   into lace.
-- **Wet sand** (`wet`, the state kernels' `wetSrc`): 1 where the simulation has water on the sand; the
-  state dries it (state/README.md).
+- **Wet sand** (`wet`, the state's `wetSrc`): 1 where the simulation has water on the sand; the
+  state dries it, and its `sand()` reader takes it live per pixel (state/README.md). Four loads of
+  S0 rather than a filtered R0 tap: the sand material's fragment stage is at its 16 samplers.
 - **Spray**: droplets off breaking fronts near the camera, from the readback window.
 
 ## CPU

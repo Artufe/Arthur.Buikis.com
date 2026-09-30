@@ -52,8 +52,11 @@ every window are ignored; invalid ones (NaN, radius ≤ 0) are dropped.
 
 The surf zone does not splat its wetting: it publishes `ocean.gpu.surfzone.wet(xz, edge)` (1 where
 the simulation has water on the sand right now), which the far and sand kernels evaluate per texel
-on the beach face, so the wet film is exactly where the water ran. Use `SPLAT_WET` for anything
-else that wets sand (a dripping board, a spilled bucket).
+on the beach face, so the wet film is exactly where the water ran. `sand()` also takes it per pixel
+every frame (the max of the two): the sand field only picks it up on its tiles' update frames (the
+rolling 1/8 slice), so read alone, a run-up's wet edge advanced in 0.8 m strips at 7.5 Hz. The field
+carries what the water leaves behind. Use `SPLAT_WET` for anything else that wets sand (a dripping
+board, a spilled bucket).
 
 Rules of thumb:
 - **Continuous emitters**: FOAM and SMOOTH strengths are *per splat*, so scale them by frame time

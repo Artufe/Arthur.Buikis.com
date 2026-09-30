@@ -9,12 +9,12 @@ import * as TSL from 'three/tsl';
 import type { GLContext, OceanSample, TSLNode } from '../../core/contracts';
 import type { SurfaceHook } from '../surface';
 import type { SwellGPU } from '../swell-gpu';
-import { APPROACH_X0, DEFAULT_GAIN, DX, DZ, H_DRY, MANNING, MAX_SUBSTEPS, RELAX_X, SPONGE_Z, SUBSTEP, WIN, WIN_STEP, X0, X1, Z0, Z1, renderWeight, swellGain } from './grid';
+import { APPROACH_X0, DEFAULT_GAIN, DX, DZ, H_DRY, MANNING, MAX_SUBSTEPS, NX, NZ, RELAX_X, SPONGE_Z, SUBSTEP, WIN, WIN_STEP, X0, X1, Z0, Z1, renderWeight, swellGain } from './grid';
 import { createKernels } from './kernels';
 import { INFILTRATION } from './scheme';
 import { SPRAY_DROPLET, type SprayService } from '../../vfx/spray';
 
-const { Fn, If, float, max, mix, smoothstep, texture, vec2, vec3, vec4 } = TSL as unknown as Record<string, any>;
+const { Fn, If, clamp, float, floor, ivec2, max, mix, smoothstep, texture, textureLoad, vec2, vec3, vec4 } = TSL as unknown as Record<string, any>;
 
 export interface SurfZoneDeps {
   swell: SwellGPU;
@@ -49,6 +49,8 @@ export function createSurfZone(ctx: GLContext, deps: SurfZoneDeps): SurfZone {
   const k = createKernels(deps.swell, deps.bedAt, deps.omega);
   const r0 = texture(k.R0, vec2(0, 0));
   const r1 = texture(k.R1, vec2(0, 0));
+  /** The state (h, u, v, b): rgba32f and nearest-filtered, so binding it takes no sampler. */
+  const s0 = textureLoad(k.S[0], ivec2(0, 0));
   const uvOf = (xz: TSLNode) => xz.sub(vec2(X0, Z0)).div(vec2(X1 - X0, Z1 - Z0));
   /** grid.ts renderWeight() in TSL (edges written rising, as Metal requires). */
   const renderW = (p: TSLNode) =>
@@ -126,11 +128,20 @@ export function createSurfZone(ctx: GLContext, deps: SurfZoneDeps): SurfZone {
       return out;
     })();
 
+  // Depth bilinear by hand from four loads of the state (R0 holds the same depth, but three binds
+  // a sampler with any filterable texture): the state's sand() reader evaluates this per pixel in
+  // the sand material, whose fragment stage is at its 16 samplers.
   const wet = (xz: TSLNode) =>
     Fn(() => {
       const out = float(0).toVar();
       If(xz.x.greaterThan(X0).and(xz.x.lessThan(X1)).and(xz.y.greaterThan(Z0)).and(xz.y.lessThan(Z1)), () => {
-        out.assign(smoothstep(H_DRY, 0.01, r0.sample(uvOf(xz)).level(0).y));
+        const q = vec2(xz.x.sub(X0).div(DX).sub(0.5), xz.y.sub(Z0).div(DZ).sub(0.5));
+        const i0 = clamp(floor(q), vec2(0, 0), vec2(NX - 2, NZ - 2)).toVar();
+        const f = clamp(q.sub(i0), 0, 1).toVar();
+        const i = ivec2(i0).toVar();
+        const L = (di: number, dj: number) => s0.load(i.add(ivec2(di, dj))).x;
+        const h = mix(mix(L(0, 0), L(1, 0), f.x), mix(L(0, 1), L(1, 1), f.x), f.y);
+        out.assign(smoothstep(H_DRY, 0.01, h));
       });
       return out;
     })();

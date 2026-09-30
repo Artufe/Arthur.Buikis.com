@@ -23,7 +23,8 @@ function fade(xz: TSLNode, f: Field, inner = 0.4, outer = 0.48) {
   return float(1).sub(smoothstep(inner, outer, max(d.x, d.y)));
 }
 
-export function createReaders(far: Field, near: Field, nearB: [StorageTexture, StorageTexture], sand: Field): Readers {
+/** `wetSrc`: where the surf zone has water on the sand right now (kernels.ts KernelDeps). */
+export function createReaders(far: Field, near: Field, nearB: [StorageTexture, StorageTexture], sand: Field, wetSrc?: (xz: TSLNode) => TSLNode): Readers {
   const farT = baseTex(far.tex[0]);
   const nearT = baseTex(near.tex[0]);
   const nearBT = baseTex(nearB[0]);
@@ -54,7 +55,12 @@ export function createReaders(far: Field, near: Field, nearB: [StorageTexture, S
       const f = farStatic(p).zw.mul(fade(p, far, 0.42, 0.49));
       const s = sandT.sample(p.mul(sand.uView.w)).level(0);
       const w = fade(p, sand).toVar();
-      return vec4(mix(f.x, s.x, w), s.y.mul(w), s.z.mul(w), mix(f.y, s.w, w));
+      // The sand field takes up the surf zone's water only on its tiles' update frames (1/8 of
+      // them a frame, active.ts): read alone, the wet edge under a run-up advanced in 0.8 m
+      // strips at 7.5-15 Hz. The water on the sand right now comes from the simulation, per pixel;
+      // the field carries what it leaves behind as it dries.
+      const wet = wetSrc ? max(mix(f.x, s.x, w), wetSrc(p)) : mix(f.x, s.x, w);
+      return vec4(wet, s.y.mul(w), s.z.mul(w), mix(f.y, s.w, w));
     },
     sandHeight(xz) {
       const p = vec2(xz).toVar();

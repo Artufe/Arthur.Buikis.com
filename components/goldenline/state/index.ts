@@ -175,6 +175,9 @@ class StateSim {
     this.noise = createNoise(ctx.renderer);
     this.active = new ActiveTiles(this.sand, 8);
     this.st = createStatic(ctx.renderer, ctx.services.terrain, terrainH, this.noise, this.tn);
+    // Where the surf-zone simulation has water on the sand (ocean/surfzone; the ocean
+    // initialises before the state). The kernels wet the fields with it, sand() reads it live.
+    const wetSrc = (ctx.services.ocean.gpu as { surfzone?: { wet?(xz: TSLNode, edge?: number): TSLNode } }).surfzone?.wet;
     this.lists = createKernels({
       far: this.far,
       near: this.near,
@@ -185,9 +188,7 @@ class StateSim {
       st: this.st,
       noise: this.noise,
       active: this.active,
-      // Where the surf-zone simulation has water on the sand (ocean/surfzone; the ocean
-      // initialises before the state).
-      wetSrc: (ctx.services.ocean.gpu as { surfzone?: { wet?(xz: TSLNode, edge?: number): TSLNode } }).surfzone?.wet,
+      wetSrc,
     }).lists;
     for (let p = 0; p < 2; p++) {
       for (let m = 0; m < 8; m++) {
@@ -196,7 +197,7 @@ class StateSim {
         this.subsets[p].push(l);
       }
     }
-    this.readers = createReaders(this.far, this.near, this.nearB, this.sand);
+    this.readers = createReaders(this.far, this.near, this.nearB, this.sand, wetSrc);
 
     const q = this.queue;
     const qd = q.data;
