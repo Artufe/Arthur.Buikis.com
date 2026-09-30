@@ -5,7 +5,7 @@
 // Surface states (brief §3.4), keyed to state.sand().x as documented in state/README.md:
 // 0 dry (rippled, sparkling) · ~0.5 damp (dark, matte) · ~0.88 saturated (dark, glossy) ·
 // >0.95 standing film right after a run-up (near mirror, SSR opt-in). The gloss comes only from
-// the state: the swash wets the sand where its sheet runs and the state dries it, fastest high on
+// the state: the surf zone wets the sand where its water runs and the state dries it, fastest high on
 // the beach face. A matte damp band up to the high-tide mark is always applied on top. With the
 // state stub, painted bands stand in (beach.fakeWet): a swash band, the saturated strip and film.
 

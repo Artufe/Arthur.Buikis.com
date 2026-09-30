@@ -70,6 +70,11 @@ export interface SurfaceHookInput {
   /** Still-water depth (m) and swell brokenness (0-1) at the vertex. */
   depth: TSLNode;
   broken: TSLNode;
+  /**
+   * [surfzone] The swell's own part of the above: displacement now and at the previous frame, and
+   * its slope terms, so a hook can replace the swell instead of adding to it.
+   */
+  swell: { d: TSLNode; dPrev: TSLNode; dd: TSLNode; dxz: TSLNode };
 }
 
 /** What a hook adds. `dd` = (∂Dy/∂x, ∂Dy/∂z, ∂Dx/∂x, ∂Dz/∂z) and `dxz` feed the normals. */
@@ -171,6 +176,7 @@ export function createOceanSurface(fft: OceanFFT, swell: SwellGPU): OceanSurface
     const sEff = s.mul(m.add(1)).toVar();
 
     const sw = swellSumGPU(swell, x0, sEff, true);
+    const swOnly = { d: sw.d, dPrev: sw.dPrev!, dd: sw.dd, dxz: sw.dxz };
     const fftD = fftDisplacement(x0, sEff, sw.depth).toVar();
     const disp = sw.d.add(fftD).toVar();
     // Motion vectors for TRAA / motion blur: the swell's true previous position; the FFT sea is
@@ -179,7 +185,7 @@ export function createOceanSurface(fft: OceanFFT, swell: SwellGPU): OceanSurface
     const dd = sw.dd.toVar();
     const dxz = sw.dxz.toVar();
     for (let i = 0; i < hooks.length; i++) {
-      const h = hooks[i]({ rest: x0, disp, dispPrev: prev, spacing: sEff, depth: sw.depth, broken: sw.broken });
+      const h = hooks[i]({ rest: x0, disp, dispPrev: prev, spacing: sEff, depth: sw.depth, broken: sw.broken, swell: swOnly });
       disp.addAssign(h.d);
       prev.addAssign(h.dPrev ?? h.d);
       if (h.dd) dd.addAssign(h.dd);

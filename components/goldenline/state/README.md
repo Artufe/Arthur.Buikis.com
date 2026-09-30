@@ -47,12 +47,13 @@ every window are ignored; invalid ones (NaN, radius ≤ 0) are dropped.
 | `SPLAT_WAKE` (1) | zero-mean pressure point + chevron trailing along −dir | source radius (m) | pressure depth (m), e.g. 0.02–0.05 | water velocity **in m/s** (magnitude matters; unit vector = 1 m/s). Zero = a splash (rings) | pushes dh/dt (moving) or displaces once (splash); blends velocity; max disturbance |
 | `SPLAT_WET` (2) | disc | radius (m) | target wetness 0–1 (1 = standing film) | – | `max` |
 
-The swash does not splat its wetting: it publishes `ocean.gpu.swash.wet(xz, edge)` (1 under its
-sheet right now), which the far and sand kernels evaluate per texel on the beach face, so the wet
-film is exactly where the water ran (lobed front, tapered ends, no discs). Use `SPLAT_WET` for
-anything else that wets sand (a dripping board, a spilled bucket).
 | `SPLAT_FOOTPRINT` (3) | heel, ball (bowl floors), lateral arch, five toes, displaced rim, kicked sand ahead | **half the foot length** (≈ 0.13) | depth (m) in dry sand, ≈ 0.02 | foot heading (normalised for you) | `max` depth; rim added |
 | `SPLAT_SMOOTH` (4) | disc | radius (m) | fraction of relief erased, 0–1 (1 = gone) | – | multiplies depression/mass by `1 − s·m`; sets *freshly smoothed* |
+
+The surf zone does not splat its wetting: it publishes `ocean.gpu.surfzone.wet(xz, edge)` (1 where
+the simulation has water on the sand right now), which the far and sand kernels evaluate per texel
+on the beach face, so the wet film is exactly where the water ran. Use `SPLAT_WET` for anything
+else that wets sand (a dripping board, a spilled bucket).
 
 Rules of thumb:
 - **Continuous emitters**: FOAM and SMOOTH strengths are *per splat*, so scale them by frame time
@@ -61,10 +62,8 @@ Rules of thumb:
 - A moving wake of `strength` 0.035 m at 5 m/s gives ~16 mm crests (dispersive trailing train,
   ~10 s decay). Paddle stroke: WAKE r≈0.2, s≈0.03, dir = hand velocity, plus a small FOAM. Board rail:
   every frame, WAKE at the rail with the board velocity and FOAM along the rail (`strength ≈ 3·dt`).
-  Breaking whitewater: FOAM discs of 2–5 m along the bore, `strength ≈ 4·dt`. Swash: SMOOTH
-  (≈ 6·dt) along the run-up front, FOAM ≈ 2·dt on the leading edge (its wetting is `wet()`, above).
-  The sand field only updates tiles with splats (plus a rolling 1/8), so these also keep the
-  tiles under the front current.
+  Breaking whitewater: FOAM discs of 2–5 m along the bore, `strength ≈ 4·dt`. (The surf zone carries
+  its own foam and wets the sand through `wet()`, above: it doesn't splat.)
 - Left/right feet are inferred from the previous footprint (it is on the medial side), so just splat
   each footfall where the foot lands, oriented along the foot. Prints are shallower with smaller rims
   on damp sand, squeeze a pale halo into wet sand for ~1.5 s, and their hollows fill with water.
@@ -88,7 +87,7 @@ Rules of thumb:
   the 102 m near window.
 - `sand(xz) → vec4(wetness 0–1, depression m, displaced mass m, freshly smoothed 0–1)`.
   Wetness: 0 dry · ~0.3 damp band where run-ups regularly reach (`state.swashFloor`, cuspate) ·
-  0.88 saturated in a narrow strip at the waterline (1 below it) · 1 under a swash sheet, then it
+  0.88 saturated in a narrow strip at the waterline (1 below it) · 1 under the surf zone's water, then it
   dries in three stages: the standing film (> 0.9, a mirror; SSR) over ~`state.filmTime`, the
   saturated sheen (0.5–0.9) over ~`state.satTime`, then damp sand at 1/`state.dryTime` per second.
   Film and sheen last ~2.5× longer at the waterline and ~0.5× at 0.9 m up the face (the water

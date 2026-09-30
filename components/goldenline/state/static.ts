@@ -3,7 +3,7 @@
 // initial "last big run-up" dampness and the masks of the residual current. Recomputing these
 // per texel per frame was most of the kernels' cost; now each is one filtered tap.
 // The floors are deliberately low: the glossy wetness above the waterline comes from the swash
-// itself (ocean/breaking/swash.ts wetAt), so it moves and dries with the water.
+// itself (ocean/surfzone wet()), so it moves and dries with the water.
 //
 //   A: (height m, saturated floor 0-0.88 (1 under water), swash-band shape 0-1, recent run-up 0-0.55)
 //   B: (surf-zone mask x toward-channel, channel rip mask, 0, 0)

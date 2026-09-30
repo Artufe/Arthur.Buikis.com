@@ -26,7 +26,7 @@ export interface KernelDeps {
   st: Static;
   noise: Noise;
   active: ActiveTiles;
-  /** Optional: (worldXZ, edge m) => 0-1, where a swash sheet covers the sand right now (wets it to a film). */
+  /** Optional: (worldXZ, edge m) => 0-1, where the surf zone has water on the sand right now (wets it to a film). */
   wetSrc?: (xz: TSLNode, edge?: number) => TSLNode;
 }
 
@@ -314,7 +314,7 @@ export function createKernels(k: KernelDeps) {
         foamSim(c, age, Pf.sub(tn.laceOrigin), fl, 0.24, true);
       });
       wet.assign(dryWet(wet, tn.dt, hS, st.wetFloor(sA), tn));
-      // Under the swash sheet (the beach face only: most of the window is sea or dune).
+      // Under the surf zone's water (the beach face only: most of the window is sea or dune).
       const wetSrc = k.wetSrc;
       if (wetSrc) If(hS.greaterThan(-1).and(hS.lessThan(2.5)), () => {
         wet.assign(max(wet, wetSrc(Pw, t)));
@@ -454,7 +454,7 @@ export function createKernels(k: KernelDeps) {
       const dried = dryWet(wet, dtS, hgt, floorS, tn);
       const soaked = mix(floorS, wet, exp(dtS.negate().div(1.5)));
       wet.assign(wet.lessThan(floorS).select(soaked, dried));
-      // Under the swash sheet. Not in the dt = 0 sync pass: the sheet has moved since the update
+      // Under the surf zone's water. Not in the dt = 0 sync pass: the water has moved since the update
       // pass, and re-wetting would leave the two ping-pong textures different.
       const wetSrc = k.wetSrc;
       if (wetSrc) If(dtS.greaterThan(0).and(hgt.greaterThan(-1)).and(hgt.lessThan(2.5)), () => {

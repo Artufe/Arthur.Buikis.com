@@ -30,7 +30,7 @@ export const SHOTS: Record<string, Shot> = {
   'beach-sun': { x: SPAWN.x - 6, y: 1.68, z: SPAWN.z - 8, lookAt: [PEAK.x, 2, PEAK.z + 40], t: 30, note: 'M2 gate: standing on the sand, looking out at the break with the sun low ahead' },
   'pier-silhouette': { x: PIER.rootX - 12, y: 1.5, z: PIER.z - 14, lookAt: [PIER.tipX, 3, PIER.z + 6], t: 30, note: 'Pier silhouetted against the sun from the sand' },
   'wetsand-reflection': { x: 6, y: 1.9, z: PIER.z - 10, absY: true, lookAt: [PIER.tipX * 0.6, 2, PIER.z + 4], t: 30, note: 'Low over wet sand: pier + sun reflected in the swash film' },
-  'shorebreak': { x: 10, y: 1.6, z: 0, lookAt: [-12, 0.4, -6], t: 42, note: 'Shore break dumping, swash sheeting up the sand' },
+  'shorebreak': { x: 10, y: 1.6, z: 0, lookAt: [-12, 0.4, -6], t: 42, note: 'Shore break dumping, the bore running up the sand (surf zone)' },
   'lineup': { x: -104, y: 0.55, z: -62, absY: true, lookAt: [PEAK.x, 1.2, PEAK.z + 10], t: 40, // [polish] 36 before ocean.swellDir 26
     note: 'Paddling eye line in the lineup, set approaching, backlit' },
   'pier-deck': { x: -70, y: PIER.deckHeight + 1.68, z: PIER.z, absY: true, lookAt: [-120, 0, -20], t: 30, note: 'Standing on the deck looking at the reef break' },
@@ -85,7 +85,7 @@ export const SHOTS: Record<string, Shot> = {
     note: 'Breaking: inside the barrel looking down the line at the opening (use --advance 0.5)' },
   'breaking-front': { x: -92, y: 2.2, z: -98, absY: true, lookAt: [-110, 1, -120], t: 39.5, note: 'Breaking: from the lagoon, the peak barrel and its whitewater explosion (use --advance 1.5)' },
   'breaking-shoulder': { x: -100, y: 2, z: -8, absY: true, lookAt: [-118, 1.2, -45], t: 41.5, note: 'Breaking: on the shoulder, the set wave peeling toward the camera, veil streaming off the lip (use --advance 1.5)' },
-  'breaking-swash': { x: 6, y: 1.25, z: 2, lookAt: [-4, -0.3, -2], t: 41, note: 'Breaking: the shore break and the swash sheet running up the beach face (use --advance 2.8, or --seq 12 --interval 0.5)' },
+  'breaking-swash': { x: 6, y: 1.25, z: 2, lookAt: [-4, -0.3, -2], t: 41, note: 'Surf zone: the shore break, the run-up and the backwash on the beach face (use --seq 12 --interval 0.5)' },
   'pierexit-gap': { x: PIER.tipX + 3.2, y: PIER.deckHeight + 1.66, z: PIER.z - 0.6, absY: true, lookAt: [PIER.tipX - 6, 1.6, PIER.z + 0.4], t: 30, note: 'Pier exit: on the deck at the open end: the gap in the tip rail, worn planks, the ladder grab rails' },
   'pierexit-ladder': { x: PIER.tipX - 4.2, y: 0.75, z: PIER.z - 1.6, absY: true, lookAt: [PIER.tipX - 0.4, 1.4, PIER.z], t: 30, note: 'Pier exit: from the water at the tip: the swim ladder down into the channel, barnacles and algae below the tide line' },
   'pierexit-run': { x: PIER.tipX + 22, y: PIER.deckHeight + 1.66, z: PIER.z - 0.4, absY: true, yaw: Math.PI / 2, pitch: -0.08, t: 30, params: { 'surf.demo': 2 }, note: 'Pier exit (demo 2): walk out the deck, jump through the open end, paddle round, climb the swim ladder back up (use --advance 6.4 --seq 48 --interval 0.35)' },

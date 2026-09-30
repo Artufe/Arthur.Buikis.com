@@ -185,8 +185,9 @@ class StateSim {
       st: this.st,
       noise: this.noise,
       active: this.active,
-      // The swash's coverage (ocean/breaking/swash.ts; the ocean initialises before the state).
-      wetSrc: (ctx.services.ocean.gpu as { swash?: { wet?(xz: TSLNode, edge?: number): TSLNode } }).swash?.wet,
+      // Where the surf-zone simulation has water on the sand (ocean/surfzone; the ocean
+      // initialises before the state).
+      wetSrc: (ctx.services.ocean.gpu as { surfzone?: { wet?(xz: TSLNode, edge?: number): TSLNode } }).surfzone?.wet,
     }).lists;
     for (let p = 0; p < 2; p++) {
       for (let m = 0; m < 8; m++) {

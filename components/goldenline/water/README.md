@@ -38,6 +38,9 @@ Owner: A7. Everything here is procedural (no third-party assets). Live in `/surf
   glints that redistribute that energy into sparks (`water.glint*`), with a separate spark roll-off.
 - **Foam**: `state.foam()` coverage/age drive a thresholded hole field (fresh bubbly sheet with pinholes →
   lace → specks), shaded as a volume of bubbles with a wet sheen and bubble-rim glints.
+  The foam tiles are domain-warped (two octaves, ~1.4 m at ~10 m): where coverage sits in the lace
+  range for a while (the surf zone) the web repeated on its tile and read as a lattice of crosses.
+  Inside the surf zone its own foam (carried by the simulated flow) adds to the state's.
 - **Micro-detail**: capillary cascade flow-advected by drift + wake velocity (two-phase flow map),
   wind slicks damp the short cascades, `state.wake()` height adds normals near the camera.
 - Sun shadows arrive through the lighting model (the pier's shadow darkens glitter, SSS and body);

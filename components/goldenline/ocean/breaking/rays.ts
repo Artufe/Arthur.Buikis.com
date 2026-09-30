@@ -32,16 +32,12 @@ export const RAYS = {
 const NC = FIELD.nx * FIELD.nz;
 
 export interface Rays {
-  /** Which fan: 'reef' follows the refracted wave direction from offshore; 'shore' is a uniform
-   * fan of short straight rays across the beach face (the reef focuses the reef fan away from the
-   * beach behind it, so the shore break needs its own). */
-  set: 'reef' | 'shore';
   nr: number;
   nm: number;
-  /** Label of ray r = label0 + r·dLabel (reef: start z; shore: along-shore z at the waterline). */
+  /** Label of ray r = label0 + r·dLabel (the ray's start z). */
   label0: number;
   dLabel: number;
-  /** Per ray: last valid sample, first nearshore sample (shore-break zone). */
+  /** Per ray: last valid sample, first nearshore sample (within 38 m of the shore). */
   mEnd: Int32Array;
   mNear: Int32Array;
   /** Per ray: reef-break plunge intensity 0-1 (how hollow waves throw here). */
@@ -58,14 +54,9 @@ export interface Rays {
   Qh: Float32Array;
   h: Float32Array;
   hr: Float32Array;
-  /** Label field on the swell grid (m, = ray start z), for the GPU hook and CPU lookups (reef only). */
+  /** Label field on the swell grid (m, = ray start z), for the GPU hook and CPU lookups. */
   label: Float32Array;
 }
-
-/** The shore fan: rays every 1.5 m along the beach from 26 m seaward of the mean water line. */
-export const SHORE_RAYS = { z0: -250, dz: 1.5, n: 300, back: 26, nm: 44 };
-/** d(shoreX)/dz. */
-export const shoreSlopeZ = (z: number) => (4 / 85) * Math.cos(z / 85) + (2 / 31) * Math.cos(z / 31 + 1.3);
 
 /** Bilinear fetch of channel `c` of layer `layer` of the swell field at world (x, z). */
 function fieldAt(f: SwellField, layer: number, c: number, x: number, z: number) {
@@ -84,17 +75,15 @@ function fieldAt(f: SwellField, layer: number, c: number, x: number, z: number) 
   return (D[a] * (1 - fu) + D[a + 4] * fu) * (1 - fv) + (D[a + r] * (1 - fu) + D[a + r + 4] * fu) * fv;
 }
 
-export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number) => number, set: 'reef' | 'shore' = 'reef'): Rays {
-  const shore = set === 'shore';
-  const NR = shore ? SHORE_RAYS.n : RAYS.n;
-  const NM = shore ? SHORE_RAYS.nm : RAYS.nm;
+export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number) => number): Rays {
+  const NR = RAYS.n;
+  const NM = RAYS.nm;
   const n = NR * NM;
   const R: Rays = {
-    set,
     nr: NR,
     nm: NM,
-    label0: shore ? SHORE_RAYS.z0 : RAYS.z0,
-    dLabel: shore ? SHORE_RAYS.dz : RAYS.dz,
+    label0: RAYS.z0,
+    dLabel: RAYS.dz,
     mEnd: new Int32Array(NR),
     mNear: new Int32Array(NR),
     plunge: new Float32Array(NR),
@@ -109,14 +98,11 @@ export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number
     Qh: new Float32Array(n),
     h: new Float32Array(n),
     hr: new Float32Array(n),
-    label: new Float32Array(shore ? 1 : NC),
+    label: new Float32Array(NC),
   };
   for (let r = 0; r < NR; r++) {
-    const zs = shore ? SHORE_RAYS.z0 + r * SHORE_RAYS.dz : 0;
-    const sl = shore ? shoreSlopeZ(zs) : 0;
-    const nl = Math.hypot(1, sl);
-    let x = shore ? shoreX(zs) - SHORE_RAYS.back / nl : RAYS.x0;
-    let z = shore ? zs + (SHORE_RAYS.back * sl) / nl : RAYS.z0 + r * RAYS.dz;
+    let x = RAYS.x0;
+    let z = RAYS.z0 + r * RAYS.dz;
     let qMax = 0;
     let sPrev = -1e30;
     let m = 0;
@@ -129,10 +115,8 @@ export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number
       const kl = Math.hypot(kx, kz) || 1e-6;
       kx /= kl;
       kz /= kl;
-      // The shore fan marches straight across the beach face (the local wave direction still
-      // orients the breaker; near the shore it is close to the shore normal anyway).
-      const mx = shore ? 1 / nl : kx;
-      const mz = shore ? -sl / nl : kz;
+      const mx = kx;
+      const mz = kz;
       R.px[o] = x;
       R.pz[o] = z;
       R.dx[o] = kx;
@@ -147,8 +131,8 @@ export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number
       R.tau[o] = fieldAt(field, 1, 0, x, z);
       R.h[o] = fieldAt(field, 1, 3, x, z);
       R.hr[o] = -terrainHeight(x, z);
-      if (near === NM - 1 && (shore || x - shoreX(z) > -38)) near = m;
-      // Stop at the beach (the swash takes over) or at the field edge.
+      if (near === NM - 1 && x - shoreX(z) > -38) near = m;
+      // Stop at the beach or at the field edge.
       if (R.hr[o] < 0.05 || x > FIELD.x0 + FIELD.nx * FIELD.texel - 4 || z < FIELD.z0 + 4 || z > FIELD.z0 + FIELD.nz * FIELD.texel - 4) {
         end = m;
         break;
@@ -187,9 +171,9 @@ export function bakeRays(field: SwellField, terrainHeight: (x: number, z: number
       R.h[o] = R.h[p];
       R.hr[o] = R.hr[p];
     }
-    R.plunge[r] = shore ? 0.75 : plungeOf(R, r);
+    R.plunge[r] = plungeOf(R, r);
   }
-  if (!shore) bakeLabels(field, R);
+  bakeLabels(field, R);
   return R;
 }
 

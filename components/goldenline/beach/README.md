@@ -32,7 +32,7 @@ Owner: A3. Everything is procedural; no third-party assets (nothing in `public/g
   sun's shadow term through `material.receivedShadowNode`, within 16 m of the camera
   (`beach.contactShadow`).
 - **Wetness:** state semantics (`state/README.md`): 0 dry · 0.5 damp · 0.88 saturated · > 0.95 film.
-  All gloss comes from the state: the swash wets the sand exactly where its sheet runs, and the
+  All gloss comes from the state: the surf zone wets the sand exactly where its water runs, and the
   state dries it (film, then sheen, faster high on the beach face), so the shine follows each
   run-up and retreats toward the water. The material only adds a matte damp band (0.3) up to the
   high-tide mark `beach.highTide` (1.45 m). With the state stub (`beach.fakeWet`) painted bands

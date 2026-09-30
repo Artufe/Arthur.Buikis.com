@@ -2,15 +2,13 @@
 // their life each bit of crest is. Zero allocations.
 //
 // Crest n of train 0 sits where S = phase + 2πn on every ray at once (the phase is global), so n
-// is a crest's identity across rays. Two ray fans feed two groups of slots:
+// is a crest's identity across rays. A crest is breaking once it has passed, or will pass, the
+// point where its own offshore amplitude first exceeds the breaking index (binary search on the
+// ray's cumulative K/h): φ = (S_crest − S_onset)/(ω·T_s), T_s = sqrt(H_b/g). The breakers fade
+// out as they reach the surf zone (ocean/surfzone), which carries every wave from there to the
+// beach and up it.
 //
-//   reef slots   (reef fan) the crest has passed, or will pass, the point where its own offshore
-//                amplitude first exceeds the breaking index (binary search on the ray's cumulative
-//                K/h): φ = (S_crest − S_onset)/(ω·T_s), T_s = sqrt(H_b/g)
-//   shore slots  (shore fan) the reformed wave breaks again on the beach face where 2·amp/h
-//                reaches γ_shore, then its bore runs to the waterline (the swash takes over)
-//
-// Crest n goes to slot n mod the group's size. The result goes into one RGBA32F data texture
+// Crest n goes to slot n mod the slot count. The result goes into one RGBA32F data texture
 // (DATA_W × DATA_H) that the ribbon mesh and the ocean's vertex hook read; the CPU keeps the same
 // numbers for sample()/wave() and the effects.
 //
@@ -23,10 +21,10 @@ import { GAMMA_BREAK, GAMMA_SURF, TRAIN_DEFS, ENV_DT, ENV_W, type SwellField, ty
 import { createTrainEval } from './train';
 import { PHI0, PHI_END, stageTimes } from './profile';
 import { RAYS, labelAt, type Rays } from './rays';
+import { X0 as SURF_X0 } from '../surfzone/grid';
 
 export const REEF_SLOTS = 6;
-export const SHORE_SLOTS = 3;
-export const SLOTS = REEF_SLOTS + SHORE_SLOTS;
+export const SLOTS = REEF_SLOTS;
 /** Rows per slot in the data texture. */
 export const ROWS = 4;
 export const DATA_W = RAYS.n;
@@ -41,7 +39,7 @@ export const G_TIME = 2 * SLOTS;
  * Texel layout, slot s, column = ray r of the slot's fan:
  *   row 4s+0: crest rest x, z · W (activity) · H (profile face height, m)
  *   row 4s+1: dir x, z (unit, train-0 wave direction) · φ · κ (plunge 0-1)
- *   row 4s+2: T_s (s) · smoothed depth (m) · phase speed (m/s) · event (1 reef, 2 shore)
+ *   row 4s+2: T_s (s) · smoothed depth (m) · phase speed (m/s) · event (1)
  *   row 4s+3: ∂φ/∂label · ∂H/∂label · smoothed depth 1.2 H ahead (m) · breaking age (s)
  */
 export interface Tracker {
@@ -50,13 +48,12 @@ export interface Tracker {
   slotN: Float64Array;
   slotR0: Int32Array;
   slotR1: Int32Array;
-  /** The fan each slot group reads. */
+  /** The ray fan every slot reads. */
   reef: Rays;
-  shore: Rays;
   raysOf(s: number): Rays;
   /**
    * Per-frame inputs, written by the caller before update() (a typed array, so nothing is
-   * boxed): [amplitude scale, dt, camera x, camera z, plunge ×, shore-break index, time ×].
+   * boxed): [amplitude scale, dt, camera x, camera z, plunge ×, (unused), time ×].
    */
   inp: Float64Array;
   /** Recompute derived per-ray tables after the fans were re-baked in place. */
@@ -69,13 +66,12 @@ export const IN_DT = 1;
 export const IN_CAMX = 2;
 export const IN_CAMZ = 3;
 export const IN_PLUNGE = 4;
-export const IN_GSHORE = 5;
 export const IN_TSCALE = 6;
 
 const G = 9.81;
 const TAU = Math.PI * 2;
 
-export function createTracker(field: SwellField, reef: Rays, shore: Rays): Tracker {
+export function createTracker(field: SwellField, reef: Rays): Tracker {
   const data = new Float32Array(DATA_W * DATA_H * 4);
   const slotN = new Float64Array(SLOTS);
   const slotR0 = new Int32Array(SLOTS);
@@ -89,7 +85,6 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
   const mS = new Float32Array(SLOTS * DATA_W);
   const cut = new Float32Array(DATA_W);
   const tmp = new Float32Array(DATA_W);
-  const ampS = new Float32Array(shore.nr);
   const e12S = new Float32Array(DATA_W);
   const cxS = new Float32Array(DATA_W);
   const czS = new Float32Array(DATA_W);
@@ -100,20 +95,8 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
   const omega = field.omega[0];
   const amp0 = TRAIN_DEFS[0].amp;
   const tImp1 = stageTimes(1).imp;
-  const tImpShore = stageTimes(0.75).imp;
-  // Shore fan: cumulative min of the raw depth along each ray (monotone, for the onset search).
-  const hrMin = new Float32Array(shore.hr.length);
-  const refresh = () => {
-    for (let r = 0; r < shore.nr; r++) {
-      const o = r * shore.nm;
-      let mn = 1e9;
-      for (let m = 0; m < shore.nm; m++) {
-        mn = Math.min(mn, shore.hr[o + m]);
-        hrMin[o + m] = mn;
-      }
-    }
-  };
-  refresh();
+  // Nothing derived from the fan is cached today; kept for callers that re-bake it in place.
+  const refresh = () => {};
   // The current frame's swell runtime and envelope (set at the top of update).
   let rtCur: SwellRuntime | null = null;
   let envCur: Float32Array | null = null;
@@ -170,27 +153,6 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
     }
     const d = Q[o + hi] - Q[o + lo];
     F[1] = lo + (d > 1e-9 ? (q - Q[o + lo]) / d : 1);
-  };
-  /** F[1] = first fractional shore-fan index with raw depth ≤ F[0], or -1. */
-  const findH = (o: number, mEnd: number) => {
-    const h = F[0];
-    if (hrMin[o + mEnd] > h) {
-      F[1] = -1;
-      return;
-    }
-    if (hrMin[o] <= h) {
-      F[1] = 0;
-      return;
-    }
-    let lo = 0;
-    let hi = mEnd;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (hrMin[o + mid] > h) lo = mid;
-      else hi = mid;
-    }
-    const d = hrMin[o + lo] - hrMin[o + hi];
-    F[1] = lo + (d > 1e-9 ? (hrMin[o + lo] - h) / d : 1);
   };
   /** Train `tr` at (F[2], F[3]): amplitude into TE[2], phase θ into TE[3]. */
   const trainXZ = (tr: number) => {
@@ -293,71 +255,18 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
           const decay = phi < tImp1 ? 1 : Math.exp(-(phi - tImp1) / 7);
           H = Hbore + (Hb - Hbore) * decay;
         }
+        // Into the surf zone the simulation takes the wave over: fade the breaker out before it.
+        const xc = reef.px[q] + (reef.px[q1] - reef.px[q]) * f;
+        let fz = (xc - (SURF_X0 - 14)) / 12;
+        fz = fz < 0 ? 0 : fz > 1 ? 1 : fz;
+        if (fz >= 1) continue;
         const s = ((n % REEF_SLOTS) + REEF_SLOTS) % REEF_SLOTS;
         if (!claim(s, n, r)) continue;
         F[4] = phi;
         F[5] = H;
         F[6] = mc;
-        F[7] = 1;
+        F[7] = 1 - fz * fz * (3 - 2 * fz);
         record(s, r, 1);
-      }
-    }
-  };
-
-  /** Shore fan: the reformed waves dump on the beach face. */
-  const shorePass = () => {
-    const phase0 = F[11];
-    // The wave's local (saturated) height where it enters the fan decides where it dumps
-    // (evaluated on every other ray; it varies slowly along the shore).
-    for (let r = 0; r < shore.nr; r++) {
-      if ((r & 1) !== 0 && r !== shore.nr - 1) continue;
-      const o = r * shore.nm;
-      F[2] = shore.px[o];
-      F[3] = shore.pz[o];
-      trainXZ(0);
-      ampS[r] = TE[2];
-      if (r >= 2 && (r & 1) === 0) ampS[r - 1] = 0.5 * (ampS[r - 2] + ampS[r]);
-    }
-    const gShore = inp[IN_GSHORE];
-    for (let r = 0; r < shore.nr; r++) {
-      const o = r * shore.nm;
-      const mEnd = shore.mEnd[r];
-      if (mEnd < 4) continue;
-      let Hs = 2 * ampS[r];
-      if (Hs > 1.6) Hs = 1.6;
-      if (Hs < 0.12) continue;
-      F[0] = Hs / gShore;
-      findH(o, mEnd);
-      const mSb = F[1];
-      if (mSb < 0) continue;
-      const Ts = Math.sqrt(Hs / G) * inp[IN_TSCALE];
-      const j0 = mSb | 0;
-      const jf = mSb - j0;
-      const p = o + j0;
-      const sOn = shore.S[p] + (jf > 0 ? (shore.S[p + 1] - shore.S[p]) * jf : 0);
-      // Crests on the ray, plus the one just seaward (still steepening).
-      const nLo = Math.ceil((shore.S[o] - phase0) / TAU) - 1;
-      const nHi = Math.floor((shore.S[o + mEnd] - phase0) / TAU) + 1;
-      for (let n = nLo; n <= nHi; n++) {
-        const sc = phase0 + TAU * n;
-        const phi = (sc - sOn) / (omega * Ts);
-        if (phi < PHI0 || phi >= PHI_END) continue;
-        // Past the waterline the swash takes over: the bore fades over its last metres.
-        if (sc < shore.S[o]) continue;
-        F[0] = sc;
-        findS(shore, o, mEnd);
-        const mc = F[1];
-        if (mc >= mEnd - 0.05) continue;
-        const H = phi < tImpShore ? Hs : Math.max(0.15, Hs * Math.exp(-(phi - tImpShore) / 4));
-        const s = REEF_SLOTS + (((n % SHORE_SLOTS) + SHORE_SLOTS) % SHORE_SLOTS);
-        if (!claim(s, n, r)) continue;
-        let x = (mc - (mEnd - 4)) / 3.7;
-        x = x < 0 ? 0 : x > 1 ? 1 : x;
-        F[4] = phi;
-        F[5] = H;
-        F[6] = mc;
-        F[7] = 1 - x * x * (3 - 2 * x);
-        record(s, r, 2);
       }
     }
   };
@@ -365,7 +274,7 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
   /** Fade at stage jumps, smooth φ along the crest, and write slot s into the texture. */
   const writeSlot = (s: number) => {
     const phase0 = F[11];
-    const R = s < REEF_SLOTS ? reef : shore;
+    const R = reef;
     const active = slotN[s] === slotN[s];
     const r0 = active ? Math.max(0, slotR0[s] - 2) : 0;
     const r1 = active ? Math.min(R.nr - 1, slotR1[s] + 2) : -1;
@@ -445,7 +354,7 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
       if (w <= 0) {
         hS[k] = 0.3;
         phiS[k] = PHI0;
-        evS[k] = s < REEF_SLOTS ? 1 : 2;
+        evS[k] = 1;
       }
       let rr = r;
       let mc = mS[k];
@@ -558,8 +467,8 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
     data[g + 3] = active ? 1 : 0;
     // The camera's column in this slot's fan (the ribbon samples densest there).
     const gc = (GLOBAL_ROW * DATA_W + G_CAM + s) * 4;
-    data[gc] = ((s < REEF_SLOTS ? F[10] : inp[IN_CAMZ]) - R.label0) / R.dLabel;
-    data[gc + 1] = s < REEF_SLOTS ? 0 : 1;
+    data[gc] = (F[10] - R.label0) / R.dLabel;
+    data[gc + 1] = 0;
     data[gc + 2] = R.label0;
     data[gc + 3] = R.dLabel;
   };
@@ -570,9 +479,8 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
     slotR0,
     slotR1,
     reef,
-    shore,
     inp,
-    raysOf: (s) => (s < REEF_SLOTS ? reef : shore),
+    raysOf: () => reef,
     refresh,
     update(rt, env) {
       rtCur = rt;
@@ -583,7 +491,6 @@ export function createTracker(field: SwellField, reef: Rays, shore: Rays): Track
       for (let s = 0; s < SLOTS; s++) slotN[s] = NaN;
       F[11] = phase0;
       reefPass();
-      shorePass();
       F[8] = inp[IN_CAMX];
       F[9] = inp[IN_CAMZ];
       labelAt(reef, F, 8);

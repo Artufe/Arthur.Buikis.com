@@ -129,6 +129,10 @@ s.addHook(({ rest, disp, dispPrev, spacing, depth, broken }) => ({
 }));
 ```
 
+A hook also gets the swell's own part (`swell: { d, dPrev, dd, dxz }`), so it can replace the swell
+instead of adding to it: the surf zone (`ocean/surfzone`, `ocean.gpu.surfzone`) does that over the
+lagoon and the beach, where one shallow-water simulation is the surface.
+
 Hooks run when the shader is built; register in `init()` (after the first compile, set
 `mesh.material.needsUpdate = true`). To make `sample()`/`wave()` include the breaker, wrap the
 service: keep a reference to A2's, install yours in `ctx.services.ocean`, add your part on top

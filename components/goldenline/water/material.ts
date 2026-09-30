@@ -513,7 +513,12 @@ function prepare(d: WaterDeps): Shading {
   const age = mix(ageS, ramp.age, testOn).toVar();
   // [breaking] optional finer foam structure (the swash's lace is centimetres, not metres).
   const fsc = sf.foamScale ?? float(1);
-  const drift = rest.sub(vec2(GLOBAL_DRIFT.x, GLOBAL_DRIFT.z).mul(u.time)).mul(fsc).toVar();
+  const drift0 = rest.sub(vec2(GLOBAL_DRIFT.x, GLOBAL_DRIFT.z).mul(u.time)).mul(fsc).toVar();
+  // [surfzone] Domain-warp the foam's tiles (1.15 m and 0.24 m repeats): wherever coverage sat in
+  // the lace range for a while (the surf zone), the ridged web repeated on its tile and read as a
+  // lattice of crosses with straight seams. Two octaves, ~1.4 m of displacement at ~10 m scale.
+  const warp = texture(d.noiseTex, drift0.mul(1 / 9.7)).xy.sub(0.5).mul(2.2).add(texture(d.noiseTex, drift0.mul(1 / 3.1).add(0.37)).zw.sub(0.5).mul(0.7));
+  const drift = drift0.add(warp).toVar();
   const ddx = dFdx(rest).mul(fsc).toVar();
   const ddy = dFdy(rest).mul(fsc).toVar();
   const foamA = float(0).toVar();

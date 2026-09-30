@@ -9,10 +9,9 @@ import type { SurfaceHook } from '../surface';
 import { swellTrainGPU, type SwellGPU } from '../swell-gpu';
 import { U_BACK, U_FRONT } from './profile';
 import { labelAtGPU, labelToCol, slotHeader, slotRow, type BreakGPU } from './gpu';
-import { REEF_SLOTS, SHORE_SLOTS } from './tracker';
-import { SHORE_RAYS } from './rays';
+import { REEF_SLOTS } from './tracker';
 
-const { abs, cos, float, floor, int, max, mix, round, select, sin, smoothstep, vec2, vec3 } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
+const { abs, float, floor, int, max, mix, round, select, smoothstep, vec2, vec3 } = TSL as unknown as Record<string, (...args: any[]) => TSLNode>;
 
 /** How far (× H) a hidden vertex drops: below any part of the breaker's lower envelope. */
 export const HIDE_DEPTH = 1.4;
@@ -29,12 +28,8 @@ export function createHideHook(swell: SwellGPU, g: BreakGPU, uEnabled: TSLNode):
     const t0 = swellTrainGPU(swell, 0, rest);
     const theta = t0.theta.toVar();
     const n = round(theta.div(Math.PI * 2)).toVar();
-    // Reef slots index the reef fan by the baked ray label; shore slots index the shore fan by
-    // the along-shore coordinate (its rays are straight, normal to the mean shoreline).
+    // Slots index the ray fan by the baked ray label.
     const colReef = labelToCol(labelAtGPU(g, rest));
-    const sx = sin(rest.y.div(85)).mul(4).add(sin(rest.y.div(31).add(1.3)).mul(2));
-    const sl = cos(rest.y.div(85)).mul(4 / 85).add(cos(rest.y.div(31).add(1.3)).mul(2 / 31));
-    const colShore = rest.y.add(rest.x.sub(sx).mul(sl)).sub(SHORE_RAYS.z0).div(SHORE_RAYS.dz);
     const check = (slotF: TSLNode, col: TSLNode) => {
       const slot = int(slotF).toVar();
       const hdr = slotHeader(g, slot).toVar();
@@ -57,7 +52,6 @@ export function createHideHook(swell: SwellGPU, g: BreakGPU, uEnabled: TSLNode):
       });
     };
     check(n.sub(floor(n.div(REEF_SLOTS)).mul(REEF_SLOTS)), colReef);
-    check(n.sub(floor(n.div(SHORE_SLOTS)).mul(SHORE_SLOTS)).add(REEF_SLOTS), colShore);
     return { d: vec3(0, out.negate(), 0) };
   };
   void select;

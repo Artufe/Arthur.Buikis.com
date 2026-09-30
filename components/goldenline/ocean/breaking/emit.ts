@@ -17,7 +17,7 @@ import { SPLAT_FOAM, type SurfaceStateService } from '../../core/contracts';
 import { SPRAY_DROPLET, SPRAY_FOAM, SPRAY_MIST, SPRAY_VEIL, type SprayService } from '../../vfx/spray';
 import { J_FACE0, J_LIP, J_LIP0, NP, lookupProfile, stageTimes, type ProfileTables } from './profile';
 import { RAYS, RAY_NR } from './rays';
-import { DATA_W, GLOBAL_ROW, REEF_SLOTS, ROWS, SLOTS, type Tracker } from './tracker';
+import { DATA_W, GLOBAL_ROW, ROWS, SLOTS, type Tracker } from './tracker';
 
 const G = 9.81;
 /** Columns per emitter (every 2nd ray: ~3 m of crest). */
@@ -251,12 +251,11 @@ export function createWhitewaterFx(tracker: Tracker, prof: ProfileTables, spray:
             acc[k + 1] = acc[k + 2] = acc[k + 3] = 0;
           }
 
-          // Foam into the surface state: under the roller front and a thinner sheet behind it
-          // (shore-break bores leave less: their foam should stay lace, not a sheet).
+          // Foam into the surface state: under the roller front and a thinner sheet behind it.
           const fk = s * RAY_NR + r;
           t = (phi - (launch + 0.6)) / (imp - launch - 0.2);
           t = t < 0 ? 0 : t > 1 ? 1 : t;
-          const foamRate = W * pFoam * (s >= REEF_SLOTS ? 0.35 : 1) * t * t * (3 - 2 * t) * (0.08 + 0.92 * Math.exp(-(phi > col ? phi - col : 0) / 5));
+          const foamRate = W * pFoam * t * t * (3 - 2 * t) * (0.08 + 0.92 * Math.exp(-(phi > col ? phi - col : 0) / 5));
           facc[fk] += foamRate * dt;
           if (facc[fk] > 1 / 15) {
             const o = state.reserve ? state.reserve(2) : -1;

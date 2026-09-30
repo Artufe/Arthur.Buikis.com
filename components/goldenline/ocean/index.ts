@@ -26,6 +26,11 @@ import {
 } from './swell';
 import { createSwellGPU, type SwellGPU } from './swell-gpu';
 import { createBreaking, type Breaking } from './breaking'; // [breaking]
+import { createSurfZone, type SurfZone } from './surfzone'; // [surfzone]
+import { bspline } from '../beach/height';
+import { TERRAIN_BOUNDS, TERRAIN_TEXEL } from '../world/layout';
+import * as TSL from 'three/tsl';
+import type { OceanSample, TSLNode } from '../core/contracts';
 
 interface OceanState {
   field: SwellField;
@@ -39,6 +44,7 @@ interface OceanState {
   cpu: OceanCpu;
   probe: OceanProbe;
   breaking: Breaking; // [breaking]
+  surf: SurfZone; // [surfzone]
   unlisten: () => void;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -118,11 +124,45 @@ export function createOceanSystem(): GLSystem {
       // [breaking] breakers on the swell: registers its surface hook and wraps the service.
       await yieldTask(); // [polish]
       const breaking = createBreaking(ctx, { field, env, rt, swell, surface, heightAt });
+      // [surfzone] The lagoon, beach face and run-up as one shallow-water simulation; inside it
+      // the surface is the simulation, not the swell (surfzone/README.md).
+      const [bx0, bz0, bx1, bz1] = TERRAIN_BOUNDS;
+      const tw = Math.round((bx1 - bx0) / TERRAIN_TEXEL);
+      const th = Math.round((bz1 - bz0) / TERRAIN_TEXEL);
+      const vec2 = (TSL as unknown as { vec2: (...a: unknown[]) => TSLNode }).vec2;
+      const surf = createSurfZone(ctx, {
+        swell,
+        omega: field.omega,
+        bedAt: (xz: TSLNode) => bspline(ctx.services.terrain.heightTexture, xz.sub(vec2(bx0, bz0)).div(vec2(bx1 - bx0, bz1 - bz0)), tw, th).x,
+        setSwellTime: (t: number) => {
+          setSwellTime(cpu.field, rt, t);
+          swell.sync(rt);
+        },
+      });
+      surface.addHook(surf.hook);
+      (gpu as Record<string, unknown>).surfzone = surf;
+      {
+        const svc = ctx.services.ocean;
+        const inner = svc.sample;
+        const g2 = svc.gpu as { sampleCoarse?: (x: number, z: number, out: OceanSample) => OceanSample };
+        const innerCoarse = g2.sampleCoarse;
+        svc.sample = (x: number, z: number, out: OceanSample) => {
+          inner(x, z, out);
+          surf.sampleInto(x, z, out);
+          return out;
+        };
+        if (innerCoarse)
+          g2.sampleCoarse = (x: number, z: number, out: OceanSample) => {
+            innerCoarse(x, z, out);
+            surf.sampleInto(x, z, out);
+            return out;
+          };
+      }
 
       // Heavy rebuilds (spectrum, envelope, field) run off a debounced param listener, never
       // inside update().
       const heavy = new Set(['ocean.seaWind', 'ocean.windSea', 'ocean.chop', 'ocean.capillary', 'ocean.localWind', 'ocean.setInterval', 'ocean.lull', 'ocean.period', 'ocean.swellDir']);
-      const state: OceanState = { field, env, spec, fft, swell, surface, water, mesh, cpu, probe, breaking, unlisten: () => {}, timer: null };
+      const state: OceanState = { field, env, spec, fft, swell, surface, water, mesh, cpu, probe, breaking, surf, unlisten: () => {}, timer: null };
       state.unlisten = ctx.params.onChange((param) => {
         if (!heavy.has(param.key)) return;
         if (state.timer) clearTimeout(state.timer);
@@ -150,6 +190,7 @@ export function createOceanSystem(): GLSystem {
         st.fft.dispatch(ctx.renderer);
       }
       st.breaking.warmup(ctx); // [breaking]
+      st.surf.spinUp(ctx, ctx.time.t, 24); // [surfzone] waves already on the beach at the first frame
     },
 
     update(ctx: GLContext) {
@@ -174,6 +215,7 @@ export function createOceanSystem(): GLSystem {
       water.uDbgGain.value = P.debugGain.value;
       if (on && cpu.fft) fft.dispatch(ctx.renderer);
       st.breaking.update(ctx); // [breaking]
+      if (on) st.surf.update(ctx); // [surfzone]
     },
 
     dispose(ctx: GLContext) {
@@ -183,6 +225,7 @@ export function createOceanSystem(): GLSystem {
       if (s.timer) clearTimeout(s.timer);
       s.unlisten();
       s.breaking.dispose(ctx); // [breaking]
+      s.surf.dispose(); // [surfzone]
       ctx.scene.remove(s.mesh);
       s.mesh.geometry.dispose();
       s.water.material.dispose();

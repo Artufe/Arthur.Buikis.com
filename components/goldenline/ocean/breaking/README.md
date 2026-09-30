@@ -1,4 +1,7 @@
-# ocean/breaking/ — breaking waves, whitewater, shore break, swash (A8)
+# ocean/breaking/ — breaking waves, whitewater and spray on the reef and the sand shelves (A8)
+
+The lagoon, the shore break and the swash are `ocean/surfzone/` (one shallow-water simulation);
+breakers here fade out over the 14 m before it and it carries every wave from there to the beach.
 
 Owner: A8. Driven from the ocean system (`ocean/index.ts` calls `createBreaking` in `init`, then
 `warmup` / `update` / `rebake` / `dispose`; every line there is marked `[breaking]`). Everything is
@@ -8,15 +11,14 @@ procedural; no assets. The shared spray system lives in `vfx/spray/` (also A8).
 
 | file | what |
 |---|---|
-| `rays.ts` | Two ray fans baked at boot from A2's swell field: the **reef fan** (336 rays marched shoreward along the refracted train-0 direction, 1 m steps: phase S, shoaling K, group time τ, depth, cumulative K/h for the breaking onset, plunge per ray from the seabed slope at the break) and a uniform **shore fan** (300 straight rays across the beach face: the reef focuses the reef fan away from the beach behind it). Plus a ray-label field on the swell grid (GPU hook lookups). |
+| `rays.ts` | The ray fan baked at boot from A2's swell field: 336 rays marched shoreward along the refracted train-0 direction, 1 m steps: phase S, shoaling K, group time τ, depth, cumulative K/h for the breaking onset, plunge per ray from the seabed slope at the break. Plus a ray-label field on the swell grid (GPU hook lookups). |
 | `profile.ts` | The breaker cross-section through its whole life as a keyframe table: 128 profile points × 96 stages (φ = time since onset in √(H/g), −4 … 19.75) × 3 plunge levels (spill … barrel). Steepening face → nose pitches → ballistic jet (launch velocity, gravity) with a rounded tip → the lip lands → tube holds → collapses into a rolling bore that decays. Point j keeps its identity through the life, so interpolating keyframes is a smooth morph. Tables: (u, y, SSS path, chord), (foam, rest σ, blend W, tube), (texture σ). |
-| `tracker.ts` | Per frame (0.04 ms): crest n of train 0 is `S = phase + 2πn` on every ray at once; its breaking onset for *its own* offshore amplitude (set envelope at its group time) is a binary search on the cumulative K/h; φ follows from the phase difference. 6 reef slots + 3 shore slots (crest n → slot n mod k). Fades at stage jumps (reef ends), smooths φ along the crest, folds trains 1–2 into the height, writes one RGBA32F data texture (336 × 37). |
+| `tracker.ts` | Per frame (0.04 ms): crest n of train 0 is `S = phase + 2πn` on every ray at once; its breaking onset for *its own* offshore amplitude (set envelope at its group time) is a binary search on the cumulative K/h; φ follows from the phase difference. 6 slots (crest n → slot n mod 6). Fades at stage jumps (reef ends) and into the surf zone, smooths φ along the crest, folds trains 1–2 into the height, writes one RGBA32F data texture (336 × 25). |
 | `gpu.ts` | The data texture, label field and profile 3D textures + TSL accessors. |
 | `ribbon.ts` | The breaker geometry: 9 × (288 along the crest × 128 profile points), one draw, vertex-only (a log warp puts the densest columns at the camera). Profile in the crest frame, blended into the full swell at the edges (+ the FFT sea everywhere), real normals, varyings for A7's water graph (SSS path, chord, foam, tube). The same grid drawn a second time as the **whitewater shell** where the profile is foam: pushed out, cauliflower billows (billow noise), stock PBR + a forward-scattering lobe (`whitewater.ts`). |
 | `hook.ts` | The ocean surface's vertex hook: under a breaker the clipmap surface drops out of the way (face / trough / landing zone deep, the back slope 12 cm), so the ribbon is the only surface there. |
 | `whitewater.ts` | Shell material: bubble-cluster bump (baked tileable billow texture, two scales, rolling), crease darkening, translucent glow, ragged alpha-tested edges. |
 | `emit.ts` | CPU whitewater effects per crest column: offshore spray **veils** off steep crests (streaming seaward on the breeze), **drips** off the thrown lip, the **impact** explosion (clumps, droplets, mist), **smoke** off the roller, and **foam** splats into the state (`SPLAT_FOAM`, bulk path). |
-| `swash.ts` | 1-D swash along the shore (0.5 m): a shore-break bore reaching the waterline launches an uprush (u₀ = 2.2·√(g·h_bore)), ballistic up the local slope, stall, slower backwash, thinning to a film; neighbours launch with slightly different speeds and times (lobed, fingered front). A camera-following sheet mesh draped on the sand (C2 B-spline of the terrain bake), shaded with A7's water graph (transparent over the sand, refraction, bubble line + lace foam at 3.4× scale). The state it uploads is smoothed along the shore (binomial, σ ≈ 0.7 m) so the reach varies in rounded lobes. Writes `SPLAT_SMOOTH` and `SPLAT_FOAM` along the front; publishes `ocean.gpu.swash.wet(xz, edge)` (1 under the sheet), from which the state kernels wet the sand. |
 | `service.ts` | Wraps A2's `OceanService`: `sample()` / `gpu.sampleCoarse()` include the breaker, `wave()` returns live breaker data, `gpu.breaking.breaker()` the full picture. |
 | `train.ts` | Zero-alloc train evaluation (= swell.ts `trainAt`, verified to 1e-16) with doubles in a typed array. |
 
@@ -76,16 +78,16 @@ a shadow-casting proxy — ask A8/B2 if you need a hook).
 
 ## For A4 (pier)
 
-- Whitewater at the pilings: the shore-break bores reach the pilings at the pier root (x ≈ −4 … 4);
-  `sample().breaking` is the whitewater coverage there, so the existing spray trigger fires. The reef bores
-  don't reach the pier line (the channel is deep).
+- Whitewater at the pilings: the surf zone's bores reach the pilings at the pier root (x ≈ −4 … 4);
+  near the camera `sample().breaking` is its foam coverage there (ocean/surfzone), so the existing spray
+  trigger fires. The reef bores don't reach the pier line (the channel is deep).
 - `ocean.gpu.spray.burst()` has `pier/spray.ts`'s signature: the pier can drop its own pool.
 
 ## Params (F1 → breaking)
 
-`enabled`, `hide` (debug), `plunge`, `timeScale`, `gammaShore`, `edgeDrop`, `warp`, `lipGlow`, `lipDiffuse`,
+`enabled`, `hide` (debug), `plunge`, `timeScale`, `edgeDrop`, `warp`, `lipGlow`, `lipDiffuse`,
 `streaks`, `faceTexture`, `whitewater`, `wwAlbedo`, `wwTranslucency`, `wwRagged`, `spray`, `veil`, `smoke`,
-`foam`, `swash`, `runup`, `swashFoam`, `debug` (1 stage colours, 2 normals, 3 blend/tube/SSS path, 4 foam).
+`foam`, `debug` (1 stage colours, 2 normals, 3 blend/tube/SSS path, 4 foam).
 The swell itself: `ocean.swellHeight`, `ocean.swellDir`, `ocean.setInterval`, `ocean.lull`.
 
 ## A7 water-material inputs added (all optional, `[breaking]` in water/)
@@ -98,5 +100,5 @@ scattering in thin lips, not gated by the backlit-face term).
 ## Shots
 
 `breaking-peel` (M3 gate, `--seq 30 --interval 2` from t = 30), `breaking-tube` (`--advance 0.5`),
-`breaking-front`, `breaking-shoulder` (`--advance 1.5`), `breaking-swash` (`--advance 2.8` or `--seq 12
+`breaking-front`, `breaking-shoulder` (`--advance 1.5`), `breaking-swash` (the surf zone: `--seq 12
 --interval 0.5`). The first set reaches the peak at t ≈ 38–56 s; lulls around t ≈ 60–100 s.

@@ -16,8 +16,8 @@ import type { OceanSample, OceanService, WaveInfo } from '../../core/contracts';
 import { type SwellField, type SwellRuntime } from '../swell';
 import { createTrainEval } from './train';
 import { J_FACE0, J_FRONT0, J_LIP, J_LIP0, NJ, NP, PHI0, lookupProfile, stageTimes, type ProfileTables } from './profile';
-import { labelAt, SHORE_RAYS } from './rays';
-import { DATA_W, GLOBAL_ROW, REEF_SLOTS, ROWS, SHORE_SLOTS, type Tracker } from './tracker';
+import { labelAt } from './rays';
+import { DATA_W, GLOBAL_ROW, REEF_SLOTS, ROWS, type Tracker } from './tracker';
 
 /** Everything B1 needs about the breaker at a point. All world metres / seconds. */
 export interface BreakerPoint {
@@ -178,24 +178,21 @@ export function wrapOceanService(
     let best = -1;
     let bestCol = 0;
     let bestW = 0;
-    // Reef fan (baked label field) and shore fan (straight rays normal to the mean shoreline).
+    // The ray fan's column here (baked label field).
     labelAt(tracker.reef, F, 0);
     const colReef = (F[2] - tracker.reef.label0) / tracker.reef.dLabel;
-    const sx = 4 * Math.sin(z / 85) + 2 * Math.sin(z / 31 + 1.3);
-    const sl = (4 / 85) * Math.cos(z / 85) + (2 / 31) * Math.cos(z / 31 + 1.3);
-    const colShore = (z + (x - sx) * sl - SHORE_RAYS.z0) / SHORE_RAYS.dz;
-    for (let set = 0; set < 2; set++) {
-      const s = set === 0 ? ((n % REEF_SLOTS) + REEF_SLOTS) % REEF_SLOTS : REEF_SLOTS + (((n % SHORE_SLOTS) + SHORE_SLOTS) % SHORE_SLOTS);
+    {
+      const s = ((n % REEF_SLOTS) + REEF_SLOTS) % REEF_SLOTS;
       const g = (GLOBAL_ROW * DATA_W + s) * 4;
-      if (d[g + 3] < 0.5 || Math.abs(d[g + 2] - n) > 0.5) continue;
-      const col = set === 0 ? colReef : colShore;
-      if (col < d[g] || col > d[g + 1]) continue;
-      F[3] = col;
-      row(s, 0, 2);
-      if (F[5] > bestW) {
-        bestW = F[5];
-        best = s;
-        bestCol = col;
+      const col = colReef;
+      if (d[g + 3] >= 0.5 && Math.abs(d[g + 2] - n) <= 0.5 && col >= d[g] && col <= d[g + 1]) {
+        F[3] = col;
+        row(s, 0, 2);
+        if (F[5] > bestW) {
+          bestW = F[5];
+          best = s;
+          bestCol = col;
+        }
       }
     }
     if (best < 0 || bestW < 0.02) return false;

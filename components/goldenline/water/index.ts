@@ -338,7 +338,10 @@ export function createWaterSystem(): GLSystem {
       const th = createThicknessHook(gpu.swellGPU, ctx.services.atmosphere.sunDirNode, gpu.waterSSS!);
       surface.addHook(th.hook);
       const ablate = Math.round((ctx.params.get('water.ablate')?.value as number) ?? 0);
+      // [surfzone] the lagoon and swash simulation's own foam (carried by its flow).
+      const surf = (gpu as { surfzone?: { foamAt(xz: unknown): unknown } }).surfzone;
       mat = makeMaterial(ctx, ablate, {
+        foam: surf ? (surf.foamAt(surface.vRest) as never) : undefined,
         rest: surface.vRest,
         depth: surface.vSwellX.z,
         broken: surface.vSwellX.y,

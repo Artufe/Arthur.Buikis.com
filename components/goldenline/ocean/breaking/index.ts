@@ -1,5 +1,6 @@
-// GOLDENLINE breaking waves (A8): real breaker geometry on the groundswell, whitewater, spray,
-// the shore break and the swash. Driven from the ocean system (ocean/index.ts calls init /
+// GOLDENLINE breaking waves (A8): real breaker geometry on the groundswell, whitewater and spray
+// on the reef and the sand shelves. The surf zone (lagoon, shore break, swash) is ocean/surfzone.
+// Driven from the ocean system (ocean/index.ts calls init /
 // warmup / update / dispose), because it lives on the ocean's swell and surface.
 // See ocean/breaking/README.md.
 
@@ -17,10 +18,9 @@ import { createHideHook } from './hook';
 import { bakeProfiles } from './profile';
 import { bakeRays, type Rays } from './rays';
 import { createRibbon, type Ribbon } from './ribbon';
-import { createTracker, DATA_W, GLOBAL_ROW, SLOTS, IN_CAMX, IN_CAMZ, IN_DT, IN_GSHORE, IN_PLUNGE, IN_SCALE, IN_TSCALE, type Tracker } from './tracker';
+import { createTracker, DATA_W, GLOBAL_ROW, SLOTS, IN_CAMX, IN_CAMZ, IN_DT, IN_PLUNGE, IN_SCALE, IN_TSCALE, type Tracker } from './tracker';
 import { bakeBubbleTexture, createWhitewaterMaterial } from './whitewater';
 import { createWhitewaterFx } from './emit';
-import { createSwash, type SwashParams } from './swash';
 import { wrapOceanService, type BreakingApi } from './service';
 import { createSpray, SPRAY_MIST, type SprayService } from '../../vfx/spray';
 import { WIND } from '../../world/layout';
@@ -54,7 +54,6 @@ interface Params {
   hide: ToggleParam;
   plunge: NumberParam;
   timeScale: NumberParam;
-  gammaShore: NumberParam;
   edgeDrop: NumberParam;
   warp: NumberParam;
   debug: NumberParam;
@@ -71,9 +70,6 @@ interface Params {
   fxVeil: NumberParam;
   fxSmoke: NumberParam;
   fxFoam: NumberParam;
-  swash: ToggleParam;
-  runup: NumberParam;
-  swashFoam: NumberParam;
 }
 
 function registerParams(ctx: GLContext): Params {
@@ -84,7 +80,6 @@ function registerParams(ctx: GLContext): Params {
     hide: p.toggle('breaking.hide', { label: 'hide the swell under breakers (debug)', group: g, value: true }),
     plunge: p.number('breaking.plunge', { label: 'plunge (hollowness) ×', group: g, min: 0, max: 2, value: 1 }),
     timeScale: p.number('breaking.timeScale', { label: 'breaking time ×', group: g, min: 0.4, max: 2.5, value: 1 }),
-    gammaShore: p.number('breaking.gammaShore', { label: 'shore-break index', group: g, min: 0.5, max: 1.4, value: 0.9 }),
     edgeDrop: p.number('breaking.edgeDrop', { label: 'ribbon edge drop (m)', group: g, min: 0, max: 0.3, value: 0.06 }),
     warp: p.number('breaking.warp', { label: 'along-crest detail near camera', group: g, min: 0.5, max: 20, value: 3 }),
     lipGlow: p.number('breaking.lipGlow', { label: 'lip / tube-ceiling glow', group: g, min: 0, max: 4, value: 1.8 }),
@@ -100,19 +95,15 @@ function registerParams(ctx: GLContext): Params {
     fxVeil: p.number('breaking.veil', { label: 'offshore spray veils ×', group: g, min: 0, max: 3, value: 1 }),
     fxSmoke: p.number('breaking.smoke', { label: 'whitewater smoke ×', group: g, min: 0, max: 3, value: 1 }),
     fxFoam: p.number('breaking.foam', { label: 'foam left on the water ×', group: g, min: 0, max: 3, value: 1 }),
-    swash: p.toggle('breaking.swash', { label: 'swash', group: g, value: true }),
-    runup: p.number('breaking.runup', { label: 'swash run-up ×', group: g, min: 0.2, max: 2, value: 1 }),
-    swashFoam: p.number('breaking.swashFoam', { label: 'swash bubble line ×', group: g, min: 0, max: 2, value: 1 }),
     debug: p.number('breaking.debug', { label: 'debug view (1 stage 2 normal 3 blend/tube 4 foam)', group: g, min: 0, max: 4, step: 1, value: 0 }),
   };
 }
 
 export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
   const P = registerParams(ctx);
-  const rays = bakeRays(deps.field, deps.heightAt, 'reef');
-  const shoreRays = bakeRays(deps.field, deps.heightAt, 'shore');
+  const rays = bakeRays(deps.field, deps.heightAt);
   const prof = bakeProfiles();
-  const tracker = createTracker(deps.field, rays, shoreRays);
+  const tracker = createTracker(deps.field, rays);
   const gpu = createBreakGPU(tracker.data, rays, prof);
   const uHide = uniform(1);
   const ru = { edgeDrop: uniform(0.06), enabled: uniform(1), warp: uniform(3), lipGlow: uniform(1.8), streaks: uniform(0.6), faceTexture: uniform(1), lipDiffuse: uniform(1.4), lipSheet: uniform(1) };
@@ -125,14 +116,10 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
   ctx.scene.add(spray.sprite);
   (ctx.services.ocean.gpu as { spray?: SprayService }).spray = spray;
   const fx = createWhitewaterFx(tracker, prof, spray);
-  const swash = createSwash(ctx, tracker);
-  // Where the swash sheet covers the sand, for the state's wetness (state/ reads it at init).
-  (ctx.services.ocean.gpu as { swash?: { wet(xz: TSLNode, edge?: number): TSLNode } }).swash = { wet: swash.wetAt };
   // sample() / wave() with the breakers in them (B1 rides this), plus the richer breaker query.
   const wrapped = wrapOceanService(ctx.services.ocean, tracker, prof, deps.field, deps.env, deps.rt);
   ctx.services.ocean = wrapped.service;
   (ctx.services.ocean.gpu as { breaking?: BreakingApi }).breaking = wrapped.api;
-  const sp: SwashParams = { runup: 1, foam: 1 };
   let ribbon: Ribbon | null = null;
   let waterMat: Material | null = null;
   let debugMat: MeshBasicNodeMaterial | null = null;
@@ -145,7 +132,6 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
 
   const sync = () => {
     tracker.inp[IN_PLUNGE] = P.plunge.value;
-    tracker.inp[IN_GSHORE] = P.gammaShore.value;
     tracker.inp[IN_TSCALE] = P.timeScale.value;
     ru.edgeDrop.value = P.edgeDrop.value;
     ru.warp.value = P.warp.value;
@@ -160,8 +146,6 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
     fx.rates[1] = P.fxVeil.value;
     fx.rates[2] = P.fxSmoke.value;
     fx.rates[3] = P.fxFoam.value;
-    sp.runup = P.runup.value;
-    sp.foam = P.swashFoam.value;
     uDebug.value = P.debug.value;
     wu.albedo.value = P.wwAlbedo.value;
     wu.translucency.value = P.wwTranslucency.value;
@@ -237,8 +221,6 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
       ribbon.shell.mesh.material = shellMat;
       ribbon.shell.mesh.renderOrder = (water?.renderOrder ?? 0) + 1;
       c.scene.add(ribbon.shell.mesh);
-      swash.warmup(c, water);
-      c.scene.add(swash.mesh);
       // Exercise the spray's spawn path and keep its sprite visible through the warm frames.
       spray.emit(SPRAY_MIST, 0, -50, 0, 0, 0, 0, 4, 0, 0.1, 0.1, 0.2, -60);
       spray.step(c.renderer, WARM_CLOCK);
@@ -259,8 +241,6 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
       timeVals[0] = c.time.t;
       uploadFloatRGBA(c.renderer, gpu.dataTex); // [polish] no version bump (core/upload.ts)
       if (P.enabled.value) fx.update(c.time, c.services.state);
-      if (P.swash.value) swash.update(c, sp);
-      swash.mesh.visible = swash.mesh.visible && P.swash.value;
       spray.step(c.renderer, c.time);
       if (ribbon) {
         ribbon.mesh.visible = P.enabled.value;
@@ -286,8 +266,7 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
         dst.plunge.set(src.plunge);
         dst.label.set(src.label);
       };
-      copy(rays, bakeRays(deps.field, deps.heightAt, 'reef'));
-      copy(shoreRays, bakeRays(deps.field, deps.heightAt, 'shore'));
+      copy(rays, bakeRays(deps.field, deps.heightAt));
       tracker.refresh();
       gpu.labelTex.needsUpdate = true;
     },
@@ -299,7 +278,6 @@ export function createBreaking(ctx: GLContext, deps: BreakingDeps): Breaking {
         ribbon.dispose();
         ribbon = null;
       }
-      swash.dispose(c);
       c.scene.remove(spray.sprite);
       spray.dispose();
       delete (c.services.ocean.gpu as { spray?: SprayService }).spray;
