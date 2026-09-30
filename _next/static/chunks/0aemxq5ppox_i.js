@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,27149,e=>{e.q("/_next/static/media/bake.worker.21ab00djejpp5.ts")}]);
