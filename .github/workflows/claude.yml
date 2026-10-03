@@ -30,9 +30,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 9
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
