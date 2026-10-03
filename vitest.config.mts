@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    exclude: ['node_modules', 'tests/e2e/**', '.next', 'out'],
+    exclude: ['**/node_modules/**', 'tests/e2e/**', '.next', 'out'],
   },
   resolve: { alias: { '@': fileURLToPath(new URL('./', import.meta.url)) } },
 });
