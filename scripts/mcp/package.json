@@ -6,7 +6,7 @@
     "description": "Local MCP server exposing image generation to the Claude Code GitHub Action.",
     "main": "image-server.mjs",
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.4",
-        "openai": "^4.77.0"
+        "@modelcontextprotocol/sdk": "^1.32.0",
+        "openai": "^7.27.0"
     }
 }
