@@ -30,6 +30,7 @@ export const commands: Command[] = [
   { id: 'goto-work', label: 'goto work', group: 'Navigate', arrow: '→', hint: '/#work', action: { type: 'navigate', href: '/#work' } },
   { id: 'goto-about', label: 'goto about', group: 'Navigate', arrow: '→', hint: '/about', action: { type: 'navigate', href: '/about' } },
   { id: 'goto-building', label: 'goto building', group: 'Navigate', arrow: '→', hint: '/building', action: { type: 'navigate', href: '/building' } },
+  { id: 'goto-play', label: 'goto play', group: 'Navigate', arrow: '→', hint: '/play', action: { type: 'navigate', href: '/play' }, keywords: ['games', 'snake', 'surf'] },
   { id: 'goto-contact', label: 'goto contact', group: 'Navigate', arrow: '→', hint: '/contact', action: { type: 'navigate', href: '/contact' } },
   { id: 'goto-cv', label: 'goto cv', group: 'Navigate', arrow: '→', hint: '/cv', action: { type: 'navigate', href: '/cv' } },
   { id: 'goto-home', label: 'goto home', group: 'Navigate', arrow: '→', hint: '/', action: { type: 'navigate', href: '/' }, keywords: ['/'] },

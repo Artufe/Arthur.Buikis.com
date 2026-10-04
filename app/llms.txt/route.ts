@@ -16,6 +16,7 @@ export async function GET() {
     `- [Home](${base}/): summary, featured work, current focus`,
     `- [About](${base}/about/): background, working style`,
     `- [Building](${base}/building/): what I'm currently shipping`,
+    `- [Play](${base}/play/): two browser games built with coding agents, and how each was built`,
     `- [CV](${base}/cv/): full resume`,
     `- [Contact](${base}/contact/): how to get in touch`,
     '',

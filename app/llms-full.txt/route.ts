@@ -38,6 +38,7 @@ export async function GET() {
     `- ${base}/ — summary, featured work`,
     `- ${base}/about/ — background, working style`,
     `- ${base}/building/ — current work in flight`,
+    `- ${base}/play/ — two browser games built with coding agents, and how each was built`,
     `- ${base}/cv/ — full resume`,
     `- ${base}/contact/ — how to get in touch`,
     '',
