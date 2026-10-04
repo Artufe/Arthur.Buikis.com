@@ -2,6 +2,7 @@
 // stand in the city read the plan's viewpoints, so they follow A2's plan automatically.
 // Add your own shots here (additive): name → { view, t }.
 
+import { buildDivePath, DIVE_SECONDS, divePoseAt, type DivePath, type DivePose } from '../camera/dive';
 import { CITY_LAT, CITY_LON, CITY_SURFACE_R, CURB_H, EYE_HEIGHT, ROAD_H } from '../world/config';
 import { planHeadingToWorld, planToDir } from '../world/city/frame';
 import type { Viewpoint } from '../world/city/types';
@@ -38,19 +39,36 @@ export const SHOTS: Record<string, ShotDef> = {
   orbit: { about: 'whole planet from 380 m, city in view, the dusk terminator on the right', view: () => ({ lat: CITY_LAT - 6, lon: CITY_LON + 26, alt: 380, heading: 0 }) },
   city: { about: 'top-down over the city from 120 m', view: () => ({ lat: CITY_LAT, lon: CITY_LON, alt: 120, heading: 0 }) },
   clouds: {
-    about: 'in the cloud layer (44 m), looking down at the city',
+    about: 'in the cloud layer (44 m), looking across it at the city (pitch −35°: the layer, not a top-down)',
     view: () => {
       const ll = planLL(0, 70);
-      return { lat: ll.lat, lon: ll.lon, alt: 44, heading: 0 };
+      return { lat: ll.lat, lon: ll.lon, alt: 44, heading: 0, pitch: -35 };
     },
   },
-  rooftops: { about: 'rooftop height (16 m) toward downtown', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16) },
+  // Pitched up to −24° (the curve's −35° puts everything above the 16 m eye out of frame): from the
+  // viewpoint's 58–70 m the plateau's curve drops the whole clock tower into view (A2).
+  rooftops: { about: 'rooftop height (16 m), in over downtown at the clock tower', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24) },
   street: { about: 'FPV on a city sidewalk', view: (ctx) => viewAt(ctx.world.city.viewpoints.street, EYE_HEIGHT) },
   horizon: { about: '6 m up at the plateau edge, looking along the curve', view: (ctx) => viewAt(ctx.world.city.viewpoints.horizon, 6) },
   night: {
     about: 'orbit over the city at local midnight (the constellation)',
     view: () => ({ lat: CITY_LAT - 4, lon: CITY_LON + 6, alt: 380, heading: 0 }),
     t: timeAtHourAngle(180),
+  },
+  approach: {
+    about: 'the dive at ~12 m, gliding in down the street toward the landing (A4)',
+    view: (ctx) => diveAt(ctx, 0.7),
+  },
+  landing: {
+    about: "the dive's last frame: its own landing on a sunlit street (A4; the /play loop point)",
+    view: (ctx) => diveAt(ctx, 1),
+  },
+  cloudscape: {
+    about: 'across the cloud layer from its top (46 m), toward the clouds-shot anchors: crowns, bellies, rims (A3)',
+    view: () => {
+      const ll = planLL(-8, 100);
+      return { lat: ll.lat, lon: ll.lon, alt: 46, heading: 0, pitch: -12 };
+    },
   },
   dusk: {
     about: 'street at sunset, looking west: the sun disc touching the horizon',
@@ -61,26 +79,29 @@ export const SHOTS: Record<string, ShotDef> = {
   },
 };
 
+const divePaths = new WeakMap<object, DivePath>();
+const _pose: DivePose = { x: 0, z: 0, alt: 0, heading: 0, pitch: 0, togo: 0 };
+
+/** The dive's ground track for this world's plan (built once per plan). */
+export function divePath(ctx: LBContext): DivePath {
+  let p = divePaths.get(ctx.world.city);
+  if (!p) {
+    p = buildDivePath(ctx.world.city, ctx.world.cityIndex);
+    divePaths.set(ctx.world.city, p);
+  }
+  return p;
+}
+
 /**
- * The scripted descent at u ∈ [0, 1]: from orbit (380 m, off to the south-east of the city) down
- * through the cloud layer and over the rooftops to the street viewpoint. Altitude falls in log
- * space; position leads altitude so the camera is over the city before it drops below the clouds.
+ * The scripted descent at u ∈ [0, 1] (camera/dive.ts): from orbit down through the cloud layer,
+ * gliding in along a street to land at eye height on the dive's own landing (camera/landing.ts:
+ * the best sunlit pavement spot with a long view down the street), facing down it.
+ * Render it at DIVE_SECONDS × fps frames with glide = 1 / fps.
  */
 export function diveAt(ctx: LBContext, u: number): ViewSpec {
-  u = Math.min(1, Math.max(0, u));
-  const end = viewAt(ctx.world.city.viewpoints.street, EYE_HEIGHT);
-  const start = { lat: CITY_LAT - 18, lon: CITY_LON + 22, heading: end.heading! - 40 };
-  const e = (x: number) => x * x * (3 - 2 * x);
-  const pu = 1 - Math.pow(1 - u, 2.2); // position leads
-  const au = e(Math.min(1, u * 1.1)); // altitude eases in and out, landing a little before the end
-  const lat = start.lat + (end.lat - start.lat) * pu;
-  // Interpolate longitude the short way round.
-  let dLon = end.lon - start.lon;
-  dLon -= Math.round(dLon / 360) * 360;
-  const lon = start.lon + dLon * pu;
-  const alt = Math.exp(Math.log(380) + (Math.log(EYE_HEIGHT) - Math.log(380)) * au);
-  let dH = end.heading! - start.heading;
-  dH -= Math.round(dH / 360) * 360;
-  const heading = start.heading + dH * e(Math.min(1, u * 1.3));
-  return { lat, lon, alt, heading };
+  const p = divePoseAt(divePath(ctx), u, _pose);
+  const ll = latLonFromDir(planToDir(p.x, p.z));
+  return { lat: ll.lat, lon: ll.lon, alt: p.alt, heading: planHeadingToWorld(p.x, p.z, p.heading) * DEG, pitch: p.pitch * DEG };
 }
+
+export { DIVE_SECONDS };

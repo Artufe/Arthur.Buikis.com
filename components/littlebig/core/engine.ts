@@ -27,7 +27,7 @@ import { getCityIndex, getCityPlan } from '../world/city';
 import { SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { type BootEntry, LAYER_NO_INK, type LBContext, type Quality, type Services, type System, type Variant, type ViewState } from './contracts';
-import { installDebugHook } from './debug';
+import type { DebugDeps } from './debug';
 import { ParamRegistry } from './params';
 import { Perf } from './perf';
 import { detectQuality, QUALITY } from './quality';
@@ -579,7 +579,10 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   };
 
   // ── debug hook ──
-  const uninstallDebug = installDebugHook(ctx, {
+  // Loaded only in dev or with ?shot (its own chunk: debug.ts, and with it the named shots and the
+  // scripted dive, stay off the production path once nothing else imports them statically).
+  let uninstallDebug: () => void = () => {};
+  const debugDeps: DebugDeps = {
     enabled: shotMode || process.env.NODE_ENV !== 'production',
     isReady: () => isReady,
     setTime(t) {
@@ -621,7 +624,12 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       paused = false;
       sync();
     },
-  });
+  };
+  if (debugDeps.enabled) {
+    void import('./debug').then((m) => {
+      if (!disposed) uninstallDebug = m.installDebugHook(ctx, debugDeps);
+    });
+  }
 
   const engine: Engine = {
     ctx,

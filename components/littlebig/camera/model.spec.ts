@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { R } from '../world/config';
 import { dirFromLatLon, dot3, headingVector, len3 } from '../world/sphere';
-import { clipPlanes, computePose, createCamState, createPose, fovForAlt, lookBlend, pitchForAlt, springStep } from './model';
+import { inStickZone, stickVector } from './input';
+import { approach, clipPlanes, computePose, createCamState, createPose, fovForAlt, lensFov, lensShift, liftRamp, lookBlend, moveSpeed, pitchForAlt, RUN, springStep, WALK } from './model';
 
 const DEG = Math.PI / 180;
 
@@ -10,7 +11,7 @@ describe('camera model', () => {
     expect(pitchForAlt(380)).toBeCloseTo(-Math.PI / 2);
     expect(pitchForAlt(120)).toBeCloseTo(-Math.PI / 2);
     expect(pitchForAlt(4)).toBeCloseTo(-8 * DEG);
-    expect(fovForAlt(1.7)).toBeCloseTo(70);
+    expect(fovForAlt(1.7)).toBeCloseTo(56);
     expect(fovForAlt(420)).toBeCloseTo(40, 0);
     let prevP = pitchForAlt(1.7);
     let prevF = fovForAlt(1.7);
@@ -35,6 +36,22 @@ describe('camera model', () => {
     expect(right).toBeLessThan(-0.01); // still moving at 4 m
     expect(lookBlend(1.7)).toBe(1);
     expect(lookBlend(100)).toBe(0);
+  });
+
+  it('the lens: a diorama FOV, capped on wide canvases, widened on portrait ones, shifted only mid-air', () => {
+    for (let a = 8; a <= 60; a *= 1.1) expect(fovForAlt(a)).toBeLessThanOrEqual(46);
+    expect(fovForAlt(1.7)).toBeLessThanOrEqual(58);
+    const hfov = (v: number, aspect: number) => (2 * Math.atan(Math.tan((v * DEG) / 2) * aspect)) / DEG;
+    expect(hfov(lensFov(56, 2.4), 2.4)).toBeLessThanOrEqual(84 + 1e-9); // 21:9
+    expect(lensFov(56, 1.6)).toBeCloseTo(56, 9); // 16:10 untouched
+    const portrait = lensFov(56, 390 / 844);
+    expect(portrait).toBeGreaterThan(56);
+    expect(portrait).toBeLessThanOrEqual(80);
+    expect(hfov(portrait, 390 / 844)).toBeGreaterThan(35);
+    expect(lensShift(1.7, -4 * DEG)).toBe(0);
+    expect(lensShift(300, -90 * DEG)).toBe(0);
+    expect(lensShift(20, -30 * DEG)).toBeGreaterThan(0.1);
+    expect(lensShift(20, -3 * DEG)).toBe(0); // a level view is upright already
   });
 
   it('the spring is critically damped: converges without overshoot, frame-rate independent', () => {
@@ -90,5 +107,46 @@ describe('camera model', () => {
     const c = clipPlanes(1.7, 3.7, { near: 0, far: 0 });
     expect(c.near).toBeLessThanOrEqual(0.06);
     expect(clipPlanes(380, 380, c).far).toBeGreaterThan(Math.sqrt(540 ** 2 - R ** 2) + 100);
+  });
+
+  it('roof lift ramps smoothly with distance (no step), movement speeds and easing are sane', () => {
+    expect(liftRamp(-2, 1, 3)).toBe(1); // inside the footprint
+    expect(liftRamp(1, 1, 3)).toBe(1);
+    expect(liftRamp(4.01, 1, 3)).toBe(0);
+    let prev = 1;
+    for (let d = 1; d <= 4; d += 0.01) {
+      const v = liftRamp(d, 1, 3);
+      expect(v).toBeLessThanOrEqual(prev + 1e-12);
+      expect(prev - v).toBeLessThan(0.006); // smooth: ≤ 0.6 % of the ask per cm
+      prev = v;
+    }
+    expect(moveSpeed(1.7, 1, false)).toBe(WALK);
+    expect(moveSpeed(1.7, 1, true)).toBe(RUN);
+    expect(moveSpeed(100, 0, false)).toBeCloseTo(70);
+    expect(moveSpeed(420, 0, false)).toBeLessThanOrEqual(160);
+    // approach is frame-rate independent
+    let a = 0;
+    let b = 0;
+    for (let i = 0; i < 60; i++) a = approach(a, 1, 9, 1 / 60);
+    for (let i = 0; i < 30; i++) b = approach(b, 1, 9, 1 / 30);
+    expect(a).toBeCloseTo(b, 12);
+  });
+
+  it('virtual stick: dead zone, full deflection at the radius, never outside the unit disc', () => {
+    const o = { x: 0, y: 0 };
+    stickVector(3, 0, 46, o);
+    expect(o.x).toBe(0);
+    stickVector(0, -46, 46, o);
+    expect(o.y).toBeCloseTo(-1, 9);
+    stickVector(200, 200, 46, o);
+    expect(Math.hypot(o.x, o.y)).toBeCloseTo(1, 9);
+    let prev = 0;
+    for (let d = 6; d <= 46; d += 0.5) {
+      stickVector(d, 0, 46, o);
+      expect(o.x).toBeGreaterThanOrEqual(prev);
+      prev = o.x;
+    }
+    expect(inStickZone(80, 700, 1280, 800)).toBe(true);
+    expect(inStickZone(900, 700, 1280, 800)).toBe(false);
   });
 });

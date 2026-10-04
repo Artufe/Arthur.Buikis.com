@@ -11,7 +11,17 @@ let bootChain: Promise<void> = Promise.resolve();
 
 const SPACE = '#070B1A';
 const HINT_ORBIT = 'drag to spin · scroll to dive · double-click to fly';
-const HINT_STREET = 'wasd walk · space jump · scroll out to fly';
+const HINT_STREET = 'wasd walk · drag to look · space jump · scroll out to fly';
+const HINT_STREET_PAGE = 'wasd walk · click to look · space jump · scroll out to fly';
+const HINT_ORBIT_TOUCH = 'drag to spin · pinch to dive · double-tap to fly';
+const HINT_STREET_TOUCH = 'left thumb walks · drag to look · pinch out to fly';
+/** Idle before the hint first shows, or shows a new line (ms); idle before it repeats one already seen. */
+const HINT_IDLE = 2000;
+const HINT_REPEAT_IDLE = 9000;
+/** Virtual stick geometry (CSS px): travel radius (camera/input.ts STICK_RADIUS) and the resting spot. */
+const STICK_R = 46;
+const STICK_REST_X = 70; // = camera/input.ts STICK_REST_X / STICK_REST_BOTTOM (the stick zone is anchored on it)
+const STICK_REST_BOTTOM = 92;
 
 export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -21,6 +31,8 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   const [slow, setSlow] = useState(false);
   const [hint, setHint] = useState<{ text: string; on: boolean }>({ text: HINT_ORBIT, on: false });
   const [debug, setDebug] = useState<string | null>(null);
+  // Touch input seen (or a coarse pointer): mounts the virtual stick overlay.
+  const [touchUi, setTouchUi] = useState(false);
   const [shotMode] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('shot'));
   // Bumped when the browser restores a lost WebGL context: remounts the canvas (fresh context) and
   // reboots the engine (~150 ms warm).
@@ -90,18 +102,69 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
     };
   }, [variant, generation]);
 
-  // Hint row: fades in after 2 s without input, fades out on interaction.
+  // Hint row: fades in after 2 s without input (from the first frame), fades out on interaction.
+  // A line already shown comes back only after a longer idle, so it never nags.
   useEffect(() => {
     if (shotMode || phase !== 'running') return;
+    const since = performance.now();
+    let lastShown = '';
+    let showing = false;
     const id = window.setInterval(() => {
       const e = engineRef.current;
       if (!e) return;
-      const idle = performance.now() - e.ctx.services.camera.lastInputAt() > 2000;
-      const text = e.ctx.view.street ? HINT_STREET : HINT_ORBIT;
-      setHint((h) => (h.on === idle && h.text === text ? h : { text, on: idle }));
+      const cam = e.ctx.services.camera;
+      const touch = cam.stick?.().touch ?? false;
+      if (touch) setTouchUi(true);
+      const street = e.ctx.view.street;
+      const text = street ? (touch ? HINT_STREET_TOUCH : variant === 'page' ? HINT_STREET_PAGE : HINT_STREET) : touch ? HINT_ORBIT_TOUCH : HINT_ORBIT;
+      const idle = performance.now() - Math.max(since, cam.lastInputAt());
+      const on = idle > (text === lastShown && !showing ? HINT_REPEAT_IDLE : HINT_IDLE);
+      if (on) lastShown = text;
+      showing = on;
+      setHint((h) => (h.on === on && h.text === text ? h : { text, on }));
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, shotMode]);
+  }, [phase, shotMode, variant]);
+
+  // Touch UI: the left-thumb stick, shown only on touch and only at street level. Driven straight
+  // from the camera's live stick state each frame (no React renders).
+  const stickRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (shotMode || phase !== 'running' || !touchUi) return;
+    let raf = 0;
+    let shown = false;
+    const last = [NaN, NaN, NaN, NaN];
+    let lastActive = false;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const base = stickRef.current;
+      const knob = knobRef.current;
+      const st = engineRef.current?.ctx.services.camera.stick?.();
+      if (!base || !knob || !st) return;
+      if (st.visible !== shown) {
+        shown = st.visible;
+        base.style.opacity = shown ? '1' : '0';
+      }
+      if (!shown) return;
+      const h = base.parentElement?.clientHeight ?? 0;
+      const cx = st.active ? st.ox : STICK_REST_X;
+      const cy = st.active ? st.oy : h - STICK_REST_BOTTOM;
+      const kx = st.x * STICK_R;
+      const ky = st.y * STICK_R;
+      if (cx === last[0] && cy === last[1] && kx === last[2] && ky === last[3] && st.active === lastActive) return;
+      last[0] = cx;
+      last[1] = cy;
+      last[2] = kx;
+      last[3] = ky;
+      lastActive = st.active;
+      base.style.transform = `translate(${cx - STICK_R}px, ${cy - STICK_R}px)`;
+      base.style.borderColor = st.active ? 'rgba(255,184,77,0.75)' : 'rgba(240,244,255,0.32)';
+      knob.style.transform = `translate(${kx}px, ${ky}px)`;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [phase, shotMode, touchUi]);
 
   // F1: debug readout (altitude, position, frame time).
   useEffect(() => {
@@ -159,10 +222,41 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       )}
       {phase === 'running' && !shotMode && (
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-3 text-center font-mono text-[11px] tracking-[0.12em]"
-          style={{ color: 'rgba(240,244,255,0.78)', textShadow: '0 1px 6px rgba(7,11,26,0.8)', opacity: hint.on ? 1 : 0, transition: 'opacity 600ms ease' }}
+          className="pointer-events-none absolute inset-x-0 bottom-3 px-4 text-center font-mono text-[11px] tracking-[0.12em]"
+          style={{ opacity: hint.on ? 1 : 0, transition: 'opacity 600ms ease' }}
         >
-          {hint.text}
+          {/* A faint backing keeps the line legible over pale pavement and sky alike. */}
+          <span className="inline-block px-2.5 py-1 whitespace-nowrap max-[460px]:px-1.5 max-[460px]:text-[10px] max-[460px]:tracking-[0.02em]" style={{ color: 'rgba(240,244,255,0.86)', background: 'rgba(7,11,26,0.34)', textShadow: '0 1px 4px rgba(7,11,26,0.7)' }}>
+            {hint.text}
+          </span>
+        </div>
+      )}
+      {phase === 'running' && !shotMode && touchUi && (
+        <div
+          ref={stickRef}
+          aria-hidden
+          className="pointer-events-none absolute top-0 left-0"
+          style={{
+            width: STICK_R * 2,
+            height: STICK_R * 2,
+            border: '1.5px solid rgba(240,244,255,0.32)',
+            background: 'rgba(7,11,26,0.18)',
+            opacity: 0,
+            transition: 'opacity 400ms ease, border-color 200ms ease',
+          }}
+        >
+          <div
+            ref={knobRef}
+            className="absolute"
+            style={{
+              left: STICK_R - 20,
+              top: STICK_R - 20,
+              width: 40,
+              height: 40,
+              background: 'rgba(240,244,255,0.55)',
+              boxShadow: '0 1px 6px rgba(7,11,26,0.5)',
+            }}
+          />
         </div>
       )}
       {debug && (

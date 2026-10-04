@@ -36,8 +36,9 @@ describe('planet', () => {
     expect(min).toBeGreaterThanOrEqual(OCEAN_FLOOR);
     expect(max).toBeLessThanOrEqual(PEAK);
     const frac = land / heights.length;
-    expect(frac).toBeGreaterThan(0.2);
-    expect(frac).toBeLessThan(0.6);
+    // A blue planet: ~2/3 ocean overall (the city's continent faces the camera from orbit).
+    expect(frac).toBeGreaterThan(0.28);
+    expect(frac).toBeLessThan(0.42);
     expect(max).toBeGreaterThan(18); // snowcapped peaks exist
     expect(min).toBeLessThan(-8); // deep water exists
   });
@@ -50,16 +51,21 @@ describe('planet', () => {
       const r = Math.sqrt(i / 400) * PLATEAU_RADIUS * (R + PLATEAU_HEIGHT) * 0.999;
       expect(Math.abs(planet.heightAt(chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r)) - PLATEAU_HEIGHT)).toBeLessThanOrEqual(0.05);
     }
-    // Across the blend ring, along 64 rays: land, and no slope steeper than ~35°.
+    // Across the blend ring, along 64 rays: no land slope steeper than ~35° (a bay may reach into
+    // the outer ring: its seabed is under the opaque ocean); past it (out to 60 m) no cliff near
+    // the waterline and no seam anywhere (steep slopes belong to hills and mountains).
     const step = 0.5;
     const r0 = PLATEAU_RADIUS * (R + PLATEAU_HEIGHT);
-    const r1 = (PLATEAU_RADIUS + PLATEAU_BLEND) * (R + PLATEAU_HEIGHT) + 4;
+    const r1 = (PLATEAU_RADIUS + PLATEAU_BLEND) * (R + PLATEAU_HEIGHT);
     for (let k = 0; k < 64; k++) {
       const a = (k / 64) * Math.PI * 2;
       let prev = planet.heightAt(chartToDir(chart, Math.cos(a) * r0, Math.sin(a) * r0));
-      for (let r = r0 + step; r <= r1; r += step) {
+      for (let r = r0 + step; r <= r1 + 60; r += step) {
         const h = planet.heightAt(chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r));
-        expect(Math.abs(h - prev) / step).toBeLessThan(0.7);
+        const slope = Math.abs(h - prev) / step;
+        if (r <= r1 && h >= 0 && prev >= 0) expect(slope).toBeLessThan(0.7);
+        else if (Math.abs(h) < 1.5) expect(slope).toBeLessThan(2.5);
+        expect(slope).toBeLessThan(6); // no discontinuity
         prev = h;
       }
     }

@@ -9,7 +9,7 @@ import type { Building, CityIndex, CityPlan, Feature, GroundClass } from './type
 const CELL = 8;
 
 /** Default collision radius of a point feature (Feature.r overrides). */
-const FEATURE_R: Record<string, number> = { streetlight: 0.2, tree: 0.4, flag: 0.15, bench: 0.5, 'bus-stop': 0.6, fountain: 1.6 };
+const FEATURE_R: Record<string, number> = { streetlight: 0.2, lamp: 0.2, hydrant: 0.18, tree: 0.4, flag: 0.15, bench: 0.5, 'bus-stop': 0.6, fountain: 1.6, planter: 0.5, 'cafe-table': 0.45, statue: 0.8 };
 export function featureRadius(f: Feature): number {
   return f.r ?? FEATURE_R[f.kind] ?? 0;
 }
@@ -33,6 +33,76 @@ export function obbDistance(b: Building, x: number, z: number): number {
   const ox = Math.max(qx, 0);
   const oz = Math.max(qz, 0);
   return Math.hypot(ox, oz) + Math.min(Math.max(qx, qz), 0);
+}
+
+/**
+ * The stadium's wall: a superellipse (|x/A|^2.6 + |z/B|^2.6 = 1) set 0.4 m inside its plan box,
+ * sampled as a 32-gon in the building's LOCAL frame (x along local +x, z along local +z), x, z
+ * interleaved. city/buildings.ts builds the mesh from exactly this ring (scaled by k for the stands).
+ */
+export function stadiumRing(b: Building, k = 1, n = 32): number[] {
+  const A = b.w / 2 - 0.4;
+  const B = b.d / 2 - 0.4;
+  const ex = 2.6;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    out.push(Math.sign(c) * Math.pow(Math.abs(c), 2 / ex) * A * k, Math.sign(s) * Math.pow(Math.abs(s), 2 / ex) * B * k);
+  }
+  return out;
+}
+
+/** Local positions (x, z) of the stadium's four floodlight masts (collision posts, r 0.3). */
+export function stadiumMasts(b: Building): number[] {
+  const mx = b.w / 2 - 0.9;
+  const mz = b.d / 2 - 0.9;
+  return [-mx, -mz, mx, -mz, mx, mz, -mx, mz];
+}
+
+const rings = new WeakMap<Building, number[]>();
+const _cp = { x: 0, z: 0, d: 0 };
+/**
+ * Closest point (local frame) on a closed local ring to local (lx, lz), and the signed distance
+ * (negative inside). Writes into _cp.
+ */
+function ringClosest(ring: number[], lx: number, lz: number): typeof _cp {
+  let best = Infinity;
+  let inside = false;
+  const n = ring.length >> 1;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ax = ring[j * 2], az = ring[j * 2 + 1], bx = ring[i * 2], bz = ring[i * 2 + 1];
+    if (az > lz !== bz > lz && lx < ((ax - bx) * (lz - bz)) / (az - bz) + bx) inside = !inside;
+    const dx = bx - ax, dz = bz - az;
+    const l2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((lx - ax) * dx + (lz - az) * dz) / l2));
+    const qx = ax + dx * t, qz = az + dz * t;
+    const d = (qx - lx) * (qx - lx) + (qz - lz) * (qz - lz);
+    if (d < best) {
+      best = d;
+      _cp.x = qx;
+      _cp.z = qz;
+    }
+  }
+  _cp.d = inside ? -Math.sqrt(best) : Math.sqrt(best);
+  return _cp;
+}
+
+/**
+ * Signed distance (m, negative inside) from plan (x, z) to the building's VISIBLE wall: its plan box,
+ * except the stadium, whose wall is the superellipse inside its box (stadiumRing). Use this for
+ * collision and camera clearance; obbDistance (the box) stays the placement / validation shape.
+ */
+export function footprintDistance(b: Building, x: number, z: number): number {
+  if (b.landmark !== 'stadium') return obbDistance(b, x, z);
+  let ring = rings.get(b);
+  if (!ring) rings.set(b, (ring = stadiumRing(b)));
+  const c = Math.cos(b.angle);
+  const s = Math.sin(b.angle);
+  const dx = x - b.x;
+  const dz = z - b.z;
+  return ringClosest(ring, dx * c + dz * s, -dx * s + dz * c).d;
 }
 
 /** Footprint corners (x, z interleaved, positive winding). */
@@ -111,6 +181,20 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     obs.push(f.x, f.z, r);
     forBox(f.x - r, f.z - r, f.x + r, f.z + r, (c) => c.obs.push(id));
   }
+  // The stadium's floodlight masts stand in its box corners, outside its rounded wall.
+  for (const b of plan.buildings) {
+    if (b.landmark !== 'stadium') continue;
+    const m = stadiumMasts(b);
+    const c = Math.cos(b.angle);
+    const sn = Math.sin(b.angle);
+    for (let i = 0; i < m.length; i += 2) {
+      const x = b.x + m[i] * c - m[i + 1] * sn;
+      const z = b.z + m[i] * sn + m[i + 1] * c;
+      const id = obs.length / 3;
+      obs.push(x, z, 0.3);
+      forBox(x - 0.3, z - 0.3, x + 0.3, z + 0.3, (cl) => cl.obs.push(id));
+    }
+  }
   const obstacles = Float64Array.from(obs);
   plan.nodes.forEach((n, id) => {
     const r = n.radius + 3;
@@ -164,11 +248,28 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
       const o = wid * 5;
       if (segDist(x, z, walkSeg[o], walkSeg[o + 1], walkSeg[o + 2], walkSeg[o + 3]) <= walkSeg[o + 4]) return 'sidewalk';
     }
+    const a = areaAt(x, z, c);
+    if (a < 0) return 'free';
+    const k = plan.areas[a].kind;
+    return k === 'plaza' ? 'plaza' : k === 'park' ? 'park' : k === 'garden' ? 'garden' : k === 'lot' ? 'lot' : k === 'water' ? 'water' : 'free';
+  };
+
+  /**
+   * The area under (x, z), or -1. Water first (a pond lies inside the park polygon it is cut into),
+   * lots last (courtyard beds, lanes and squares sit inside the block's lot).
+   */
+  const areaAt = (x: number, z: number, c: Cell): number => {
+    let lot = -1;
+    let other = -1;
     for (const id of c.area) {
       const a = plan.areas[id];
-      if (pointInPolygon(a.outline, x, z)) return a.kind === 'plaza' ? 'plaza' : a.kind === 'park' ? 'park' : a.kind === 'garden' ? 'garden' : 'free';
+      if (a.kind === 'lot' ? lot >= 0 : other >= 0 && a.kind !== 'water') continue;
+      if (!pointInPolygon(a.outline, x, z)) continue;
+      if (a.kind === 'water') return id;
+      if (a.kind === 'lot') lot = id;
+      else other = id;
     }
-    return 'free';
+    return other >= 0 ? other : lot;
   };
 
   const isClear = (x: number, z: number, r: number): boolean => {
@@ -186,6 +287,10 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
           const n = plan.nodes[id];
           if (Math.hypot(x - n.x, z - n.z) < n.radius + r) return false;
         }
+        for (const wid of c.walk) {
+          const o = wid * 5;
+          if (segDist(x, z, walkSeg[o], walkSeg[o + 1], walkSeg[o + 2], walkSeg[o + 3]) < walkSeg[o + 4] + r) return false;
+        }
       }
     }
     return true;
@@ -196,7 +301,7 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     let h = 0;
     for (const id of c.b) {
       const b = plan.buildings[id];
-      if (b.h > h && obbDistance(b, x, z) <= 0) h = b.h;
+      if (b.h > h && footprintDistance(b, x, z) <= 0) h = b.h;
     }
     return h;
   };
@@ -216,7 +321,7 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
         for (const id of c.b) {
           if (bStamp[id] === stamp) continue;
           bStamp[id] = stamp;
-          if (obbDistance(plan.buildings[id], x, z) <= r) out[n++] = id;
+          if (footprintDistance(plan.buildings[id], x, z) <= r) out[n++] = id;
         }
       }
     }
@@ -265,6 +370,34 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
         const dz = z - b.z;
         const lx = dx * c + dz * s;
         const lz = -dx * s + dz * c;
+        if (b.landmark === 'stadium') {
+          // the rounded wall: push out along the closest point's outward direction
+          let ring = rings.get(b);
+          if (!ring) rings.set(b, (ring = stadiumRing(b)));
+          const q = ringClosest(ring, lx, lz);
+          if (q.d >= r) continue;
+          let nx = lx - q.x;
+          let nz = lz - q.z;
+          const l = Math.hypot(nx, nz);
+          if (l > 1e-9) {
+            nx /= l;
+            nz /= l;
+            if (q.d < 0) {
+              nx = -nx;
+              nz = -nz;
+            }
+          } else {
+            const lc = Math.hypot(lx, lz) || 1;
+            nx = lx / lc;
+            nz = lz / lc;
+          }
+          const push = r - q.d;
+          x += (nx * c - nz * s) * push;
+          z += (nx * s + nz * c) * push;
+          any = true;
+          moved = true;
+          continue;
+        }
         const hw = b.w / 2;
         const hd = b.d / 2;
         // closest point on the box (local)
@@ -332,6 +465,7 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     return out.edge;
   };
 
+  const areaH = plan.areas.map((a) => a.h ?? (a.kind === 'water' ? AREA_H + 0.02 : AREA_H));
   const groundH = (x: number, z: number): number => {
     switch (classify(x, z)) {
       case 'road':
@@ -340,18 +474,12 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
       case 'sidewalk':
       case 'building':
         return ROAD_H + CURB_H;
-      case 'plaza':
-      case 'park':
-      case 'garden':
-        return AREA_H;
-      case 'free': {
-        // 'free' also covers lots / water / field areas; any area is drawn at AREA_H.
-        const c = cellAt(x, z);
-        for (const id of c.area) if (pointInPolygon(plan.areas[id].outline, x, z)) return AREA_H;
-        return 0;
-      }
-      default:
+      case 'outside':
         return opts.terrainH ? opts.terrainH(x, z) : 0;
+      default: {
+        const a = areaAt(x, z, cellAt(x, z));
+        return a >= 0 ? areaH[a] : 0;
+      }
     }
   };
 

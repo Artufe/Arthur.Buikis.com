@@ -23,7 +23,7 @@ export const ALT_LOW = 4;
 export const PITCH_LOW = -8 * DEG;
 export const PITCH_EYE = -4 * DEG;
 export const FOV_ORBIT = 40;
-export const FOV_STREET = 70;
+export const FOV_STREET = 56;
 
 const smooth = (x: number) => {
   const t = Math.min(1, Math.max(0, x));
@@ -63,10 +63,60 @@ export function pitchForAlt(alt: number): number {
   return PITCH_LOW + (-Math.PI / 2 - PITCH_LOW) * f;
 }
 
-/** Vertical FOV (deg): 40° in orbit widening to 70° at street level, log-altitude eased. */
+/** FOV knots (alt m, vertical deg): a toy-diorama lens, not a GoPro. */
+const FOV_KNOTS: Array<[number, number]> = [
+  [1.7, FOV_STREET],
+  [8, 45],
+  [60, 43],
+  [300, FOV_ORBIT],
+];
+
+/**
+ * Vertical FOV (deg) by altitude: 56° at street level, a long ~43–45° from rooftops to the cloud
+ * layer (towers at the frame edge stay upright: it reads as a model, not a fisheye), 40° in orbit.
+ * Monotone, eased in log-altitude between knots.
+ */
 export function fovForAlt(alt: number): number {
-  const u = Math.log(Math.max(1.7, alt) / 1.7) / Math.log(300 / 1.7);
-  return FOV_STREET + (FOV_ORBIT - FOV_STREET) * smooth(u);
+  const a = Math.max(1.7, alt);
+  for (let i = 1; i < FOV_KNOTS.length; i++) {
+    const [a1, f1] = FOV_KNOTS[i];
+    if (a <= a1 || i === FOV_KNOTS.length - 1) {
+      const [a0, f0] = FOV_KNOTS[i - 1];
+      return f0 + (f1 - f0) * smooth(Math.log(a / a0) / Math.log(a1 / a0));
+    }
+  }
+  return FOV_ORBIT;
+}
+
+/** Widest horizontal FOV (deg) on a wide canvas. */
+export const MAX_HFOV = 84;
+
+/**
+ * The vertical FOV for a canvas aspect (w / h): capped so the horizontal FOV never passes MAX_HFOV
+ * (a 21:9 window would otherwise stretch the frame edges), and widened on portrait canvases (a
+ * phone held upright) so the horizontal view does not shrink to a slit: there the vertical FOV
+ * grows with 1/√aspect, up to 80°.
+ */
+export function lensFov(vfov: number, aspect: number): number {
+  const t = Math.tan((vfov * DEG) / 2);
+  let v = vfov;
+  if (aspect < 1) v = Math.min(80, (2 * Math.atan(t / Math.sqrt(Math.max(0.2, aspect)))) / DEG);
+  const capV = (2 * Math.atan(Math.tan((MAX_HFOV * DEG) / 2) / Math.max(0.2, aspect))) / DEG;
+  return Math.min(v, capV);
+}
+
+/**
+ * Vertical lens shift (fraction of the frame height, ≥ 0) for an altitude and view pitch: the
+ * architectural / tilt-shift trick. The camera's axis pitches up and the frustum shifts down by the
+ * same angle at frame centre, so the centre ray stays at `pitch` while the image plane stands more
+ * upright: verticals converge less and 10–40 m reads as a model. None at street level (already
+ * upright), none from orbit (a shifted globe would go oval), none on a near-level view.
+ */
+export function lensShift(alt: number, pitch: number): number {
+  const a = smooth((Math.log(Math.max(alt, 1.7)) - Math.log(3)) / (Math.log(8) - Math.log(3)));
+  const b = 1 - smooth((Math.log(Math.max(alt, 1.7)) - Math.log(55)) / (Math.log(110) - Math.log(55)));
+  const p = smooth((-pitch - 10 * DEG) / (14 * DEG));
+  return 0.16 * a * b * p;
 }
 
 /** How much drag means "look around" rather than "spin the planet": 1 at ≤ 6 m, 0 at ≥ 60 m. */
@@ -89,6 +139,74 @@ export function springStep(x: number, v: number, target: number, omega: number, 
   const tmp = v + omega * y;
   out[0] = target + (y + tmp * dt) * e;
   out[1] = (v - omega * tmp * dt) * e;
+}
+
+/**
+ * Roof-lift weight for a building whose footprint is `d` m away (≤ 0 inside): 1 within `margin`,
+ * easing to 0 over `width` beyond it. The lift asks for (roof + clearance − eye) × this, so it swells
+ * up as a tower approaches instead of stepping.
+ */
+export function liftRamp(d: number, margin: number, width: number): number {
+  if (d <= margin) return 1;
+  if (width <= 0) return 0;
+  return 1 - smooth((d - margin) / width);
+}
+
+/**
+ * Time (s) until a point at plan (x, z) moving at (vx, vz) m/s enters an oriented box (centre bx,
+ * bz, rotation `angle` like Building.angle, half extents hw × hd): 0 if already inside, Infinity if
+ * it never does. 2D slab test in the box frame. Pure; the roof lift's look-ahead.
+ */
+export function timeToBox(x: number, z: number, vx: number, vz: number, bx: number, bz: number, angle: number, hw: number, hd: number): number {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const dx = x - bx;
+  const dz = z - bz;
+  const lx = dx * c + dz * s;
+  const lz = -dx * s + dz * c;
+  const ux = vx * c + vz * s;
+  const uz = -vx * s + vz * c;
+  let t0 = 0;
+  let t1 = Infinity;
+  for (let k = 0; k < 2; k++) {
+    const p = k === 0 ? lx : lz;
+    const u = k === 0 ? ux : uz;
+    const h = k === 0 ? hw : hd;
+    if (Math.abs(u) < 1e-9) {
+      if (p < -h || p > h) return Infinity;
+      continue;
+    }
+    let a = (-h - p) / u;
+    let b = (h - p) / u;
+    if (a > b) {
+      const tmp = a;
+      a = b;
+      b = tmp;
+    }
+    if (a > t0) t0 = a;
+    if (b < t1) t1 = b;
+    if (t0 > t1) return Infinity;
+  }
+  return t0;
+}
+
+/** Walking speed (m/s). */
+export const WALK = 4.2;
+export const RUN = 9;
+
+/**
+ * Movement speed for keys / stick (m/s): walking pace at street level, a pan that scales with
+ * altitude above it (≈ 0.7 m/s per metre, capped), ×2 when running.
+ */
+export function moveSpeed(alt: number, look: number, run: boolean): number {
+  if (look > 0.95) return run ? RUN : WALK;
+  const pan = Math.min(160, Math.max(WALK, alt * 0.7));
+  return pan * (run ? 2 : 1);
+}
+
+/** Exponential approach of x toward target at `rate` (1/s), frame-rate independent. */
+export function approach(x: number, target: number, rate: number, dt: number): number {
+  return target + (x - target) * Math.exp(-rate * dt);
 }
 
 export interface CamState {

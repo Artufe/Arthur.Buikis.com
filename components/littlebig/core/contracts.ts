@@ -203,6 +203,23 @@ export interface SkyService {
   sun: DirectionalLight | null;
   /** The scene fog (always present so programs never recompile); the sky tunes it by altitude. */
   fog: Fog | null;
+  /**
+   * 0..1: how far the camera is inside a cloud (the clouds system's white-out veil, drawn last as a
+   * full-screen overlay). Post (B4) may fade ink and tilt-shift by it. Absent / 0 outside clouds.
+   */
+  veil?: number;
+  /**
+   * 0..1: how much a real (3D) cloud stands above the eye's visible horizon, written by the clouds
+   * system each frame. The sky fades its painted far cumulus out by it, so the two never share a
+   * frame. Absent / 0 when no cloud is in view.
+   */
+  cloudsInView?: number;
+  /**
+   * 0..1: how far the clouds system has closed the scene fog into the cloud mist (≥ veil: it starts
+   * a few metres before the eye enters a puff and lingers just after). The sky sinks into the same
+   * mist by it, so fogged buildings never stand as cut-outs against a clear sky.
+   */
+  mist?: number;
 }
 
 /** The camera controller (camera/ owns it). */
@@ -222,6 +239,13 @@ export interface CameraService {
   releaseLock(): void;
   /** performance.now() of the last user input on the canvas (the hint row fades on it). */
   lastInputAt(): number;
+  /**
+   * The touch UI's live state (A4), read by the canvas overlay every frame while visible: the
+   * left-thumb virtual stick (`visible` only on touch, only at street level; `ox`, `oy` where the
+   * thumb went down, CSS px; `x`, `y` its deflection in the unit disc) and whether touch input has
+   * been seen. Optional: core's default service has none.
+   */
+  stick?(): { visible: boolean; active: boolean; x: number; y: number; ox: number; oy: number; touch: boolean };
 }
 
 /**
@@ -251,6 +275,22 @@ export interface Services {
   camera: CameraService;
   /** Zebra-crossing state shared by traffic and people (core allocates it; see CrossingState). */
   crossings: CrossingState;
+  /**
+   * Nature's collision discs outside the city plan (A1): tree trunks and big boulders of the
+   * terrain scatter (city trees are CityIndex obstacles already). Optional: installed once the
+   * nature system has initialised; call through ctx.services.nature?.collide(...).
+   */
+  nature?: NatureService;
+}
+
+/** Collision against the countryside's trunks and boulders (A1, nature/collide.ts). Zero-alloc. */
+export interface NatureService {
+  /**
+   * Push a body of radius r (m) standing at unit surface direction `dir` out of every trunk /
+   * boulder disc it overlaps (sliding along them). Writes the resolved unit direction into out
+   * (out may be dir); returns true if it moved.
+   */
+  collide(dir: Vec3, r: number, out: Vec3): boolean;
 }
 
 export interface LBDebug {

@@ -230,6 +230,13 @@ export interface Building {
   landmark?: string;
   /** Optional setbacks: tiers from the bottom up, each the height it reaches and its inset (m). */
   tiers?: Array<{ h: number; inset: number }>;
+  /**
+   * Optional hand-dressing for the renderer (additive, A2): 'cafe' = a corner café (awning, blade
+   * sign, tables outside), used on the building the street viewpoint (the dive's landing) looks at.
+   */
+  decor?: 'cafe';
+  /** Local x (m, along the frontage) of the main entrance on the front face. Renderers put the door here. */
+  door?: number;
 }
 
 export type AreaKind = 'park' | 'plaza' | 'garden' | 'lot' | 'water' | 'field';
@@ -240,6 +247,12 @@ export interface Area {
   kind: AreaKind;
   /** Closed polygon (x, z interleaved, positive winding, last ≠ first). */
   outline: Float64Array;
+  /**
+   * Height of the area's surface above the plateau (m), when it is not AREA_H: downtown lots and the
+   * plaza are paved flush with the sidewalks (ROAD_H + CURB_H − 4 mm, tucked under the slab edge),
+   * courtyard lawns are raised beds. CityIndex.groundH returns it. (Additive, A2.)
+   */
+  h?: number;
 }
 
 /**
@@ -292,8 +305,12 @@ export interface CityPlan {
 
 // ── Queries (built from a plan by world/city/index.ts) ──
 
-/** What lies on the ground at a plan point. */
-export type GroundClass = 'road' | 'intersection' | 'sidewalk' | 'building' | 'plaza' | 'park' | 'garden' | 'free' | 'outside';
+/**
+ * What lies on the ground at a plan point. 'lot' = a paved building lot (Area kind 'lot': the ground
+ * of a downtown block between its buildings) and 'water' = a pond: nothing grows on either. 'free' =
+ * bare plateau or an unpaved area (field). Water wins over the area it sits in (a pond in the park).
+ */
+export type GroundClass = 'road' | 'intersection' | 'sidewalk' | 'building' | 'plaza' | 'park' | 'garden' | 'lot' | 'water' | 'free' | 'outside';
 
 /** A point on a path: position, unit tangent and the sample index it fell in. */
 export interface PathSample {

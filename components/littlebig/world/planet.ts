@@ -1,11 +1,18 @@
 // Planet shape and biomes. Pure TS, seeded, deterministic, allocation-free per query.
 //
 // heightAt(dir) is metres above sea level (R) for a unit direction: negative under the ocean,
-// exactly PLATEAU_HEIGHT on the city plateau, PEAK at most on the mountain range. The shape:
-//   - a continent field: low-frequency fbm plus three seeded continent blobs, one of them centred
-//     on the city so the plateau always sits on land, with coast within ~30-60 m of its edge;
-//   - rolling hills on land, a ridged mountain range with snowcaps on the city's continent (far
-//     enough away that it peeks over the city's horizon), a shelf and basins under the ocean;
+// exactly PLATEAU_HEIGHT on the city plateau, PEAK at most on the mountain range. The shape (A1):
+//   - a blue planet (~2/3 ocean; ~70 % of the default orbit view around the city is not city):
+//     land is the max of seeded angular blobs, their outlines bent by one warp field into bays
+//     and headlands, plus fine coves at the waterline;
+//   - the city's continent: the coast hugs the plateau on most bearings (a guard keeps land to
+//     ~20 m past the plateau edge, the blend ring lifting it gently, then a 1-2 m deep lagoon shelf
+//     with sandbars for ~40 m before deep water, so the shore is a turquoise ring, never a circle
+//     or a drop), a windmill hill on the sunny (west) side, and a neck of meadows and woods out to
+//     a peninsula carrying a ridge of snowcapped peaks across the city's line of sight (~1 rad);
+//   - islands in the city's sea and a second continent with an archipelago on the far side;
+//   - a wide, gently sloping beach ramp (same slope on both sides of the waterline), rolling hills
+//     inland (calmer right around the city), a shallow turquoise shelf then deep basins offshore;
 //   - the city plateau blended in with a smoothstep over PLATEAU_BLEND radians: no cliff.
 //
 // A1 may tune the shape (BRIEF: "may tune world/planet*"), keeping heightAt's range, the plateau
@@ -66,6 +73,12 @@ const smooth = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** 0 → 1 over x ∈ [0, 1] with a finite slope at 0 and a flat top (1 − (1 − x)²). */
+const easeOut = (x: number) => {
+  const t = Math.min(1, Math.max(0, x));
+  return 1 - (1 - t) * (1 - t);
+};
+
 const cache = new Map<number, Planet>();
 
 /** The planet for `seed` (cached). getPlanet() with no argument is the canonical world. */
@@ -82,71 +95,143 @@ export function createPlanet(seed: number): Planet {
   const nMoist = createNoise3(seed ^ 0x4004);
   const cityDir = dirFromLatLon(CITY_LAT, CITY_LON);
 
-  // Continent blobs: the city's, plus two more spread around the globe.
+  // Land masses (angular blobs). The city's continent is kept compact so that from orbit the
+  // planet reads ~55-60 % ocean even with the 0.56 rad plateau in view: a ring of coast around the
+  // plateau (bays come within ~8 m of the blend ring, headlands reach ~50 m out), a mountainous
+  // peninsula carrying the snowy range, a few islands in the city's sea, a second continent and an
+  // archipelago on the far side.
   const rng = Rng.for(seed, 'continents');
-  const blobs: Array<{ c: Vec3; r: number; k: number }> = [{ c: cityDir, r: 1.25, k: 0.55 }];
-  while (blobs.length < 3) {
-    const c = normalize3(v3(rng.gauss(), rng.gauss() * 0.6, rng.gauss()));
-    if (blobs.every((b) => angleBetween(b.c, c) > 1.5)) blobs.push({ c, r: rng.range(0.7, 0.95), k: rng.range(0.55, 0.7) });
-  }
-  // The mountain range: a ridge line on the city's continent, ~1.2 rad from the city.
-  const rangeCentre = v3();
-  {
+  const blobs: Array<{ c: Vec3; r: number; k: number }> = [];
+  const pointAt = (from: Vec3, ang: number, bearing: number): Vec3 => {
     const e = v3();
     const n = v3();
-    tangentFrame(cityDir, e, n);
-    const a = rng.range(0, Math.PI * 2);
-    const t = v3(e.x * Math.cos(a) + n.x * Math.sin(a), e.y * Math.cos(a) + n.y * Math.sin(a), e.z * Math.cos(a) + n.z * Math.sin(a));
-    const ang = 1.05;
-    rangeCentre.x = cityDir.x * Math.cos(ang) + t.x * Math.sin(ang);
-    rangeCentre.y = cityDir.y * Math.cos(ang) + t.y * Math.sin(ang);
-    rangeCentre.z = cityDir.z * Math.cos(ang) + t.z * Math.sin(ang);
-    normalize3(rangeCentre);
-    // Keep the city's continent big enough to hold the range.
-    blobs.push({ c: v3(rangeCentre.x, rangeCentre.y, rangeCentre.z), r: 0.7, k: 0.55 });
+    tangentFrame(from, e, n);
+    const tx = e.x * Math.cos(bearing) + n.x * Math.sin(bearing);
+    const ty = e.y * Math.cos(bearing) + n.y * Math.sin(bearing);
+    const tz = e.z * Math.cos(bearing) + n.z * Math.sin(bearing);
+    return normalize3(v3(from.x * Math.cos(ang) + tx * Math.sin(ang), from.y * Math.cos(ang) + ty * Math.sin(ang), from.z * Math.cos(ang) + tz * Math.sin(ang)));
+  };
+  // The mountain range: a ridge on a peninsula of the city's continent, ~0.98 rad from the city, so
+  // its snowcaps peek over the city's horizon from the rooftops and fill the skyline from 40 m up.
+  const rangeBearing = rng.range(0, Math.PI * 2);
+  const rangeCentre = pointAt(cityDir, 0.98, rangeBearing);
+  const cosRC = cityDir.x * rangeCentre.x + cityDir.y * rangeCentre.y + cityDir.z * rangeCentre.z;
+  // The range runs across the city's line of sight (its long side faces the city skyline).
+  const toCity = normalize3(v3(cityDir.x - rangeCentre.x * cosRC, cityDir.y - rangeCentre.y * cosRC, cityDir.z - rangeCentre.z * cosRC));
+  const ridgeT = cross3(v3(), rangeCentre, toCity);
+  const along = (s: number) => normalize3(v3(rangeCentre.x * Math.cos(s) + ridgeT.x * Math.sin(s), rangeCentre.y * Math.cos(s) + ridgeT.y * Math.sin(s), rangeCentre.z * Math.cos(s) + ridgeT.z * Math.sin(s)));
+  // The city's continent: the coast hugs the plateau on most bearings (beaches just past the blend
+  // ring, a blue planet from orbit), and a broad neck of meadows and forest runs out to the range's
+  // peninsula: windmill hills and woods at the foot of the snowy ridge, seen from the city.
+  blobs.push({ c: pointAt(cityDir, 0.48, rangeBearing + Math.PI), r: 0.22, k: 0.3 });
+  // A hill on the sunny side (west of the city at the start of the day): the windmill meadow.
+  const windHill = pointAt(cityDir, 0.76, rangeBearing + Math.PI + 0.5);
+  blobs.push({ c: windHill, r: 0.19, k: 0.34 });
+  blobs.push({ c: pointAt(cityDir, 0.66, rangeBearing), r: 0.24, k: 0.42 }); // the neck
+  blobs.push({ c: pointAt(cityDir, 0.74, rangeBearing + 0.45), r: 0.13, k: 0.32 }); // a shoulder
+  blobs.push({ c: rangeCentre, r: 0.27, k: 0.56 });
+  blobs.push({ c: along(0.2), r: 0.21, k: 0.52 });
+  blobs.push({ c: along(-0.2), r: 0.21, k: 0.52 });
+  // A couple of small headlands off the city's coast, away from the range.
+  blobs.push({ c: pointAt(cityDir, 0.74, rangeBearing + 2.3), r: 0.13, k: 0.14 });
+  blobs.push({ c: pointAt(cityDir, 0.72, rangeBearing - 2.0), r: 0.12, k: 0.13 });
+  // Islands in the city's sea, east and south of it (beside the city as seen from orbit). Each is
+  // two or three overlapping blobs so none is a round dot.
+  // Low k: a gentle dome with a sandy rim (a high k on a small blob made cliffs, not beaches).
+  // (A wide, low blob has a gentle shelf: the coast's slope scales with k / r.)
+  const island = (c: Vec3, r: number) => {
+    blobs.push({ c, r: r * 1.7, k: rng.range(0.1, 0.2) });
+    const extra = rng.int(1, 2);
+    for (let j = 0; j < extra; j++) blobs.push({ c: pointAt(c, r * rng.range(0.6, 1.1), rng.range(0, Math.PI * 2)), r: r * rng.range(0.9, 1.3), k: rng.range(0.06, 0.14) });
+  };
+  for (const [bearing, dist, r] of [
+    [0.3, 1.05, 0.1],
+    [0.75, 1.25, 0.08],
+    [1.15, 1.0, 0.06],
+    [-1.3, 1.1, 0.09],
+    [-1.75, 1.32, 0.07],
+  ]) {
+    island(pointAt(cityDir, dist + rng.range(-0.05, 0.05), bearing + rng.range(-0.1, 0.1)), r);
   }
+  // The far side: a second continent and an archipelago arcing away from it.
+  const anti = v3(-cityDir.x, -cityDir.y, -cityDir.z);
+  const second = pointAt(anti, 0.45, rng.range(0, Math.PI * 2));
+  blobs.push({ c: second, r: 0.72, k: 0.55 });
+  const archBearing = rng.range(0, Math.PI * 2);
+  for (let i = 0; i < 6; i++) island(pointAt(second, 1.05 + i * 0.19, archBearing + Math.sin(i * 0.9) * 0.35), rng.range(0.07, 0.13) * (1 - i * 0.06));
+  blobs.push({ c: pointAt(anti, 1.2, rng.range(0, Math.PI * 2)), r: 0.42, k: 0.5 });
+  const cosBlob = blobs.map((b) => 1 - Math.cos(b.r));
 
-  const cosGuard0 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.02);
-  const cosGuard1 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.3);
+  // Land guard around the plateau: land to ~20 m past the plateau edge (the coast sits inside the
+  // blend ring, which lifts it gently), then a wide shallow lagoon shelf (1-2 m deep, ~40 m) before
+  // the drop to deep water, so the shore is a turquoise ring and never a cliff. The wobble moves
+  // both edges: bays, points and sandbars instead of a circle.
+  const GUARD_LAND = PLATEAU_RADIUS + 0.05;
+  const cosGuardShelf = Math.cos(1.3);
+  function guard(cosCity: number, wobble: number, bars: number): number {
+    const a = Math.acos(Math.min(1, cosCity));
+    const coast = smooth(GUARD_LAND - 0.02, GUARD_LAND + 0.07 + 0.04 * wobble, a);
+    const drop = smooth(0.8 + 0.07 * wobble, 1.06 + 0.06 * wobble, a);
+    // Sandbars and channels: the lagoon floor varies between ~0.4 and ~2.2 m deep.
+    return 0.12 - (0.2 + 0.07 * bars) * coast - 0.32 * drop;
+  }
   function continent(d: Vec3): number {
-    let c = 0.42 * nContinent.fbm3(d.x * 1.3, d.y * 1.3, d.z * 1.3, 4) - 0.3;
+    // One warp field bends every blob's outline into bays and headlands.
+    const wn = nContinent.fbm3(d.x * 2.1, d.y * 2.1, d.z * 2.1, 3);
+    const warp = 1 + 0.45 * wn;
+    let c = -0.3;
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       const cosA = d.x * b.c.x + d.y * b.c.y + d.z * b.c.z;
-      // Smooth bump of angular radius b.r (cosine-space falloff, no trig).
-      const x = (1 - cosA) / (1 - Math.cos(b.r));
-      if (x < 1) c += b.k * (1 - x) * (1 - x);
+      const x = ((1 - cosA) / cosBlob[i]) * warp;
+      if (x < 1) c = Math.max(c, -0.3 + (b.k + 0.3) * (1 - x) * (2 - (1 - x)) * 0.999);
     }
-    // Guarantee land around the plateau (the coast stays at least ~10 m beyond the blend ring),
-    // without drawing a circular coastline: the guard only lifts, the noise still shapes the coast.
+    // Coves and spits at a ~20-40 m scale, strongest at the waterline.
+    const cn = nContinent.fbm3(d.x * 6.5 + 11, d.y * 6.5, d.z * 6.5 - 7, 3);
+    c += 0.075 * cn;
+    // Guarantee land around the plateau: the blend ring and a few metres beyond it are always land
+    // (the noise still shapes the coast right after, so it is not a circle).
     const cosCity = d.x * cityDir.x + d.y * cityDir.y + d.z * cityDir.z;
-    c += 0.32 * smooth(cosGuard1, cosGuard0, cosCity);
+    if (cosCity > cosGuardShelf) c = Math.max(c, guard(cosCity, Math.max(-1, Math.min(1, 1.6 * wn + 1.2 * cn)), nDetail.simplex3(d.x * 13 + 5, d.y * 13, d.z * 13)));
     return c;
   }
 
+  const cosRangeOut = Math.cos(0.62);
+  const cosAway0 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.03);
+  const cosAway1 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.2);
   function mountainAt(d: Vec3): number {
     const cosA = d.x * rangeCentre.x + d.y * rangeCentre.y + d.z * rangeCentre.z;
-    // Elongated: a noise-warped band through the range centre.
-    const band = Math.abs(nMountain.fbm3(d.x * 1.6 + 3.1, d.y * 1.6, d.z * 1.6 - 1.7, 3));
-    const near = smooth(0.62, 0.86, cosA);
+    if (cosA < cosRangeOut) return 0;
+    // A noise-bent ridge line through the range centre.
+    const across = d.x * toCity.x + d.y * toCity.y + d.z * toCity.z + 0.09 * nMountain.fbm3(d.x * 3.1, d.y * 3.1, d.z * 3.1, 2);
+    const along = d.x * ridgeT.x + d.y * ridgeT.y + d.z * ridgeT.z;
+    const m = (1 - smooth(0.04, 0.2, Math.abs(across))) * (1 - smooth(0.2, 0.42, Math.abs(along)));
+    if (m <= 0) return 0;
     const cosCity = d.x * cityDir.x + d.y * cityDir.y + d.z * cityDir.z;
-    const awayFromCity = smooth(Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.12), Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.4), cosCity);
-    return near * smooth(0.32, 0.06, band) * awayFromCity;
+    return m * smooth(cosAway0, cosAway1, cosCity);
   }
 
+  const cosCalm0 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND - 0.04);
+  const cosCalm1 = Math.cos(PLATEAU_RADIUS + PLATEAU_BLEND + 0.3);
   function natural(d: Vec3): number {
     const c = continent(d);
     if (c < 0) {
       // Shelf near the coast, basins further out.
-      const deep = smooth(0.02, 0.45, -c);
+      // (A wide, shallow shelf first: turquoise lagoons and a gentle waterline, then the drop.)
+      const deep = smooth(0.07, 0.5, -c);
       const ripple = 1.5 * nDetail.simplex3(d.x * 9, d.y * 9, d.z * 9);
-      return Math.max(OCEAN_FLOOR, -deep * (-OCEAN_FLOOR - 2) + ripple * deep - 2 * smooth(0, 0.1, -c));
+      return Math.max(OCEAN_FLOOR, -deep * (-OCEAN_FLOOR - 2) + ripple * deep - 2 * easeOut(-c / 0.26));
     }
-    const inland = smooth(0.04, 0.28, c);
+    // Gentle meadows right around the city, bigger hills further out.
+    const cosCity = d.x * cityDir.x + d.y * cityDir.y + d.z * cityDir.z;
+    const calm = cosCity > cosCalm1 ? 0.36 + 0.64 * smooth(cosCalm0, cosCalm1, cosCity) : 1;
+    const inland = smooth(0.04, 0.28, c) * calm;
     // Coast: a gentle beach ramp from the waterline, then rolling hills further in.
-    let h = 1.55 * smooth(0.0, 0.1, c); // continuous with the seabed at the waterline (c = 0)
-    h += inland * (1.8 + 1.8 * nDetail.fbm3(d.x * 5.5, d.y * 5.5, d.z * 5.5, 3));
-    h += inland * 6 * smooth(0.25, 0.7, c) * (0.5 + 0.5 * nDetail.simplex3(d.x * 2.3, d.y * 2.3, d.z * 2.3));
+    // A wide, gently sloping beach; continuous with the seabed at the waterline (c = 0) and with
+    // the same slope on both sides (no flat zone the swell would flood).
+    let h = 1.3 * easeOut(c / 0.17);
+    h += inland * (1.8 + 2.0 * nDetail.fbm3(d.x * 5.5, d.y * 5.5, d.z * 5.5, 3));
+    h += inland * 8 * smooth(0.12, 0.42, c) * Math.max(0, 0.3 + 0.7 * nDetail.simplex3(d.x * 3.1, d.y * 3.1, d.z * 3.1));
     const m = mountainAt(d);
     if (m > 0.001) {
       const r = nMountain.ridged3(d.x * 4.2, d.y * 4.2, d.z * 4.2, 5);
@@ -173,8 +258,18 @@ export function createPlanet(seed: number): Planet {
     return w <= 0 ? n : n + (PLATEAU_HEIGHT - n) * w;
   }
 
+  const cosWet0 = Math.cos(0.75);
+  const cosWet1 = Math.cos(0.35);
+  const cosDry0 = Math.cos(0.24);
+  const cosDry1 = Math.cos(0.1);
   function moistureAt(d: Vec3): number {
-    return 0.5 + 0.5 * nMoist.fbm3(d.x * 2.6, d.y * 2.6, d.z * 2.6, 3);
+    const m = 0.5 + 0.5 * nMoist.fbm3(d.x * 2.6, d.y * 2.6, d.z * 2.6, 3);
+    // Wetter at the range's foot: woods between the windmill meadows and the rock.
+    const cosR = d.x * rangeCentre.x + d.y * rangeCentre.y + d.z * rangeCentre.z;
+    if (cosR > cosWet0) return Math.min(1, m + 0.16 * smooth(cosWet0, cosWet1, cosR));
+    // Drier on the windmill hill: open meadow round the mills.
+    const cosW = d.x * windHill.x + d.y * windHill.y + d.z * windHill.z;
+    return cosW > cosDry0 ? Math.max(0, m - 0.22 * smooth(cosDry0, cosDry1, cosW)) : m;
   }
 
   function biomeAt(d: Vec3, hIn?: number): BiomeId {
@@ -182,7 +277,8 @@ export function createPlanet(seed: number): Planet {
     if (h < -3.5) return Biome.DeepOcean;
     if (h < 0) return Biome.Shallows;
     if (plateauWeight(d) >= 1) return Biome.City;
-    if (h < 1.1 && plateauWeight(d) < 0.5) return Biome.Beach;
+    // Beaches ring every shore (the city's bays too), wider in some coves than others.
+    if (h < 1.25 + 0.4 * nDetail.simplex3(d.x * 6.5, d.y * 6.5, d.z * 6.5)) return Biome.Beach;
     const m = mountainAt(d);
     const jitter = 1.6 * nDetail.simplex3(d.x * 23, d.y * 23, d.z * 23);
     if (h + jitter > 18.5) return Biome.Snow;

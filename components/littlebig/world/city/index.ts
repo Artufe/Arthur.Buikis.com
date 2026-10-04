@@ -1,13 +1,13 @@
 // The canonical city: one plan per page load, built lazily from the world seed, plus its spatial
 // index. Systems read it through ctx.world.city / ctx.world.cityIndex rather than calling these.
 //
-// A2: swap buildStubPlan for the real plan builder here (keep the CityPlan contract in types.ts).
+// The plan is A2's (plan.ts: layout.ts → graph.ts → blocks.ts → buildings, areas, features).
 
 import { PLATEAU_HEIGHT, SEED } from '../config';
 import { getPlanet } from '../planet';
 import { planToDir } from './frame';
 import { createCityIndex } from './index-grid';
-import { buildStubPlan } from './stub';
+import { buildCityPlan } from './plan';
 import type { CityIndex, CityPlan } from './types';
 
 let plan: CityPlan | null = null;
@@ -16,7 +16,7 @@ let index: CityIndex | null = null;
 /** Read-only: shared by every engine instance. Deep-frozen in development so a mutation throws. */
 export function getCityPlan(): CityPlan {
   if (!plan) {
-    plan = buildStubPlan(SEED);
+    plan = buildCityPlan(SEED);
     if (process.env.NODE_ENV !== 'production') deepFreeze(plan);
   }
   return plan;

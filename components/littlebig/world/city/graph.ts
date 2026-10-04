@@ -55,6 +55,16 @@ export interface RoadGraph {
 const KIND_RANK: Record<RoadKind, number> = { ring: 4, avenue: 3, street: 2, lane: 1, rural: 2 };
 /** Zebra strip extent along the road (m). */
 const CROSSING_WIDTH = 2.4;
+/** Extra patch radius (m) for the rounded curb corners at junctions (smaller = tighter corners, less apron). */
+const FILLET = 0.6;
+
+/**
+ * Radius (m) of a dead end's turning circle (its carriageway), centred on the node. The arm's
+ * centreline is trimmed where its curbs meet that circle: RoadNode.radius = √(ρ² − half²).
+ */
+export function turningRadius(half: number): number {
+  return Math.max(5.4, half + 2.6);
+}
 
 export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdge[]): RoadGraph {
   const nodes: RoadNode[] = sketchNodes.map((n, id) => ({
@@ -73,7 +83,14 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
   });
 
   // Departure direction of edge `id` from node `n` (taken a few metres out, so curves read right).
+  const depCache = new Map<number, { x: number; z: number }>();
   const departure = (id: number, n: number) => {
+    const key = id * 4096 + n;
+    let d = depCache.get(key);
+    if (!d) depCache.set(key, (d = departureRaw(id, n)));
+    return d;
+  };
+  const departureRaw = (id: number, n: number) => {
     const pl = raw[id];
     const fromA = sketchEdges[id].a === n;
     const s = Math.min(6, pl.length * 0.3);
@@ -107,8 +124,11 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
       }
     }
     if (n.kind === 'bend') n.radius = 0.6; // bends: nearly continuous, tiny patch
-    else if (n.kind === 'end') n.radius = halfMax + 1;
-    else n.radius = Math.max(halfMax + 2.5, halfMax / Math.tan(Math.max(0.35, minGap) / 2) + 2.5);
+    else if (n.kind === 'end') {
+      const half = (sketchEdges[n.edges[0]].width ?? 6.5) / 2;
+      const rho = turningRadius(half);
+      n.radius = Math.sqrt(rho * rho - half * half);
+    } else n.radius = Math.max(halfMax + FILLET, halfMax / Math.tan(Math.max(0.35, minGap) / 2) + FILLET);
     if (n.edges.length >= 3 && n.control === 'none') n.control = 'yield';
   }
 
@@ -177,7 +197,7 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
         const z0 = pa[pa.length - 1];
         const x1 = pb[0];
         const z1 = pb[1];
-        const pts = turn === 'uturn' ? uturnPoints(x0, z0, ta, x1, z1) : hermitePoints(x0, z0, ta.x, ta.z, x1, z1, tb.x, tb.z);
+        const pts = turn === 'uturn' ? uturnPoints(x0, z0, ta, x1, z1, n, turningRadius(edges[a.edge].width / 2) - 1.6) : hermitePoints(x0, z0, ta.x, ta.z, x1, z1, tb.x, tb.z);
         // Pin exact endpoints (lane continuity is an invariant).
         pts[0] = x0;
         pts[1] = z0;
@@ -193,25 +213,40 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
     }
   }
   // Conflicts: connectors at the same node that cross, merge into the same lane, or pass closer than
-  // VEHICLE_CLEARANCE (two buses side by side), so yielding alone guarantees no overlap.
+  // VEHICLE_CLEARANCE (two buses side by side), so yielding alone guarantees no overlap. Only traffic
+  // (stage 2) needs them, so they are computed per node on first read, off the first-frame path.
   const byNode = new Map<number, Connector[]>();
   for (const c of connectors) {
     let l = byNode.get(c.node);
     if (!l) byNode.set(c.node, (l = []));
     l.push(c);
   }
-  for (const list of byNode.values()) {
+  const conflicts: number[][] = [];
+  const solve = (node: number) => {
+    const list = byNode.get(node)!;
+    const out = list.map(() => [] as number[]);
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const p = list[i];
         const q = list[j];
         if (p.fromLane === q.fromLane) continue; // diverging from the same lane: car-following handles it
-        if (p.toLane === q.toLane || pathsCross(p.path, q.path) || minPathDistance(p.path, q.path, VEHICLE_CLEARANCE) < VEHICLE_CLEARANCE) {
-          p.conflicts.push(q.id);
-          q.conflicts.push(p.id);
+        // (Tested on every other sample, with a margin over the decimation error: conservative.)
+        if (p.toLane === q.toLane || (boxGap(p.path, q.path) < VEHICLE_CLEARANCE + 0.2 && (pathsCross(p.path, q.path) || minPathDistance(p.path, q.path, VEHICLE_CLEARANCE + 0.2) < VEHICLE_CLEARANCE + 0.2))) {
+          out[i].push(q.id);
+          out[j].push(p.id);
         }
       }
     }
+    list.forEach((c, i) => (conflicts[c.id] = Object.freeze(out[i].sort((a, b) => a - b)) as number[]));
+  };
+  for (const c of connectors) {
+    Object.defineProperty(c, 'conflicts', {
+      get() {
+        if (!conflicts[c.id]) solve(c.node);
+        return conflicts[c.id];
+      },
+      enumerable: false,
+    });
   }
 
   // Intersection outlines and the walk graph.
@@ -312,15 +347,55 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
     // Outline: for each arm L curb, R curb, then a fillet to the next arm's L curb.
     const out: number[] = [];
     if (arms.length === 1) {
+      // Dead end: a turning circle of radius ρ round the node; the arm's curbs meet it at the trim line.
       const a = arms[0];
-      // Dead end: a round cap.
-      // L curb, R curb, then around the back of the node from the right side to the left.
+      const rho = turningRadius(a.half);
+      const lx = a.px - a.rx * a.half;
+      const lz = a.pz - a.rz * a.half;
+      const rx = a.px + a.rx * a.half;
+      const rz = a.pz + a.rz * a.half;
+      out.push(lx, lz, rx, rz);
+      // The long way round from the right curb to the left one.
+      let t0 = Math.atan2(rz - n.z, rx - n.x);
+      let t1 = Math.atan2(lz - n.z, lx - n.x);
       const ang = Math.atan2(a.uz, a.ux);
-      const r = Math.max(n.radius, a.half + 1);
-      out.push(a.px - a.rx * a.half, a.pz - a.rz * a.half, a.px + a.rx * a.half, a.pz + a.rz * a.half);
-      for (let k = 1; k < 16; k++) {
-        const t = ang + Math.PI / 2 + (Math.PI * k) / 16;
-        out.push(n.x + Math.cos(t) * r, n.z + Math.sin(t) * r);
+      const away = ang + Math.PI;
+      // Pick the direction whose midpoint lies away from the arm.
+      let d = t1 - t0;
+      d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+      if (Math.cos(t0 + d / 2 - away) < 0) d += d > 0 ? -2 * Math.PI : 2 * Math.PI;
+      const steps = Math.max(12, Math.ceil((Math.abs(d) * rho) / 0.7));
+      for (let k = 1; k < steps; k++) {
+        const t = t0 + (d * k) / steps;
+        out.push(n.x + Math.cos(t) * rho, n.z + Math.sin(t) * rho);
+      }
+      // Its sidewalk ring (a 'corner' walk edge from the right sidewalk round to the left one).
+      if (a.walkR !== undefined && a.walkL !== undefined) {
+        const wa = walkNodes[a.walkR];
+        const wb = walkNodes[a.walkL];
+        const ra = Math.hypot(wa.x - n.x, wa.z - n.z);
+        const rb = Math.hypot(wb.x - n.x, wb.z - n.z);
+        t0 = Math.atan2(wa.z - n.z, wa.x - n.x);
+        t1 = Math.atan2(wb.z - n.z, wb.x - n.x);
+        let dw = t1 - t0;
+        dw -= Math.round(dw / (2 * Math.PI)) * 2 * Math.PI;
+        if (Math.cos(t0 + dw / 2 - away) < 0) dw += dw > 0 ? -2 * Math.PI : 2 * Math.PI;
+        const pts: number[] = [];
+        const ns = Math.max(12, Math.ceil((Math.abs(dw) * (rho + a.e.sidewalk / 2)) / 0.7));
+        for (let k = 0; k <= ns; k++) {
+          const f = k / ns;
+          // ease from the sidewalk node's radius onto the ring and back
+          const ring = rho + a.e.sidewalk / 2;
+          const e = Math.min(1, Math.min(f, 1 - f) * 5);
+          const rr = (k === 0 ? ra : k === ns ? rb : (ra * (1 - f) + rb * f) * (1 - e) + ring * e);
+          const t = t0 + dw * f;
+          pts.push(n.x + Math.cos(t) * rr, n.z + Math.sin(t) * rr);
+        }
+        pts[0] = wa.x;
+        pts[1] = wa.z;
+        pts[pts.length - 2] = wb.x;
+        pts[pts.length - 1] = wb.z;
+        addWalkEdge(a.walkR, a.walkL, 'corner', polyline(pts), a.e.sidewalk);
       }
     } else {
       for (let i = 0; i < arms.length; i++) {
@@ -333,13 +408,13 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
         out.push(lx, lz, rx, rz);
         const bx = b.px - b.rx * b.half;
         const bz = b.pz - b.rz * b.half;
-        const f = hermitePoints(rx, rz, -a.ux, -a.uz, bx, bz, b.ux, b.uz, 0.5, 0.4);
+        const f = cornerPoints(rx, rz, a.ux, a.uz, bx, bz, b.ux, b.uz);
         for (let k = 2; k < f.length - 2; k += 2) out.push(f[k], f[k + 1]);
         // Corner sidewalk (walk edge) around the same corner, offset outward by half a sidewalk.
         if (a.walkR !== undefined && b.walkL !== undefined && arms.length > 1) {
           const wa = walkNodes[a.walkR];
           const wb = walkNodes[b.walkL];
-          const cp = hermitePoints(wa.x, wa.z, -a.ux, -a.uz, wb.x, wb.z, b.ux, b.uz, 0.5, 0.4);
+          const cp = cornerPoints(wa.x, wa.z, a.ux, a.uz, wb.x, wb.z, b.ux, b.uz);
           addWalkEdge(a.walkR, b.walkL, 'corner', polyline(cp), Math.min(a.e.sidewalk, b.e.sidewalk));
         }
       }
@@ -376,6 +451,15 @@ export function buildRoadGraph(sketchNodes: SketchNode[], sketchEdges: SketchEdg
   }
 
   return { nodes, edges, lanes, connectors, intersections, walkNodes, walkEdges };
+}
+
+/**
+ * The rounded curb corner between two arms of a junction: from arm a's right curb end (rx, rz)
+ * heading back into the patch (−a.u) to arm b's left curb end heading out along b.u. Shared with
+ * blocks.ts and the renderer so curbs, corner sidewalks and block outlines agree exactly.
+ */
+export function cornerPoints(rx: number, rz: number, aux: number, auz: number, bx: number, bz: number, bux: number, buz: number): number[] {
+  return hermitePoints(rx, rz, -aux, -auz, bx, bz, bux, buz, 0.5, 0.4);
 }
 
 function trimByRadius(pl: Polyline, na: RoadNode, ra: number, nb: RoadNode, rb: number): Polyline {
@@ -428,13 +512,49 @@ function laneIndex(e: RoadEdge, laneId: number): number {
   return i >= 0 ? i : e.lanesBA.indexOf(laneId);
 }
 
-function uturnPoints(x0: number, z0: number, t: { x: number; z: number }, x1: number, z1: number): number[] {
-  // Loop out ahead and come back: a balloon around the dead-end cap.
-  const mx = (x0 + x1) / 2 + t.x * 3;
-  const mz = (z0 + z1) / 2 + t.z * 3;
-  const a = hermitePoints(x0, z0, t.x, t.z, mx, mz, (x1 - x0) / (Math.hypot(x1 - x0, z1 - z0) || 1), (z1 - z0) / (Math.hypot(x1 - x0, z1 - z0) || 1));
-  const b = hermitePoints(mx, mz, (x1 - x0) / (Math.hypot(x1 - x0, z1 - z0) || 1), (z1 - z0) / (Math.hypot(x1 - x0, z1 - z0) || 1), x1, z1, -t.x, -t.z);
-  return [...a, ...b.slice(2)];
+/**
+ * Round a turning circle: from the arriving lane's end (x0, z0; heading t, toward the node) out onto
+ * a circle of radius rc round the node, the long way round the far side, and back into the leaving
+ * lane's start (x1, z1). Right-hand traffic keeps the circle's centre on its left.
+ */
+function uturnPoints(x0: number, z0: number, t: { x: number; z: number }, x1: number, z1: number, c: { x: number; z: number }, rc: number): number[] {
+  const rx = -t.z; // right of travel
+  const rz = t.x;
+  const prx = c.x + rx * rc, prz = c.z + rz * rc;
+  const plx = c.x - rx * rc, plz = c.z - rz * rc;
+  const a = hermitePoints(x0, z0, t.x, t.z, prx, prz, t.x, t.z, 0.5, 0.45);
+  const th = Math.atan2(rz, rx);
+  const arc: number[] = [];
+  const n = Math.max(8, Math.ceil((Math.PI * rc) / 0.5));
+  for (let k = 1; k < n; k++) {
+    const q = th - (Math.PI * k) / n;
+    arc.push(c.x + Math.cos(q) * rc, c.z + Math.sin(q) * rc);
+  }
+  const b = hermitePoints(plx, plz, -t.x, -t.z, x1, z1, -t.x, -t.z, 0.5, 0.45);
+  return [...a, ...arc, ...b];
+}
+
+/** Gap between two paths' bounding boxes (0 if they overlap): a cheap lower bound on their distance. */
+function boxGap(p: Polyline, q: Polyline): number {
+  const bp = bbox(p);
+  const bq = bbox(q);
+  const dx = Math.max(0, bp[0] - bq[2], bq[0] - bp[2]);
+  const dz = Math.max(0, bp[1] - bq[3], bq[1] - bp[3]);
+  return Math.hypot(dx, dz);
+}
+const boxes = new WeakMap<Polyline, number[]>();
+function bbox(pl: Polyline): number[] {
+  let b = boxes.get(pl);
+  if (b) return b;
+  b = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pl.pts.length; i += 2) {
+    b[0] = Math.min(b[0], pl.pts[i]);
+    b[1] = Math.min(b[1], pl.pts[i + 1]);
+    b[2] = Math.max(b[2], pl.pts[i]);
+    b[3] = Math.max(b[3], pl.pts[i + 1]);
+  }
+  boxes.set(pl, b);
+  return b;
 }
 
 function segIntersect(ax: number, az: number, bx: number, bz: number, cx: number, cz: number, dx: number, dz: number): boolean {
@@ -446,8 +566,9 @@ function segIntersect(ax: number, az: number, bx: number, bz: number, cx: number
 }
 
 function pathsCross(p: Polyline, q: Polyline): boolean {
-  const a = p.pts;
-  const b = q.pts;
+  // Every other sample (≤ 1 m chords of 0.5 m-sampled turn curves); the ends are always included.
+  const a = decimated(p);
+  const b = decimated(q);
   for (let i = 0; i < a.length - 2; i += 2) {
     for (let j = 0; j < b.length - 2; j += 2) {
       if (segIntersect(a[i], a[i + 1], a[i + 2], a[i + 3], b[j], b[j + 1], b[j + 2], b[j + 3])) return true;
@@ -456,15 +577,29 @@ function pathsCross(p: Polyline, q: Polyline): boolean {
   return false;
 }
 
+const decim = new WeakMap<Polyline, number[]>();
+function decimated(pl: Polyline): number[] {
+  let d = decim.get(pl);
+  if (d) return d;
+  d = [];
+  const n = pl.pts.length >> 1;
+  for (let i = 0; i < n; i += 2) d.push(pl.pts[i * 2], pl.pts[i * 2 + 1]);
+  if ((n - 1) % 2) d.push(pl.pts[(n - 1) * 2], pl.pts[(n - 1) * 2 + 1]);
+  decim.set(pl, d);
+  return d;
+}
+
 /**
  * Minimum distance between two polylines (each one's samples against the other's segments, so
  * 1 m sampling never hides a near pass). Returns early with a value < stop once one is found.
  */
 function minPathDistance(p: Polyline, q: Polyline, stop: number): number {
   let best = Infinity;
+  const dp = decimated(p);
+  const dq = decimated(q);
   for (const [u, v] of [
-    [p.pts, q.pts],
-    [q.pts, p.pts],
+    [dp, dq],
+    [dq, dp],
   ]) {
     for (let i = 0; i < u.length; i += 2) {
       for (let j = 0; j < v.length - 2; j += 2) {
