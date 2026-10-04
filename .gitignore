@@ -53,3 +53,7 @@ docs/goldenline/shots/*
 
 # /play capture: the Snake engine bundles are regenerated with esbuild (docs/play-media.md)
 scripts/play-media/snake-engine.*
+
+# LITTLEBIG per-agent evidence shots (milestones are committed)
+docs/littlebig/shots/*
+!docs/littlebig/shots/milestones/
