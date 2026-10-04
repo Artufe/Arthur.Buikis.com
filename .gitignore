@@ -50,3 +50,6 @@ playwright-report/
 # GOLDENLINE: per-agent review/evidence shots stay local; only the curated milestones are committed.
 docs/goldenline/shots/*
 !docs/goldenline/shots/milestones/
+
+# /play capture: the Snake engine bundles are regenerated with esbuild (docs/play-media.md)
+scripts/play-media/snake-engine.*

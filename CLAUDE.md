@@ -8,7 +8,7 @@ Personal site for Arthur Buikis — Next.js 16 (App Router, Turbopack) + Tailwin
 pnpm dev            # local dev — wraps `next dev` via scripts/dev.mjs to force NODE_ENV=development
 pnpm build          # static export → ./out, then scripts/postbuild.mjs (OG image rename)
 pnpm typecheck      # tsc --noEmit (run before pushing)
-pnpm test           # vitest run (tests/{app,components,lib}, components/**/*.spec.ts, .github/scripts)
+pnpm test           # vitest run (tests/{app,components,content,lib}, components/**/*.spec.ts, .github/scripts)
 pnpm test:e2e       # playwright (tests/e2e) — auto-starts `pnpm dev` unless :3000 is already up
 ```
 
@@ -19,20 +19,22 @@ There is no lint script (no ESLint config in the repo) and no `start` script (`n
 ## Layout
 
 ```
-app/            Routes: / (page.tsx), about/, building/, contact/, cv/, work/[slug]/,
+app/            Routes: / (page.tsx), about/, building/, play/, contact/, cv/, work/[slug]/,
                 subscribe/, snake/, surf/,
                 plus sitemap.ts, robots.ts, llms.txt/, llms-full.txt/, opengraph-image.tsx
 components/     Page sections + global chrome; ui/ (Input, Textarea), mdx/ (MDX overrides),
                 snake/ (three.js 3D snake game), goldenline/ (WebGPU surf demo),
-                floating-window.tsx (shared game window)
-content/        site.ts, cv.ts, about.ts (typed data) + work/*.mdx, building/*.mdx
+                play/ (GameClip, GameCard, PlayMethod), floating-window.tsx (shared game window)
+content/        site.ts, cv.ts, about.ts, play.ts (typed data) + work/*.mdx, building/*.mdx
 lib/            Pure helpers: commands.ts (palette commands), fuzzy.ts, utils.ts (cn),
                 and window-event buses: palette-bus, plasma-bus, snake-bus, surf-bus, ide-bus
-public/         Static assets: CNAME, cv.pdf, favicons, site.webmanifest, hero-shader.js
+public/         Static assets: CNAME, cv.pdf, favicons, site.webmanifest, hero-shader.js,
+                play/ (game clips + posters)
 scripts/        dev.mjs, postbuild.mjs, gen-icons.py (favicons), goldenline-shot.mjs (GOLDENLINE
-                review shots / perf / boot timing), mcp/ (image server for the Claude bot)
-docs/           hero-shader.md, goldenline/ (brief, agent task list, decisions, perf, assets)
-tests/          vitest (app/, components/, lib/) + playwright (e2e/)
+                review shots / perf / boot timing), play-media/ (capture helpers for the /play
+                clips), mcp/ (image server for the Claude bot)
+docs/           hero-shader.md, play-media.md, goldenline/ (brief, agent task list, decisions, perf, assets)
+tests/          vitest (app/, components/, content/, lib/) + playwright (e2e/)
 .github/        workflows/, scripts/grok-imagine.mjs (PR image bot), agents/ (prompt library)
 ```
 
@@ -84,6 +86,7 @@ All in `app/globals.css`, defined on `:root` (light) and overridden on `.dark`:
 - `content/site.ts` — name, email, URL, nav, socials, bio (`knowsAbout` feeds JSON-LD, OG image, llms.txt), Formspree + newsletter endpoints. Single source of truth for contact details.
 - `content/cv.ts` — typed CV (`CVExperience`, `CVProject`, `CVLanguage`). `app/cv/page.tsx` renders it; `public/cv.pdf` is generated separately and committed.
 - `content/about.ts` — timeline, beliefs, anti-list, `stackGroups` (rendered on /about *and* /cv), `sideThings` (home hero sidebar).
+- `content/play.ts` — the games, receipts and "How these were built" data for `/play`, the home Play strip and `llms.txt`. Media lives in `public/play/` (MP4 + JPG posters, Snake has dark/light variants). Regenerate it with `docs/play-media.md` (scripts in `scripts/play-media/`, run against the dev server). `GameClip` (`components/play/game-clip.tsx`) owns all video behaviour: in-view autoplay, off-screen/hidden-tab pause, a pause toggle outside the card link, poster only under reduced motion.
 - `content/work/*.mdx` — case studies. Each exports a `meta` object. To add one, register the slug in the `works` map in `app/work/[slug]/page.tsx` **and** in `WORK_SLUGS` in `app/sitemap.ts` and `app/llms-full.txt/route.ts`, and add a line to `app/llms.txt/route.ts`.
 - Notes: the `/notes` section (hidden since #38) was removed along with its only post. `/subscribe` still pitches a future notes newsletter. If you bring notes back, restore `app/notes/` and `lib/notes.ts` from git. Note that `output: 'export'` fails the build if a dynamic route's `generateStaticParams()` returns `[]`, so don't ship the `[slug]` route without at least one post.
 - `content/building/index.mdx` — imported by `/building` (its `meta.updated` drives the header).
