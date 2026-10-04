@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { PlayMedia } from '@/content/play';
 import { cn } from '@/lib/utils';
 
@@ -38,11 +38,13 @@ function ClipLayer({
   media,
   paused,
   reduced,
+  onBlocked,
   className,
 }: {
   media: PlayMedia;
   paused: boolean;
   reduced: boolean;
+  onBlocked: () => void;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -55,7 +57,8 @@ function ClipLayer({
   useEffect(() => {
     const el = ref.current;
     if (!el || reduced) return;
-    const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+    // Entries can arrive batched (in and out before the callback runs): the last one is current.
+    const io = new IntersectionObserver((entries) => setInView(entries[entries.length - 1].isIntersecting), {
       rootMargin: '200px 0px',
     });
     io.observe(el);
@@ -72,12 +75,15 @@ function ClipLayer({
     const v = videoRef.current;
     if (!v || !loaded) return;
     if (run) {
-      // Refused autoplay (Low Power Mode, data saver) just leaves the poster up.
-      v.play().catch(() => {});
+      // Refused autoplay (Low Power Mode, data saver) leaves the poster up and flips the toggle to
+      // "Play video", so one tap starts the clip. AbortError is just a pause() interrupting play().
+      v.play().catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === 'NotAllowedError') onBlocked();
+      });
     } else {
       v.pause();
     }
-  }, [run, loaded]);
+  }, [run, loaded, onBlocked]);
 
   return (
     <div ref={ref} className={cn('play-clip-layer', className)}>
@@ -121,16 +127,17 @@ export function GameClip({
 }) {
   const reduced = useReducedMotion();
   const [paused, setPaused] = useState(false);
+  const onBlocked = useCallback(() => setPaused(true), []);
 
   return (
     <div className={cn('play-clip', className)}>
       {lightMedia ? (
         <>
-          <ClipLayer media={media} paused={paused} reduced={reduced} className="only-dark" />
-          <ClipLayer media={lightMedia} paused={paused} reduced={reduced} className="only-light" />
+          <ClipLayer media={media} paused={paused} reduced={reduced} onBlocked={onBlocked} className="only-dark" />
+          <ClipLayer media={lightMedia} paused={paused} reduced={reduced} onBlocked={onBlocked} className="only-light" />
         </>
       ) : (
-        <ClipLayer media={media} paused={paused} reduced={reduced} />
+        <ClipLayer media={media} paused={paused} reduced={reduced} onBlocked={onBlocked} />
       )}
       {children}
       {!reduced && (

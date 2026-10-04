@@ -60,6 +60,8 @@ describe('GameClip', () => {
     await act(async () => {});
     expect(videoOf(layers[0]).classList.contains('is-playing')).toBe(false);
     expect(screen.getByAltText(DARK.alt)).toBeDefined();
+    // The toggle offers to play, so one tap (a user gesture) starts the clip.
+    expect(screen.getByRole('button', { name: 'Play video' })).toBeDefined();
   });
 
   it('drops the video and toggle when reduced motion turns on', () => {
