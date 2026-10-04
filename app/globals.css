@@ -1012,6 +1012,10 @@ body:has([data-variant="page"])::after {
 body:has(canvas[aria-label="GOLDENLINE surf demo"])::after {
   display: none;
 }
+/* LITTLEBIG (page and floating window): the scanlines band its sky gradients. */
+body:has(canvas[data-littlebig])::after {
+  display: none;
+}
 
 /* ── Play: game clips (components/play/game-clip.tsx) ───────────────────────────────── */
 /* Theme-matched media. Tailwind's dark: follows the OS, so key on next-themes' class. */

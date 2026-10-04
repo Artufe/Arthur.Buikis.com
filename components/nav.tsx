@@ -42,8 +42,8 @@ export function Nav() {
   const isActive = (href: string) =>
     pathname === href || (href !== '/' && pathname !== null && pathname.startsWith(href));
 
-  // The surf demo owns the whole viewport (app/surf/page.tsx).
-  if (pathname?.startsWith('/surf')) return null;
+  // The surf demo and the planet own the whole viewport (app/surf, app/planet).
+  if (pathname?.startsWith('/surf') || pathname?.startsWith('/planet')) return null;
 
   return (
     <nav

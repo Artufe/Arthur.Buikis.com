@@ -11,6 +11,7 @@ export type CommandAction =
   | { type: 'plasma'; value: 'calm' | 'vivid' }
   | { type: 'snake' }
   | { type: 'surf' }
+  | { type: 'planet' }
   | { type: 'ide' };
 
 export type CommandGroup = 'Navigate' | 'Meta' | 'Theme';
@@ -44,6 +45,7 @@ export const commands: Command[] = [
   { id: 'help', label: 'help', group: 'Meta', arrow: '?', hint: 'shortcut keys', action: { type: 'help' } },
   { id: 'play-snake', label: 'play snake', group: 'Meta', arrow: '▶', hint: 'easter egg', action: { type: 'snake' }, keywords: ['game', 'easter egg', 'snake'] },
   { id: 'play-surf', label: 'go surfing', group: 'Meta', arrow: '▶', hint: 'goldenline · webgpu', action: { type: 'surf' }, keywords: ['game', 'easter egg', 'surf', 'beach', 'goldenline', 'waves'] },
+  { id: 'visit-planet', label: 'visit planet', group: 'Meta', arrow: '▶', hint: 'littlebig · 3d', action: { type: 'planet' }, keywords: ['planet', 'city', 'littlebig', 'world', 'game'] },
   { id: 'open-in-ide', label: 'open in zed', group: 'Meta', arrow: '⌨', hint: 'preview / source', action: { type: 'ide' }, keywords: ['ide', 'editor', 'code', 'source', 'view source', 'zed', 'easter egg'] },
   { id: 'plasma-calm',  label: 'plasma calm',  group: 'Meta', arrow: '◌', hint: 'low intensity',     action: { type: 'plasma', value: 'calm'  }, keywords: ['shader', 'background'] },
   { id: 'plasma-vivid', label: 'plasma vivid', group: 'Meta', arrow: '●', hint: 'default intensity', action: { type: 'plasma', value: 'vivid' }, keywords: ['shader', 'background'] },

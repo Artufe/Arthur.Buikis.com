@@ -16,6 +16,7 @@ import { onPaletteClose, onPaletteOpen } from '@/lib/palette-bus';
 import { setPlasmaMode } from '@/lib/plasma-bus';
 import { openSnake } from '@/lib/snake-bus';
 import { openSurf } from '@/lib/surf-bus';
+import { openPlanet } from '@/lib/planet-bus';
 import { openIde } from '@/lib/ide-bus';
 
 type Inline =
@@ -140,6 +141,10 @@ export function CommandPalette({ openOnMount = false, initialQuery = '' }: Comma
           break;
         case 'surf':
           openSurf();
+          close();
+          break;
+        case 'planet':
+          openPlanet();
           close();
           break;
         case 'ide':

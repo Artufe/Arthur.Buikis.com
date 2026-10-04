@@ -47,6 +47,38 @@ Phase 4  fix round from G2 (≤4 agents) ──► C1 site integration + media �
 
   Be honest. The orchestrator re-shoots everything.
 
+## Contract decisions after the F0 review (binding)
+
+The details live in the code comments (`core/contracts.ts`, `world/city/types.ts`,
+`render/toon.ts`) and in `DECISIONS.md`. In short:
+
+- **Stage-2 init order:** build meshes → add them to the scene → `await ctx.compile()` (colour and
+  shadow programs, no hitch) → `ctx.reveal.slot()` → write `aReveal`. Create every material in
+  `init`. Reuse patch keys; reveal durations and fade ranges are uniforms. In dev, a program built
+  mid-flow logs a warning: treat it as a bug.
+- **Trees:** A2 places every city tree as a `Feature` of kind `'tree'` (with `size` and `seed`),
+  in streets, the park and gardens. A1 renders **all** trees, from those features plus its own
+  scatter only where `cityIndex.classify` is `'outside'` (or `'free'` outside every area).
+- **City ground:** A2 owns every surface inside the plan radius, drawn at `ROAD_H` (roads,
+  intersections), `ROAD_H + CURB_H` (sidewalks) and `AREA_H` (lots, plaza, park lawns, gardens)
+  from `world/config.ts`. A1 colours `Biome.City` facets as a neutral base only.
+- **Budgets for A2:** city plan + index ≤ 30 ms on the M3 (it sits on the first-frame path, see
+  the `city plan` boot mark). Use spatial-grid placement tests (never all-pairs) and run
+  `validatePlan` only in specs, never at runtime.
+- **Footprinted instances** (buildings, lots, benches) take their matrix from `planBasis()`, not
+  `planFrame()`, or neighbours overlap on screen.
+- **Ink (B4):** outlines come from depth (plus normals reconstructed from depth). Anything that
+  must not be inked does not write depth, or uses `LAYER_NO_INK`. A custom `ShaderMaterial` merges
+  `ctx.uniforms` and ends with the tone-mapping and colour-space chunks.
+- **Light (A3):** write `lbDuskTint` (the terminator colour, per fragment) and optionally
+  `lbCloudShadow*`. Keep the sun light's own colour golden at most, never sunset-orange across
+  the whole lit hemisphere.
+- **Traffic and people (B1, B2):** cars stop at `Lane.stopS`; crossings carry `laneS`; the
+  runtime handshake is `ctx.services.crossings` (`busy` written by people, `blocked` by traffic).
+  Connectors closer than `VEHICLE_CLEARANCE` are listed as conflicts.
+- **LOD and fades:** use `ctx.view.altTerrain` (roofs ignored), not `alt`. The toon kit's `fade`
+  option dithers the mesh and its shadow by altitude or distance with no custom patch.
+
 ---
 
 ## F0: Foundation
@@ -114,8 +146,8 @@ Build the planet the city sits on, so it looks finished from orbit down to your 
   bands, gentle low-poly swell, sparkle in the sun path and toon specular. It reads at orbit *and*
   at street level on the beach.
 - **Nature** (instanced and varied):
-  - Blobby and conifer trees in forests and along streets (coordinate with A2 through `world/city`
-    data: trees go in the park and gardens, never on roads), rocks and flowers.
+  - Blobby and conifer trees in forests and in the city (A2 places city trees as `'tree'`
+    features; A1 renders all of them, see the contract decisions above), rocks and flowers.
   - Optional, if they look finished: windmills turning on a ridge, a lighthouse on a headland with
     a night beam.
 - **Ground cover near the camera:** grass tufts and flowers fade in below ~10 m, so street level
