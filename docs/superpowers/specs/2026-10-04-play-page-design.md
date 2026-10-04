@@ -180,12 +180,12 @@ type PlayGame = {
 | File | Spec |
 |---|---|
 | `goldenline.jpg` | 1600×1000 cover (`gl-pier-break.jpg`, main), ≤ 300 KB |
-| `goldenline.mp4` | trailer (crash → ride → ashore), 1280×800, 30 fps, ~13.5 s, H.264 yuv420p `+faststart`, ≤ 4 MB |
+| `goldenline.mp4` | trailer (crash → ride → ashore), 1280×800, 30 fps, 15 s, H.264 yuv420p `+faststart`, ≤ 6 MB (budget raised for the ride's spray; ~5.9 MB, denoised before encoding) |
 | `snake-dark.jpg` / `snake-light.jpg` | 1600×1000 posters, ~285 KB |
 | `snake-dark.mp4` / `snake-light.mp4` | 1280×800, 30 fps, 9 s, seamless loop (0.6 s dissolve), ~1.8 MB each |
 
 - **MP4 only.** H.264 plays everywhere, including iOS. The VP9 WebMs came out the same size, so a
-  second source adds weight to the repo without saving bandwidth. That's about 8.5 MB of committed
+  second source adds weight to the repo without saving bandwidth. That's about 10.4 MB of committed
   media.
 - Frames are rendered deterministically:
   - **GOLDENLINE** through its shot tool's `__goldenline` hooks: free camera, `setTime`, `step`.
