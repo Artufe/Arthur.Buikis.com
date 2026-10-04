@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+  # Daily rebuild so the header's GitHub pulse (scripts/github-pulse.mjs) stays current.
+  schedule:
+    - cron: '17 5 * * *'
 
 jobs:
   deploy:
@@ -28,6 +31,13 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Refresh GitHub pulse
+        # Keeps the committed snapshot if the API call fails. PULSE_TOKEN (optional) is a read-only
+        # token for when GITHUB_TOKEN sees fewer contributions than the public profile shows.
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/github-pulse.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.PULSE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: pnpm build
