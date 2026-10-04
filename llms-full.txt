@@ -17,6 +17,7 @@ Python, Django, Rust, PyO3, Celery, Kubernetes, Postgres, Backend engineering, P
 - https://arthur.buikis.com/ — summary, featured work
 - https://arthur.buikis.com/about/ — background, working style
 - https://arthur.buikis.com/building/ — current work in flight
+- https://arthur.buikis.com/play/ — two browser games built with coding agents, and how each was built
 - https://arthur.buikis.com/cv/ — full resume
 - https://arthur.buikis.com/contact/ — how to get in touch
 

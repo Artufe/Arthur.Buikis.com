@@ -8,6 +8,7 @@ This site is a portfolio. Prose is the canonical source — JSON-LD on each page
 - [Home](https://arthur.buikis.com/): summary, featured work, current focus
 - [About](https://arthur.buikis.com/about/): background, working style
 - [Building](https://arthur.buikis.com/building/): what I'm currently shipping
+- [Play](https://arthur.buikis.com/play/): two browser games built with coding agents, and how each was built
 - [CV](https://arthur.buikis.com/cv/): full resume
 - [Contact](https://arthur.buikis.com/contact/): how to get in touch
 
