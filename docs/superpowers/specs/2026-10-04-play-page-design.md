@@ -155,7 +155,7 @@ type PlayGame = {
   media: PlayMedia;          // default (dark theme, or the only variant)
   lightMedia?: PlayMedia;    // present → swapped in under the light theme
   caption: string[];        // home-strip caption parts
-  receipt: { label: string; value: string; href?: string; mobile?: boolean }[];
+  receipt: { label: string; value: string; href?: string; desktopOnly?: boolean }[]; // desktopOnly rows hide below 640px
   pr: { number: number; date: string };            // index row
 };
 ```
@@ -164,9 +164,10 @@ type PlayGame = {
 - Renders `<video muted loop playsInline preload="none" aria-hidden>` with no `src` until an
   `IntersectionObserver` (rootMargin `200px`) reports it in view. Then it sets `src`, plays, and
   fades in on the first `playing` event.
-- It pauses when out of view or when `document.hidden`. The toggle (`aria-pressed`, label
-  "Pause video" / "Play video") is a sibling of the card link, positioned top right, and a manual
-  pause sticks.
+- It pauses when out of view or when `document.hidden`. The toggle is a sibling of the card link,
+  positioned top right, and a manual pause sticks. Its label flips between "Pause video" and
+  "Play video", with no `aria-pressed`: a toggle whose name changes must not also report a pressed
+  state.
 - With `prefers-reduced-motion: reduce` there is no video at all: the poster `<img>` with its alt
   text stays.
 - Theme-matched media (Snake) renders one `GameClip` per theme, wrapped in `.only-dark` /
@@ -219,6 +220,8 @@ type PlayGame = {
 ## Testing
 
 - **vitest:**
+  - `tests/content/play.test.ts`: the data's shape and links. `tests/content/play-media.test.ts`:
+    every referenced media file exists and is within budget.
   - `tests/app/play-page.test.tsx`: every game in `content/play.ts` renders a link to its `href`.
     Receipts render every row. PR and doc links are external (`target=_blank`, `rel=noreferrer`).
     The chips render.
