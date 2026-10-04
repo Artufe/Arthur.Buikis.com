@@ -49,9 +49,16 @@ gate) callout. The pipeline diagram shows the gates neutrally, with no ✗.
   it's near the viewport and pauses off screen or in a hidden tab. Reduced motion shows the still
   only. A small pause/play toggle sits on every clip (WCAG 2.2.2).
 - Images are **clean**: no baked-in text.
-- GOLDENLINE: cover still = pier with a breaking barrel (`gl-pier-break.jpg`, main). Clip = the
-  **trailer** (crash → cut → ashore, seamless loop).
-- Snake: gets theme-matched clips (dark and light), so both cards move.
+- GOLDENLINE: cover still = pier with a breaking barrel (`gl-pier-break.jpg`, main). Clip = a
+  **three-scene trailer, crash → ride → ashore**, about 4.5 s each, joined by short crossfades and
+  looping seamlessly back to the crash.
+  - **Crash:** the wave pitching with the pier on the horizon.
+  - **Ride:** the surfer on the face, gliding down the line.
+  - **Ashore:** the swash running up beside the pier and draining back.
+  - Every scene has a **slow, continuous camera move** (a truck, pan or push-in) rather than a
+    locked-off camera.
+- Snake: gets theme-matched clips (dark and light), so both cards move. Its camera is the game's
+  own follow camera, which already pans with the snake.
 
 ## Page anatomy
 
@@ -172,15 +179,17 @@ type PlayGame = {
 | File | Spec |
 |---|---|
 | `goldenline.jpg` | 1600×1000 cover (`gl-pier-break.jpg`, main), ≤ 300 KB |
-| `goldenline.mp4` | trailer, 1280×800, 30 fps, 8.8 s, H.264 yuv420p `+faststart`, ~2.9 MB |
+| `goldenline.mp4` | trailer (crash → ride → ashore), 1280×800, 30 fps, ~13.5 s, H.264 yuv420p `+faststart`, ≤ 4 MB |
 | `snake-dark.jpg` / `snake-light.jpg` | 1600×1000 posters, ~285 KB |
 | `snake-dark.mp4` / `snake-light.mp4` | 1280×800, 30 fps, 9 s, seamless loop (0.6 s dissolve), ~1.8 MB each |
 
 - **MP4 only.** H.264 plays everywhere, including iOS. The VP9 WebMs came out the same size, so a
-  second source adds weight to the repo without saving bandwidth. That's about 7.3 MB of committed
+  second source adds weight to the repo without saving bandwidth. That's about 8.5 MB of committed
   media.
 - Frames are rendered deterministically:
   - **GOLDENLINE** through its shot tool's `__goldenline` hooks: free camera, `setTime`, `step`.
+    Each scene is 165 frames: 135 core frames plus 15-frame handles at each end for the crossfades.
+    The camera keyframes are interpolated per frame.
   - **Snake** by freezing the live renderer and stepping the real pure engine at 60 Hz. A scripted
     autopilot steers it, and a seed planner picks a window (seed 246, sim time 18–27 s) with three
     eats, including a golden. Both themes follow the identical path.
