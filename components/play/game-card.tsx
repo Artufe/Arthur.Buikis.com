@@ -16,10 +16,19 @@ export function GameCard({ game, index }: { game: PlayGame; index: number }) {
       </div>
 
       <GameClip media={game.media} lightMedia={game.lightMedia} className="play-card">
-        <Link href={game.href} className="play-card-link" aria-label={`Play ${game.title}`}>
+        {/* aria-label replaces the link's content, so describedby restores the requirements and the
+            description for screen readers. */}
+        <Link
+          href={game.href}
+          className="play-card-link"
+          aria-label={`Play ${game.title}`}
+          aria-describedby={`play-${game.slug}-req play-${game.slug}-desc`}
+        >
           <span className={cn('play-chip', `play-chip--${game.chip.tone}`)}>
             <i aria-hidden="true">●</i>
-            <span className="play-chip-full">{game.chip.label}</span>
+            <span id={`play-${game.slug}-req`} className="play-chip-full">
+              {game.chip.label}
+            </span>
             <span className="play-chip-short" aria-hidden="true">
               {game.chip.short ?? game.chip.label}
             </span>
@@ -30,7 +39,9 @@ export function GameCard({ game, index }: { game: PlayGame; index: number }) {
               {game.cmd}
             </span>
             <span className="play-ov-title">{game.title}</span>
-            <span className="play-ov-desc">{game.description}</span>
+            <span id={`play-${game.slug}-desc`} className="play-ov-desc">
+              {game.description}
+            </span>
             <span className="play-ov-go">
               <span className="play-ov-path">{game.href.replace(/\/$/, '')}</span>
               <span className="play-ov-btn">

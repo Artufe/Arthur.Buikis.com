@@ -1156,6 +1156,9 @@ html:not(.dark) .only-dark,
 
 @media (prefers-reduced-motion: reduce) {
   .play-card:hover .play-clip-poster { transform: none; }
+  /* GameClip drops these after hydration; the static HTML still has them until then. */
+  .play-clip-video,
+  .play-clip-toggle { display: none; }
 }
 
 /* ── Play: home strip tiles (components/play-teaser.tsx) ─────────────────────────────── */
