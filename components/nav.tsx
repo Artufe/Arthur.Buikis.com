@@ -7,6 +7,7 @@ import { Menu, X } from 'lucide-react';
 import { site } from '@/content/site';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { OpenInZedButton } from '@/components/open-in-zed-button';
+import { GithubPulse } from '@/components/github-pulse';
 import { cn } from '@/lib/utils';
 
 export function Nav() {
@@ -52,14 +53,16 @@ export function Nav() {
       )}
     >
       <div className="l-wrap">
-        <Link
-          href="/"
-          className="brand"
-          aria-label="Arthur Buikis — home"
-        >
-          <span className="signal" aria-hidden="true"><span /><span /><span /></span>
-          a<span className="accent">b</span>.
-        </Link>
+        <div className="header-id">
+          <Link
+            href="/"
+            className="brand"
+            aria-label="Arthur Buikis — home"
+          >
+            a<span className="accent">b</span>.
+          </Link>
+          <GithubPulse />
+        </div>
         <nav className="nav-desktop" id="mainNav" aria-label="Primary">
           {site.nav.map((item) => {
             const active = isActive(item.href);

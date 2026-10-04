@@ -30,9 +30,9 @@ lib/            Pure helpers: commands.ts (palette commands), fuzzy.ts, utils.ts
                 and window-event buses: palette-bus, plasma-bus, snake-bus, surf-bus, ide-bus
 public/         Static assets: CNAME, cv.pdf, favicons, site.webmanifest, hero-shader.js,
                 play/ (game clips + posters)
-scripts/        dev.mjs, postbuild.mjs, gen-icons.py (favicons), goldenline-shot.mjs (GOLDENLINE
-                review shots / perf / boot timing), play-media/ (capture helpers for the /play
-                clips), mcp/ (image server for the Claude bot)
+scripts/        dev.mjs, postbuild.mjs, github-pulse.mjs (header stats), gen-icons.py (favicons),
+                goldenline-shot.mjs (GOLDENLINE review shots / perf / boot timing), play-media/
+                (capture helpers for the /play clips), mcp/ (image server for the Claude bot)
 docs/           hero-shader.md, play-media.md, goldenline/ (brief, agent task list, decisions, perf, assets)
 tests/          vitest (app/, components/, content/, lib/) + playwright (e2e/)
 .github/        workflows/, scripts/grok-imagine.mjs (PR image bot), agents/ (prompt library)
@@ -41,7 +41,7 @@ tests/          vitest (app/, components/, content/, lib/) + playwright (e2e/)
 ## Deploy
 
 - PRs to `master` → `.github/workflows/ci.yml` runs typecheck, unit tests, and build.
-- Push to `master` → `deploy.yml` builds with pnpm, copies `public/CNAME` into `./out`, deploys via `peaceiris/actions-gh-pages@v4` to the `gh-pages` branch. (Deploy does not run unit tests.)
+- Push to `master` (and a daily 05:17 UTC schedule) → `deploy.yml` refreshes the GitHub pulse (`scripts/github-pulse.mjs`), builds with pnpm, copies `public/CNAME` into `./out`, deploys via `peaceiris/actions-gh-pages@v4` to the `gh-pages` branch. (Deploy does not run unit tests.)
 - `next.config.mjs` sets `output: 'export'` + `trailingSlash: true` + `images.unoptimized: true`. **No SSR, no API routes, no `revalidate`** — anything dynamic must run client-side or at build time. Route handlers (`llms.txt`, `sitemap`, OG image) must be `force-static`.
 - `scripts/postbuild.mjs` renames the extensionless `out/opengraph-image` to `.png` and rewrites references in the HTML, because GitHub Pages would serve it as `application/octet-stream`.
 - `gh-pages` branch is auto-managed; never commit there directly.
@@ -52,8 +52,9 @@ Direct `git push origin master` is blocked by the harness ("bypasses pull reques
 
 ## Global chrome (app/layout.tsx)
 
-Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav`, `Footer`, `SnakeWindowHost`, `GoldenlineWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
+Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav` (with the GitHub pulse), `Footer`, `SnakeWindowHost`, `GoldenlineWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
 
+- **GitHub pulse** (`components/github-pulse.tsx`): the card beside the brand. It shows one bar per month for the last 12 months, with "hot" months (≥ 2× the average) in the accent, plus the headline numbers. The data is `content/github-pulse.json`: a committed snapshot that `deploy.yml` refreshes before every build, including the daily scheduled one, via `scripts/github-pulse.mjs` (GraphQL, falls back to the snapshot). Aggregation helpers live in `lib/github-pulse.ts`, which has no imports so the script can load it with Node's type stripping. The breakpoints in `globals.css` are measured: full card ≥ 1024px, bars only 820–1023, hidden 769–819, short copy on phones.
 - **Command palette** (`components/command-palette*.tsx`, commands in `lib/commands.ts`) — opens on `/` or `Ctrl/⌘+K`. The lazy wrapper listens for the keys and idle-prefetches the real palette.
 - **Snake** (`components/snake/`) — floating window opened via the palette (`snake-bus`), expandable to `/snake`. Engine (`engine/`) is pure and unit-tested; specs sit next to the code they cover.
 - **GOLDENLINE** (`components/goldenline/`): a first-person golden-hour reef-break surf demo on three.js `WebGPURenderer` + TSL. The palette's `go surfing` opens it in a `FloatingWindow` (`surf-bus`), expandable to the full-viewport `/surf` (the nav hides there). WebGPU only: without it the canvas shows one line of text. One directory per system, wired in `systems.ts` against `core/contracts.ts`; the engine chunk loads only when opened. The lagoon, shore break and swash are one GPU shallow-water simulation (`ocean/surfzone/`, CPU reference + tests in `scheme.ts`); the reef breakers are `ocean/breaking/`. Start at `docs/goldenline/TASKS.md` and each system's README. Review with `node scripts/goldenline-shot.mjs` (headless Chromium with real WebGPU; `--shot`, `--seq`, `--perf`, `--boot`) against the dev server. F1 opens the settings/perf overlay. Per-agent evidence shots under `docs/goldenline/shots/` are gitignored except `milestones/`.
