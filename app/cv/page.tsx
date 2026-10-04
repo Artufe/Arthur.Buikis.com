@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ogImage } from '@/lib/og';
 import { cvHeadline, cvExperience, cvProjects, cvLanguages } from '@/content/cv';
 import { stackGroups } from '@/content/about';
 import { site } from '@/content/site';
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
     title,
     description,
     url: path,
+    images: [ogImage],
   },
   twitter: {
     card: 'summary_large_image',

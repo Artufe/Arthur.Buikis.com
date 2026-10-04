@@ -1,0 +1,3 @@
+[
+  { "name": "frames", "ride": { "demo": 1, "start": 40.7, "frames": 165, "every": 1, "settle": 20, "reduced": false, "resume": true } }
+]

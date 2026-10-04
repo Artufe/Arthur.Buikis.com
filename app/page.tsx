@@ -1,6 +1,7 @@
 import { Hero } from '@/components/hero';
 import { AboutSnippet } from '@/components/about-snippet';
 import { FeaturedWork } from '@/components/featured-work';
+import { PlayTeaser } from '@/components/play-teaser';
 import { BuildingTeaser } from '@/components/building-teaser';
 
 export default function Home() {
@@ -9,6 +10,7 @@ export default function Home() {
       <Hero />
       <AboutSnippet />
       <FeaturedWork />
+      <PlayTeaser />
       <BuildingTeaser />
     </>
   );
