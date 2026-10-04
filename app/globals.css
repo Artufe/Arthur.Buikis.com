@@ -1020,3 +1020,176 @@ html:not(.dark) .only-dark,
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* ── Play: cards (components/play/game-card.tsx, app/play/page.tsx) ─────────────────── */
+.play-h1 {
+  max-width: 12ch;
+  font-size: clamp(48px, 6.6vw, 96px);
+  line-height: 0.9;
+  letter-spacing: -0.045em;
+}
+.play-game-idx {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.play-game-idx b { font-weight: 400; color: var(--fg); }
+
+.play-card { border: 2px solid var(--border); transition: border-color var(--dur) var(--ease); }
+.play-card:hover,
+.play-card:has(.play-card-link:focus-visible) { border-color: var(--accent); }
+.play-card .play-clip-poster,
+.play-card .play-clip-video { transition: transform 700ms var(--ease), opacity 320ms var(--ease); }
+.play-card:hover .play-clip-poster,
+.play-card:hover .play-clip-video { transform: scale(1.04); }
+
+.play-card-link {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  color: #f3ede2;
+  text-decoration: none;
+}
+.play-card-link:focus-visible { outline: none; }
+
+.play-chip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f3ede2;
+  background: rgb(8 8 6 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  backdrop-filter: blur(6px);
+}
+.play-chip i { margin-right: 6px; font-style: normal; }
+.play-chip--ok i { color: oklch(75% 0.15 145); }
+.play-chip--warn i { color: oklch(80% 0.14 80); }
+.play-chip-short { display: none; }
+
+.play-ov {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  padding: 28px 28px 24px;
+  background: linear-gradient(to top, rgb(8 8 6 / 0.94) 0%, rgb(8 8 6 / 0.7) 32%, rgb(8 8 6 / 0) 68%);
+  opacity: 0;
+  transition: opacity 320ms var(--ease);
+}
+.play-ov > * { transform: translateY(10px); transition: transform 420ms var(--ease); }
+.play-card:hover .play-ov,
+.play-card-link:focus-visible .play-ov { opacity: 1; }
+.play-card:hover .play-ov > *,
+.play-card-link:focus-visible .play-ov > * { transform: none; }
+.play-ov-cmd { font-size: 11px; color: rgb(243 237 226 / 0.6); }
+.play-ov-cmd b { margin-right: 8px; font-weight: 400; color: oklch(68% 0.16 30); }
+.play-ov-title {
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+.play-ov-desc { max-width: 52ch; margin-top: 12px; font-size: 13px; line-height: 1.65; color: rgb(243 237 226 / 0.86); }
+.play-ov-go {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 18px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.play-ov-path { color: rgb(243 237 226 / 0.55); }
+.play-ov-btn { padding: 7px 14px; color: #fff; background: oklch(55% 0.16 25); }
+.play-ov-btn-touch { display: none; }
+
+.play-receipt {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 2px solid var(--border);
+  font-size: 11px;
+}
+.play-receipt dt { margin-bottom: 4px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.play-receipt dd { margin: 0; }
+.play-receipt a { color: var(--accent); text-underline-offset: 4px; }
+
+/* Touch screens have no hover: a compact caption band is always on, and one tap opens the game. */
+@media (hover: none) {
+  .play-ov {
+    padding: 16px;
+    background: linear-gradient(to top, rgb(8 8 6 / 0.92) 0%, rgb(8 8 6 / 0.6) 38%, transparent 62%);
+    opacity: 1;
+  }
+  .play-ov > * { transform: none; }
+  .play-ov-cmd,
+  .play-ov-path,
+  .play-ov-btn-desk { display: none; }
+  .play-ov-title { margin-top: 0; font-size: 28px; }
+  .play-ov-desc { margin-top: 6px; font-size: 11.5px; }
+  .play-ov-go { justify-content: flex-end; margin-top: 10px; }
+  .play-ov-btn { padding: 5px 10px; }
+  .play-ov-btn-touch { display: inline; }
+}
+
+@media (max-width: 640px) {
+  .play-chip-full { display: none; }
+  .play-chip-short { display: inline; }
+  .play-receipt { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .play-receipt-desk { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play-card:hover .play-clip-poster { transform: none; }
+}
+
+/* ── Play: home strip tiles (components/play-teaser.tsx) ─────────────────────────────── */
+.play-tile { border: 2px solid var(--border); transition: border-color var(--dur) var(--ease); }
+.play-tile:hover,
+.play-tile:has(.play-tile-link:focus-visible) { border-color: var(--accent); }
+.play-tile .play-clip-poster,
+.play-tile .play-clip-video { transition: transform 600ms var(--ease), opacity 320ms var(--ease); }
+.play-tile:hover .play-clip-poster,
+.play-tile:hover .play-clip-video { transform: scale(1.035); }
+.play-tile-link { position: absolute; inset: 0; z-index: 1; }
+.play-tile-link:focus-visible { outline: none; }
+.play-tile-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 5px 10px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.play-tile:hover .play-tile-badge,
+.play-tile-link:focus-visible .play-tile-badge { opacity: 1; transform: none; }
+.play-tile-cap { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; font-size: 11px; }
+
+@media (hover: none) {
+  .play-tile-badge { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play-tile:hover .play-clip-poster { transform: none; }
+}
