@@ -1,9 +1,10 @@
 import { ImageResponse } from 'next/og';
 import { site } from '@/content/site';
+import { ogImage } from '@/lib/og';
 
 export const dynamic = 'force-static';
-export const alt = `${site.name} — ${site.description}`;
-export const size = { width: 1200, height: 630 };
+export const alt = ogImage.alt;
+export const size = { width: ogImage.width, height: ogImage.height };
 export const contentType = 'image/png';
 
 const BG = '#0F0F0F';

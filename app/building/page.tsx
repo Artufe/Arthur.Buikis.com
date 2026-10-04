@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ogImage } from '@/lib/og';
 import Content, { meta } from '@/content/building/index.mdx';
 import { site } from '@/content/site';
 
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
     title,
     description,
     url: path,
+    images: [ogImage],
   },
   twitter: {
     card: 'summary_large_image',

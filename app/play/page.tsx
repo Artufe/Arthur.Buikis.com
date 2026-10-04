@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ogImage } from '@/lib/og';
 import { games } from '@/content/play';
 import { GameCard } from '@/components/play/game-card';
 import { PlayMethod } from '@/components/play/play-method';
@@ -12,7 +13,7 @@ export const metadata: Metadata = {
   title,
   description,
   alternates: { canonical: path },
-  openGraph: { type: 'website', title, description, url: path },
+  openGraph: { type: 'website', title, description, url: path, images: [ogImage] },
   twitter: { card: 'summary_large_image', title, description },
 };
 
