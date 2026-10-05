@@ -28,13 +28,12 @@
 //     crown and facade (0.6 m at touchdown), and in the last 25 m nothing at eye level sits within
 //     4 m inside ±30° of the view (clearPath; spec'd).
 
-import { ALT_MAX, CITY_SURFACE_R, EYE_HEIGHT } from '../world/config';
-import { planToDir } from '../world/city/frame';
-import { sunDirection } from '../world/sun';
-import { v3 } from '../world/sphere';
 import type { CityIndex, CityPlan } from '../world/city/types';
-import { buildingDistance, clearanceAt, coneBlocked, LandingFinder, type Landing } from './landing';
-import { pitchForAlt } from './model';
+import { K } from '../core/debug-kit';
+import type { Landing } from './landing';
+
+// Review tooling (the debug chunk): engine modules come through the kit, not imports (core/kit.ts).
+const { ALT_MAX, CITY_SURFACE_R, EYE_HEIGHT, planToDir, sunDirection, v3, buildingDistance, clearanceAt, coneBlocked, LandingFinder, pitchForAlt } = K;
 
 const DEG = Math.PI / 180;
 

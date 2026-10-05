@@ -152,7 +152,14 @@ export class CameraInput {
     const keyTarget = variant === 'page' ? window : canvas;
     on(keyTarget, 'keydown', (e: KeyboardEvent) => this.onKey(e, true));
     on(keyTarget, 'keyup', (e: KeyboardEvent) => this.onKey(e, false));
-    on(window, 'blur', () => this.keys.clear());
+    const drop = () => {
+      this.keys.clear();
+      this.downs.clear();
+    };
+    on(window, 'blur', drop);
+    // The window variant only hears keys while the canvas has focus, so a key released after
+    // focus left it would stay held forever (the planet spinning on its own).
+    if (variant === 'window') on(canvas, 'blur', drop);
     // Focus moving into a text field (e.g. the palette opening) drops held keys: no stuck walking.
     on(document, 'focusin', (e: FocusEvent) => {
       if (isEditable(e.target)) this.keys.clear();
@@ -418,19 +425,18 @@ export class CameraInput {
   }
 
   private onKey(e: KeyboardEvent, down: boolean) {
+    // A release always lands, whatever has focus or which modifiers are held (no stuck keys).
+    if (!down) this.keys.delete(e.code);
     if (this.variant === 'window' && document.activeElement !== this.canvas) return;
-    // A good guest: typing into the palette (or any field) never moves the camera or loses keys.
-    if (isEditable(e.target) || isEditable(document.activeElement)) {
-      if (!down) this.keys.delete(e.code);
-      return;
-    }
+    // A good guest: typing into the palette (or any field) never moves the camera.
+    if (isEditable(e.target) || isEditable(document.activeElement)) return;
     const game = /^(Key[WASDQE]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|ShiftRight|Equal|Minus|NumpadAdd|NumpadSubtract)$/.test(e.code);
     if (!game) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (down) {
       if (!e.repeat) this.downs.add(e.code);
       this.keys.add(e.code);
-    } else this.keys.delete(e.code);
+    }
     this.touch();
     e.preventDefault();
   }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { R } from '../world/config';
 import { dirFromLatLon, dot3, headingVector, len3 } from '../world/sphere';
 import { inStickZone, stickVector } from './input';
-import { approach, clipPlanes, computePose, createCamState, createPose, fovForAlt, lensFov, lensShift, liftRamp, lookBlend, moveSpeed, pitchForAlt, RUN, springStep, WALK } from './model';
+import { approach, clipPlanes, computePose, createCamState, createPose, fovForAlt, lensFov, lensShift, orbitFitFov, liftRamp, lookBlend, moveSpeed, pitchForAlt, RUN, springStep, WALK } from './model';
 
 const DEG = Math.PI / 180;
 
@@ -48,6 +48,14 @@ describe('camera model', () => {
     expect(portrait).toBeGreaterThan(56);
     expect(portrait).toBeLessThanOrEqual(80);
     expect(hfov(portrait, 390 / 844)).toBeGreaterThan(35);
+    // A phone held upright holds the whole planet from orbit (85 % of the width); landscape untouched.
+    for (const alt of [380, 420]) {
+      const ph = 390 / 844;
+      const v = orbitFitFov(lensFov(40, ph), ph, alt, 160 + alt);
+      expect(Math.tan(Math.asin(160 / (160 + alt))) / (Math.tan((v * DEG) / 2) * ph)).toBeLessThanOrEqual(0.85 + 1e-9);
+      expect(orbitFitFov(40, 1.6, alt, 160 + alt)).toBe(40);
+    }
+    expect(orbitFitFov(50, 390 / 844, 60, 222)).toBe(50); // near the ground: untouched
     expect(lensShift(1.7, -4 * DEG)).toBe(0);
     expect(lensShift(300, -90 * DEG)).toBe(0);
     expect(lensShift(20, -30 * DEG)).toBeGreaterThan(0.1);

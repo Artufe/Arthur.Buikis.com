@@ -34,7 +34,7 @@ export const LAYER_WORLD = 0;
 /** Layer 1: visible but never inked. Enable it on the camera too: `ctx.camera.layers.enable(LAYER_NO_INK)` is done by core. */
 export const LAYER_NO_INK = 1;
 
-import type { DirectionalLight, Fog, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
+import type { DirectionalLight, Fog, Object3D, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import type { CityIndex, CityPlan } from '../world/city/types';
 import type { Planet } from '../world/planet';
 import type { Vec3 } from '../world/sphere';
@@ -189,6 +189,8 @@ export interface BootEntry {
   ms: number;
   /** Time since createEngine() was called (ms) when the stage ended. */
   at: number;
+  /** Stage-2 inits: ms spent waiting on the driver for the system's shader compiles (C2). */
+  wait?: number;
 }
 
 export interface BootLog {
@@ -374,6 +376,12 @@ export interface LBContext {
    * forgets, core compiles after init returns. Never settles once the engine is disposed.
    */
   compile(): Promise<void>;
+  /**
+   * Start compiling (colour + shadow depth) the programs of these meshes now, without adding them to
+   * the scene: stand-ins that share the real materials (any small geometry; same mesh flags, e.g.
+   * from ctx.toon.mesh). For System.prepare (C2): the driver compiles while the inits build.
+   */
+  prewarm(objects: Object3D[]): void;
 }
 
 export interface System {
@@ -394,6 +402,13 @@ export interface System {
    * t = 0 at fixedDt is fine within ~300 ms; a closed-form schedule is better.
    */
   init(ctx: LBContext): void | Promise<void>;
+  /**
+   * Stage 1 only, optional (C2): called for every stage-1 system right after the sky's init (the
+   * lights and fog every lit program depends on exist), before the other inits. Create the
+   * materials here and hand stand-ins to ctx.prewarm(), so a cold visit's shader compiles overlap
+   * the CPU-heavy inits instead of following them. init then uses those materials.
+   */
+  prepare?(ctx: LBContext): void;
   /**
    * Deterministic sim step of ctx.time.fixedDt (traffic, people, planes). Zero allocations.
    * Runs before the camera's update: ctx.view is the previous frame's.

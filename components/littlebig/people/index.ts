@@ -38,7 +38,7 @@ import { CITY_DIR, nightFactor, sunDirection } from '../world/sun';
 import { dogGeometry, J, personGeometry, POSE_LEASH, posedHand } from './figure';
 import { makeIdlers } from './idlers';
 import { peoplePatch } from './shader';
-import { LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look } from './sim';
+import { LensWatch, LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look } from './sim';
 
 /** Altitude band (m, ViewState.altTerrain): everyone is in below POP_LO, nobody above POP_HI. */
 const POP_LO = 27;
@@ -107,9 +107,7 @@ export function createPeopleSystem(): System {
   let gv = new Float32Array(0);
   let ready = false;
   const lastEye = new Vector3(1e9, 0, 0);
-  let camPX = 0;
-  let camPZ = 0;
-  let camStill = 0;
+  const lens = new LensWatch();
 
   // scratch
   const fr = { up: v3(), ax: v3(), az: v3() };
@@ -331,13 +329,8 @@ export function createPeopleSystem(): System {
       if (!sim || !ready) return;
       const v = ctx.view;
       const cr = ctx.services.crossings;
-      // a player standing still gets a wider berth (nobody brushes past the lens)
-      const mx = v.cityX - camPX;
-      const mz = v.cityZ - camPZ;
-      camPX = v.cityX;
-      camPZ = v.cityZ;
-      camStill = mx * mx + mz * mz < (0.3 * ctx.time.fixedDt) ** 2 ? Math.min(1, camStill + ctx.time.fixedDt) : 0;
-      sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, v.cityX, v.cityZ, v.altTerrain < 3 && v.cityDist < ctx.world.city.radius, camStill >= 0.5 ? 1.15 : 0.75);
+      lens.update(ctx.time.fixedDt, v.cityX, v.cityZ, v.altTerrain, v.cityDist < ctx.world.city.radius);
+      sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, lens.x, lens.z, lens.on, lens.r, lens.lens);
     },
 
     onTimeJump(ctx) {

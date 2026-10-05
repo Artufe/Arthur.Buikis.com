@@ -7,7 +7,7 @@
 // drawRange. Runs are merged across the smallest gaps until they fit the slots, so the draw-call
 // count stays fixed (≤ SLOTS per pass) while the triangle count follows the view.
 
-import { BufferGeometry, Frustum, Matrix4, type Mesh, Sphere } from 'three';
+import { BufferAttribute, BufferGeometry, Frustum, Matrix4, type Mesh, Sphere } from 'three';
 import type { LBContext } from '../core/contracts';
 import type { ToonMaterial } from '../render/toon';
 import { chunkAboveHorizon, type ChunkBounds } from '../nature/chunks';
@@ -194,4 +194,16 @@ export function chunkedMesh(ctx: LBContext, geometry: BufferGeometry, material: 
       for (const g of geos) g.dispose();
     },
   };
+}
+
+/**
+ * A one-triangle geometry for ctx.prewarm stand-ins (System.prepare); disposed with the engine.
+ * It carries a normal like the real meshes: three's program key depends on its presence (and on
+ * tangents, 4-channel colours and morph targets, which the terrain and ocean do not have).
+ */
+export function standInGeometry(ctx: LBContext): BufferGeometry {
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array(9), 3));
+  g.setAttribute('normal', new BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), 3));
+  return ctx.track(g);
 }

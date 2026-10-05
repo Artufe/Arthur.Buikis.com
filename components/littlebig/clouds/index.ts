@@ -38,14 +38,15 @@ import {
   Vector3,
 } from 'three';
 import { LAYER_NO_INK, type LBContext, type System } from '../core/contracts';
-import { diveAt, SHOTS } from '../core/shots';
 import { CLOUD_MAX, CLOUD_MIN, R } from '../world/config';
 import { addScaled3, cross3, dirFromLatLon, dot3, headingVector, normalize3, v3, type Vec3 } from '../world/sphere';
 import { moonDirection } from '../world/sun';
-import { CITY_AXIS, type CloudAnchor, coverageMap, layoutClouds, SHELL_R } from './layout';
+import { cloudsShotView, diveCrossing } from './dive-anchors';
+import { CITY_AXIS, type CloudAnchor, coverageMapSteps, layoutClouds, SHELL_R } from './layout';
 import { airSpace, cloudLift, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, mistBlend, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
 import { PuffLod } from './puffs';
 import { blockFrag, blockVert, puffFrag, puffVert, veilFrag, veilVert } from './shaders';
+import { hyp3 } from '../world/hyp';
 
 const DEG = Math.PI / 180;
 const SHADOW_W = 1024;
@@ -57,19 +58,26 @@ const REVEAL_DUR = 0.9;
 const FOG_REACH = 5;
 /** Mist under (and just beside) a cluster's flat base (m). */
 const BASE_MIST = 4;
-/** Scene visibility (fog far, m) at full white-out. */
-const VEIL_VIS = 9;
-/** The mist slab over the city (altitude above sea level, m): ramps in / full / ramps out. */
-const SLAB = [31.5, 38.5, 44, 49];
+/**
+ * Scene visibility (fog far, m) at full white-out: far enough that the cluster's other puffs still
+ * read as soft shapes through the mist while passing through one (at 9 m the pass was a flat
+ * lavender card that read as a glitch at tile size).
+ */
+const VEIL_VIS = 16;
+/**
+ * The mist slab over the city (altitude above sea level, m): ramps in / full / ramps out. Thin: a
+ * dive crosses it in ~0.25 s (at 31.5–49 m it was ~0.45 s of flat white, the clip's glitchy flash).
+ */
+const SLAB = [36, 39.5, 42, 45.5];
 /** Plan radius (m) the mist slab covers (it fades out between these). */
 const SLAB_R0 = 72;
 const SLAB_R1 = 92;
 /**
- * Temporal release (s): leaving a cloud, the overlay thins over ~6 frames and the scene fog opens
+ * Temporal release (s): leaving a cloud, the overlay thins over ~4 frames and the scene fog opens
  * over ~10 more (overlay first, fog last), so the city is revealed out of the mist, never cut to.
  * Entering is instant (the near plane must never slice a puff open).
  */
-const VEIL_RELEASE = 0.2;
+const VEIL_RELEASE = 0.12;
 const MIST_RELEASE = 0.4;
 /** The puffs' own fog far plane is floored at this while the white-out fog is closed (m). */
 const PUFF_FOG_MIN = 30;
@@ -132,7 +140,7 @@ export function createCloudsSystem(): System {
       bump = ctx.params.number('clouds.bump', { label: 'cloud bump', min: 0, max: 1, value: 0.2 });
       mask = ctx.params.number('clouds.mask', { label: 'debug: clouds as flat magenta', min: 0, max: 1, value: 0 });
 
-      const layout = layoutClouds({ seed: ctx.world.seed, clusters: 30, anchors: anchors(ctx) });
+      const layout = layoutClouds({ seed: ctx.world.seed, clusters: 30, anchors: anchors() });
       puffs = layout.puffs;
       puffCount = layout.count;
       puffBase = new Float32Array(puffCount);
@@ -140,7 +148,13 @@ export function createCloudsSystem(): System {
       await ctx.yield();
 
       // Shadow coverage map.
-      const cov = coverageMap(layout, SHADOW_W, SHADOW_H);
+      const covSteps = coverageMapSteps(layout, SHADOW_W, SHADOW_H);
+      let covStep = covSteps.next();
+      while (!covStep.done) {
+        await ctx.yield();
+        covStep = covSteps.next();
+      }
+      const cov = covStep.value;
       tex = ctx.track(new DataTexture(cov, SHADOW_W, SHADOW_H, RedFormat, UnsignedByteType));
       tex.minFilter = LinearFilter;
       tex.magFilter = LinearFilter;
@@ -215,7 +229,7 @@ export function createCloudsSystem(): System {
           const along = dx * c.dir.x + dy * c.dir.y + dz * c.dir.z;
           const hd = Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - along * along));
           rh = Math.max(rh, hd + p[i * 4 + 3] * 0.85);
-          rb = Math.max(rb, Math.hypot(dx, dy, dz) + p[i * 4 + 3]);
+          rb = Math.max(rb, hyp3(dx, dy, dz) + p[i * 4 + 3]);
         }
         const rv = Math.max(3, (c.top - c.base) * 0.55);
         for (let i = c.first; i < c.first + c.count; i++) {
@@ -370,7 +384,7 @@ export function createCloudsSystem(): System {
           const px = clusterInfo[o] * top - eyeLocal.x;
           const py = clusterInfo[o + 1] * top - eyeLocal.y;
           const pz = clusterInfo[o + 2] * top - eyeLocal.z;
-          const d = Math.hypot(px, py, pz);
+          const d = hyp3(px, py, pz);
           if (d > 260) continue;
           let az = 1;
           if (fl > 1e-4) {
@@ -378,7 +392,7 @@ export function createCloudsSystem(): System {
             const hx = px - ux * pu;
             const hy = py - uy * pu;
             const hz = pz - uz * pu;
-            const hl = Math.hypot(hx, hy, hz);
+            const hl = hyp3(hx, hy, hz);
             if (hl > 1e-3) {
               const daz = Math.acos(Math.max(-1, Math.min(1, (hx * fwdL.x + hy * fwdL.y + hz * fwdL.z) / (hl * fl))));
               az = 1 - smooth(hfov + 0.2, hfov + 0.6, daz);
@@ -472,7 +486,9 @@ export function createCloudsSystem(): System {
       const vm = veilMat.uniforms;
       vm.uAmount.value = amount;
       veil.visible = amount > 0.002;
-      block.visible = amount > 0.985;
+      // (The opaque blocker stays off: the veil never closes fully any more, the fogged scene
+      // shows through it; see veilFrag.)
+      block.visible = false;
       ctx.services.sky.veil = amount;
       ctx.services.sky.mist = fogAmt;
 
@@ -497,7 +513,8 @@ export function createCloudsSystem(): System {
         vm.uPhase.value = phase;
         vm.uAspect.value = ctx.camera.aspect;
         // Wisps only well inside: gone the moment the eye is out (no streaks over a clear city).
-        vm.uWisp.value = smooth(0.3, 0.75, amountNow) * smooth(0.5, 0.9, amount);
+        // (Faint: at full strength they formed an X-shaped radial streak across the white.)
+        vm.uWisp.value = 0.3 * smooth(0.3, 0.75, amountNow) * smooth(0.5, 0.9, amount);
       }
       pu.uFogMin.value = fogAmt > 0.002 ? PUFF_FOG_MIN : 0;
       if (fogAmt > 0.002) {
@@ -543,31 +560,6 @@ export function createCloudsSystem(): System {
   };
 }
 
-/** Unit direction where the scripted dive's eye crosses `altSea` (m above sea level), and the
- *  travel direction there (unit, tangent). */
-function diveCrossing(ctx: LBContext, altSea: number): { at: Vec3; travel: Vec3 } | null {
-  const planet = ctx.world.planet;
-  let prev = diveAt(ctx, 0);
-  let prevDir = dirFromLatLon(prev.lat, prev.lon);
-  let prevH = prev.alt + planet.surfaceAt(prevDir);
-  for (let i = 1; i <= 400; i++) {
-    const cur = diveAt(ctx, i / 400);
-    const dir = dirFromLatLon(cur.lat, cur.lon);
-    const h = cur.alt + planet.surfaceAt(dir);
-    if (prevH >= altSea && h < altSea) {
-      const t = (prevH - altSea) / Math.max(1e-6, prevH - h);
-      const at = normalize3(v3(), addScaled3(v3(), prevDir, addScaled3(v3(), dir, prevDir, -1), t));
-      const d = addScaled3(v3(), dir, prevDir, -1);
-      addScaled3(d, d, at, -dot3(d, at));
-      return { at, travel: normalize3(d) };
-    }
-    prev = cur;
-    prevDir = dir;
-    prevH = h;
-  }
-  return null;
-}
-
 /**
  * Forced clusters: the dive's cloud and two small ones flanking the `clouds` shot.
  *
@@ -577,11 +569,11 @@ function diveCrossing(ctx: LBContext, altSea: number): { at: Vec3; travel: Vec3 
  * bridge to the body), so the camera cuts through the cloud's edge: a brief white-out with a thin
  * gap between the two puffs, then out beside the wall, under the belly.
  */
-function anchors(ctx: LBContext): CloudAnchor[] {
+function anchors(): CloudAnchor[] {
   const out: CloudAnchor[] = [];
   const mid = (CLOUD_MIN + CLOUD_MAX) / 2;
   const rad = R + mid;
-  const c0 = diveCrossing(ctx, 43);
+  const c0 = diveCrossing(43);
   if (c0) {
     const side = normalize3(v3(), cross3(v3(), c0.travel, c0.at));
     const toCity = addScaled3(v3(), CITY_AXIS, c0.at, -1);
@@ -596,7 +588,7 @@ function anchors(ctx: LBContext): CloudAnchor[] {
     // bulk sits below and outboard of the track, so on the way in it hangs under the skyline, not
     // over it. The eye cuts its inner top corner and leaves through the flat base (~0.15 s inside).
     const puff = (alt: number, lateral: number, along: number, r: number) => {
-      const c = diveCrossing(ctx, alt) ?? c0;
+      const c = diveCrossing(alt) ?? c0;
       return { dir: at(c.at, lateral, along), alt, r };
     };
     out.push({
@@ -615,7 +607,7 @@ function anchors(ctx: LBContext): CloudAnchor[] {
   }
   // The `clouds` shot hovers at the top of the layer looking steeply down at the city: a cluster
   // just west of the camera's footprint fills the left of the frame, the city shows past it.
-  const shot = SHOTS.clouds?.view(ctx);
+  const shot = cloudsShotView();
   if (shot) {
     const up = dirFromLatLon(shot.lat, shot.lon);
     const fwd = headingVector(up, ((shot.heading ?? 0) * Math.PI) / 180);

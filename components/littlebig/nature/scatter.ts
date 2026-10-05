@@ -185,7 +185,7 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
   // ── Terrain scatter ──
   const I = t.ico.indices;
   for (let f = 0; f < t.ico.triangleCount; f++) {
-    if ((f & 4095) === 4095) yield;
+    if ((f & 1023) === 1023) yield;
     const b = faceBiome(t, f);
     const rates = RATES[b] ?? ZERO;
     if (rates === ZERO && b !== Biome.City) continue;
@@ -206,7 +206,9 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
     const tm = (tone0 + t.tone[I[f * 3 + 1]] + t.tone[I[f * 3 + 2]]) / 3;
     const grove = open && !farm ? 0.25 + 5.5 * (1 - smooth01((tm - 0.24) / 0.2)) : 1;
     const treeRate = farm ? (hedgeRow ? 0.05 : 0) : rates.tree * grove;
-    const bushRate = farm ? (hedgeRow ? 0.45 : 0.003) : rates.bush * (open ? 0.6 + 0.4 * grove : 1);
+    // Hedgerows dense enough that neighbouring bushes overlap into a hedge (at 0.45 they stood
+    // apart: a row of identical lumps that read as boulders laid along a contour).
+    const bushRate = farm ? (hedgeRow ? 0.75 : 0.003) : rates.bush * (open ? 0.6 + 0.4 * grove : 1);
     for (let slot = 0; slot < 6; slot++) {
       const roll = hash3(f, slot, 0x51);
       let kind: NatureKindId | -1 = -1;
@@ -295,7 +297,7 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
           size = 4 + 2.6 * tone;
           break;
         case NatureKind.Bush:
-          size = flags & NatureFlag.Hedge ? 0.8 + 0.35 * tone : 0.7 + 0.8 * tone;
+          size = flags & NatureFlag.Hedge ? 0.65 + 0.6 * tone : 0.7 + 0.8 * tone;
           if (b === Biome.Meadow && !(flags & NatureFlag.Hedge) && hash3(f, slot, 10) < 0.12) flags |= NatureFlag.Bloom;
           break;
         case NatureKind.Rock:
@@ -309,7 +311,7 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
       const hedge = (flags & NatureFlag.Hedge) !== 0;
       const yaw = hedge ? hedgeYaw + (hash3(f, slot, 0x31) - 0.5) * 0.3 : hash3(f, slot, 0x31) * Math.PI * 2;
       add(kind, p.x, p.y, p.z, yaw, wide, size, tone, flags, f, 0.12 + 0.88 * Math.min(1, ang / 2.2) + 0.05 * hash3(f, slot, 8));
-      if (hedge && out.count <= cap) out.stretch[out.count - 1] = 2.1;
+      if (hedge && out.count <= cap) out.stretch[out.count - 1] = 1.6 + 1.0 * hash3(f, slot, 0x3b);
       if (cr > 0 && out.count < cap) remember(out.count - 1, cr);
     }
   }

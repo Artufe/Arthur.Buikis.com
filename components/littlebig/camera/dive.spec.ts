@@ -1,3 +1,4 @@
+import '../core/kit-fill'; // before the review tooling (core/kit.ts)
 import { describe, expect, it } from 'vitest';
 import { getCityIndex, getCityPlan } from '../world/city';
 import { EYE_HEIGHT } from '../world/config';

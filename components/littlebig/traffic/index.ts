@@ -24,6 +24,7 @@ import { v3, type Vec3 } from '../world/sphere';
 import { createFleetLights, type FleetLights } from './lights';
 import { bodyColours, buildVehicle, VARIANT_COLOURS } from './mesh';
 import { createTrafficSim, FLEET, KINDS, type TrafficSim } from './sim';
+import { hyp } from '../world/hyp';
 
 /** Sim seconds the fleet has already driven at t = 0, and the most of t replayed exactly on a jump. */
 const WARM = 20;
@@ -154,8 +155,14 @@ const PATCH_DEPTH = /* glsl */ `
 if(lbTrafficCull()||1.0-lbSmooth01((lbCamAlt-${SH_FROM.toFixed(1)})/${(SH_TO - SH_FROM).toFixed(1)})<lbBayer4(gl_FragCoord.xy))discard;
 `;
 
-/** Write a rigid instance matrix (columns: left, up, forward, position) at offset o. */
-function basis(m: Float32Array, o: number, l: Vec3, u: Vec3, f: Vec3, x: number, y: number, z: number) {
+/**
+ * Write a rigid instance matrix (columns: left, up, forward, position p) at offset o. (Position as
+ * a Vec3: doubles passed to a call V8 does not inline are boxed, i.e. allocated, per call.)
+ */
+function basis(m: Float32Array, o: number, l: Vec3, u: Vec3, f: Vec3, p: Vec3) {
+  const x = p.x;
+  const y = p.y;
+  const z = p.z;
   m[o] = l.x;
   m[o + 1] = l.y;
   m[o + 2] = l.z;
@@ -230,18 +237,20 @@ export function createTrafficSystem(): System {
   };
 
   /** Wheel spin angle and bob of the vehicle being packed. */
-  let mo0 = 0;
-  let mo2 = 0;
+  // Wheel turn and bob of the vehicle being packed (a typed array: a closure `let` holding a double
+  // allocates a fresh number on every write).
+  const mo = new Float64Array(2);
+  const bp = v3();
   /** Copy vehicle i's instance data (the pose in left / F.up / fwd / P) into pack p's next slot. */
   function put(p: Pack, i: number) {
     const j = p.n++;
-    basis(p.mat, j * 16, left, F.up, fwd, P.x, P.y, P.z);
+    basis(p.mat, j * 16, left, F.up, fwd, P);
     p.col[j * 3] = colour[i * 3];
     p.col[j * 3 + 1] = colour[i * 3 + 1];
     p.col[j * 3 + 2] = colour[i * 3 + 2];
-    p.mo[j * 4] = mo0;
+    p.mo[j * 4] = mo[0];
     p.mo[j * 4 + 1] = steer[i];
-    p.mo[j * 4 + 2] = mo2;
+    p.mo[j * 4 + 2] = mo[1];
     p.mo[j * 4 + 3] = roll[i];
     p.st[j * 3] = sim!.brake[i];
     p.st[j * 3 + 1] = sim!.signal[i];
@@ -305,21 +314,35 @@ export function createTrafficSystem(): System {
       const kappa = (2 * Math.tan(steer[i] / 1.5)) / kind.wheelbase;
       roll[i] += (Math.max(-0.06, Math.min(0.06, sp * sp * kappa * 0.012)) - roll[i]) * kS;
       pitch[i] += (Math.max(-0.05, Math.min(0.03, sim.acc[i] * 0.011)) - pitch[i]) * kS;
-      mo0 = sim.odo[i] / kind.wheelR;
-      mo2 = 0.012 * Math.min(1, sp / 4) * Math.sin(sim.odo[i] * 1.7 + i * 1.3);
+      mo[0] = sim.odo[i] / kind.wheelR;
+      mo[1] = 0.012 * Math.min(1, sp / 4) * Math.sin(sim.odo[i] * 1.7 + i * 1.3);
       // packing: in view (with a shadow margin) and above the horizon; near and / or far by distance
       const ex = P.x - E.x;
       const ey = P.y - E.y;
       const ez = P.z - E.z;
       const d = Math.sqrt(ex * ex + ey * ey + ez * ez);
       const hl = kind.len / 2;
-      if (d < farR && inView(P, hl + 7)) {
+      let seen = d < farR;
+      if (seen) {
+        // in the frustum (sphere test, inlined: no doubles across a call)
+        const pl = frustum.planes;
+        for (let q = 0; q < 6 && seen; q++) {
+          const n = pl[q].normal;
+          if (n.x * P.x + n.y * P.y + n.z * P.z + pl[q].constant < -(hl + 7)) seen = false;
+        }
+      }
+      if (seen) {
         const k = sim.kind[i] * 2;
         if (d < rn + BAND + hl) put(packs[k], i);
         if (d > rn - BAND - hl) put(packs[k + 1], i);
       }
       // night lights: the headlight pool from the bumper, the head / tail sparks
-      if (beamsOn) basis(bm, i * 16, left, U, fwd, P.x + fwd.x * hl + U.x * 0.012, P.y + fwd.y * hl + U.y * 0.012, P.z + fwd.z * hl + U.z * 0.012);
+      if (beamsOn) {
+        bp.x = P.x + fwd.x * hl + U.x * 0.012;
+        bp.y = P.y + fwd.y * hl + U.y * 0.012;
+        bp.z = P.z + fwd.z * hl + U.z * 0.012;
+        basis(bm, i * 16, left, U, fwd, bp);
+      }
       const sp6 = lights.pos;
       const sd = lights.dir;
       const lh = 0.8;
@@ -349,16 +372,6 @@ export function createTrafficSystem(): System {
     if (lights.beams.visible) lights.beams.instanceMatrix.needsUpdate = true;
     lights.posAttr.needsUpdate = true;
     lights.dirAttr.needsUpdate = true;
-  }
-
-  /** Sphere (centre c, radius r) against the camera frustum. */
-  function inView(c: Vec3, r: number) {
-    const pl = frustum.planes;
-    for (let k = 0; k < 6; k++) {
-      const n = pl[k].normal;
-      if (n.x * c.x + n.y * c.y + n.z * c.z + pl[k].constant < -r) return false;
-    }
-    return true;
   }
 
   /** The player's collision: push a disc out of every drawn body box (plan space). */
@@ -421,7 +434,7 @@ export function createTrafficSystem(): System {
       const steps = replaySteps(ctx);
       for (let k = 0; k < steps; k++) {
         replayStep(ctx, k === steps - 1);
-        if (k % 50 === 49) await ctx.yield();
+        if ((k & 7) === 7) await ctx.yield(); // (ctx.yield only yields once the slice is spent)
       }
 
       // body colours by kind slot; character variants; box-truck liveries (1 circle, 2 band, 3 wave)
@@ -491,7 +504,7 @@ export function createTrafficSystem(): System {
       // reveal: the fleet pops onto the streets one after another, centre outward
       const start = ctx.reveal.slot(1.6);
       revealStart = start;
-      const order = Array.from({ length: n }, (_, i) => i).sort((p, q) => Math.hypot(sim!.fx[p], sim!.fz[p]) - Math.hypot(sim!.fx[q], sim!.fz[q]));
+      const order = Array.from({ length: n }, (_, i) => i).sort((p, q) => hyp(sim!.fx[p], sim!.fz[p]) - hyp(sim!.fx[q], sim!.fz[q]));
       order.forEach((i, r) => (reveal[i] = start + (r / n) * 1.1));
       const r0 = ctx.reveal.instant ? 1 : 0;
       lights.beamMat.uniforms.uReveal.value = r0;

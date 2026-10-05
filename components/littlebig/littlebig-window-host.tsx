@@ -6,16 +6,18 @@ import { usePathname, useRouter } from 'next/navigation';
 import { FloatingWindow } from '@/components/floating-window';
 import { closePlanet, onPlanetClose, onPlanetOpen, onPlanetRaise } from '@/lib/planet-bus';
 
-// Nothing of LITTLEBIG loads until someone opens the window (or shows intent, below).
-const LittlebigCanvas = dynamic(() => import('./littlebig-canvas').then((m) => ({ default: m.LittlebigCanvas })), {
-  ssr: false,
-});
+import { loadLittlebigCanvas, prefetchLittlebig, stashHandoff } from './handoff';
 
-/** Warm the LITTLEBIG chunks (JS only; the world is generated on open). Safe to call repeatedly. */
-export function prefetchLittlebig() {
-  void import('./littlebig-canvas');
-  void import('./core/engine');
-}
+export { prefetchLittlebig };
+
+const SPACE = '#070B1A';
+
+// Nothing of LITTLEBIG loads until someone opens the window (or shows intent, below). The space
+// colour stands in while the chunk arrives (the window body is black: no black → navy flash).
+const LittlebigCanvas = dynamic(() => loadLittlebigCanvas().then((m) => ({ default: m.LittlebigCanvas })), {
+  ssr: false,
+  loading: () => <div className="absolute inset-0" style={{ background: SPACE }} />,
+});
 
 export function LittlebigWindowHost() {
   const [open, setOpen] = useState(false);
@@ -29,6 +31,9 @@ export function LittlebigWindowHost() {
     let done = false;
     const onKey = (e: KeyboardEvent) => {
       if (done) return;
+      // Typing a '/' into a field is not the palette (the palette ignores it too).
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.key !== '/' && !((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
       done = true;
       window.removeEventListener('keydown', onKey);
@@ -41,6 +46,8 @@ export function LittlebigWindowHost() {
   useEffect(() => {
     const offOpen = onPlanetOpen(() => {
       if (window.location.pathname.startsWith('/planet')) return;
+      // Engine and three start downloading alongside the canvas chunk, not after it mounts.
+      prefetchLittlebig();
       setOpen((wasOpen) => {
         if (wasOpen) setRaiseToken((t) => t + 1);
         return true;
@@ -65,6 +72,8 @@ export function LittlebigWindowHost() {
       height={600}
       onClose={closePlanet}
       onExpand={() => {
+        // /planet carries on from the window's view and sim time (handoff.ts).
+        stashHandoff();
         setOpen(false);
         router.push('/planet');
       }}

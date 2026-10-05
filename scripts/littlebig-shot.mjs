@@ -6,8 +6,9 @@
 //   node scripts/littlebig-shot.mjs --shot orbit,city,clouds,rooftops,street,horizon,night,dusk --out docs/littlebig/shots/F0/
 //   node scripts/littlebig-shot.mjs --view 20,10,16,45,-30 --t 120 --out a.png     lat,lon,alt,heading,pitch (deg; pitch optional)
 //   node scripts/littlebig-shot.mjs --shot street --seq 8 --interval 0.25 --out seq/   frame sequence (sim time steps)
-//   node scripts/littlebig-shot.mjs --dive 48 --out dive/                            scripted orbit → street descent
-//   node scripts/littlebig-shot.mjs --dive 301 --t 0 --size 1280x800 --out clip/     the /play clip: 30 fps, the true path,
+//   node scripts/littlebig-shot.mjs --dive 48 --out dive/                            scripted orbit → street descent (sim from
+//                                                    DIVE_T0, the clip's start, unless --t is given)
+//   node scripts/littlebig-shot.mjs --dive 301 --size 1280x800 --out clip/           the /play clip: 30 fps, the true path,
 //                                                    the world moving (frames are diveSeconds/(N−1) apart in camera AND sim time)
 //   node scripts/littlebig-shot.mjs --shot city,street --perf 90 --reps 5 --size 1280x800   frame-time JSON lines: best-of-reps
 //                                                    net (≈ quiet GPU) + median of reps; serial CPU+GPU ms
@@ -17,8 +18,10 @@
 //   node scripts/littlebig-shot.mjs --boot                                            startup timeline per stage
 //   node scripts/littlebig-shot.mjs --list                                            named shots
 //   node scripts/littlebig-shot.mjs --leak 10 --close-at 300,ready                    window open/close leak check
+//   node scripts/littlebig-shot.mjs --bundle --url http://localhost:3099              production JS a /planet/ visit loads
+//                                                    (pnpm build, then serve out/: cd out && python3 -m http.server 3099)
 //
-// Flags: --size WxH (default 1600x1000) · --q low|high (default high) · --p key=value (repeatable,
+// Flags: --size WxH (default 1600x1000) · --dpr N (device pixel ratio, default 1) · --q low|high (default high) · --p key=value (repeatable,
 // param overrides) · --cold (unique shader sources: first-visit compile cost) · --t <s> sim time · --warm N rAFs before each capture (default 6) · --jpg ·
 // --headed · --url. Console errors and warnings from the page are always printed.
 // --leak N: opens and closes the floating window N times on the home page, alternating between
@@ -30,6 +33,7 @@ import { chromium } from '@playwright/test';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -75,7 +79,9 @@ const busy = (() => {
     return 0;
   }
 })();
-const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+// --dpr: the device pixel ratio (default 1). A retina laptop is 2: high caps it at 1.5 (core/quality.ts),
+// and the live loop's adaptive resolution steps it down further (off in shot mode).
+const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: Number(flags.dpr ?? 1) });
 const logs = [];
 page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text()}`);
@@ -99,6 +105,40 @@ const snap = async (file) => {
   await page.screenshot({ path: file, type: ext === 'jpg' ? 'jpeg' : 'png', quality: ext === 'jpg' ? 90 : undefined });
   console.log(file);
 };
+
+if (flags.bundle) {
+  // The JS a /planet/ visit loads that /about/ does not, gzip -9 (BRIEF §1 budget: LITTLEBIG's own
+  // production JS, three.js excluded; three's two chunks are labelled). Against a served `out/`.
+  try {
+    const load = async (p) => {
+      const pg = await browser.newPage();
+      const seen = new Set();
+      pg.on('request', (r) => r.url().endsWith('.js') && seen.add(r.url()));
+      await pg.goto(base + p, { timeout: 180_000 });
+      await pg.waitForTimeout(6000);
+      await pg.close();
+      return seen;
+    };
+    const about = await load('/about/');
+    const planet = await load('/planet/');
+    let own = 0;
+    for (const u of planet) {
+      if (about.has(u)) continue;
+      const src = await (await fetch(u)).text();
+      const gz = zlib.gzipSync(src, { level: 9 }).length;
+      const three = /ShaderChunk|ShaderLib|Matrix4/.test(src) && !/\[littlebig\]|lbCamAlt|walkEdges/.test(src);
+      if (!three) own += gz;
+      console.log(`${(src.length / 1024).toFixed(1).padStart(8)} KB ${(gz / 1024).toFixed(1).padStart(7)} KB gz  ${three ? 'three    ' : 'littlebig'} ${new URL(u).pathname}`);
+    }
+    console.log(`LITTLEBIG production JS: ${(own / 1024).toFixed(1)} KB gzip (three excluded)`);
+  } catch (e) {
+    console.error('FAILED:', e.message);
+    process.exitCode = 1;
+  } finally {
+    await browser.close();
+  }
+  process.exit();
+}
 
 if (flags.leak) {
   try {
@@ -131,7 +171,9 @@ async function leakCheck(n, closeAts) {
       }
     }, 5);
   });
-  await page.goto(`${base}/`, { waitUntil: 'load', timeout: 180_000 });
+  // ?shot=1 installs the debug hook in a production build too (the leak that matters there is a
+  // minifier's: run this against a served out/ as well as the dev server).
+  await page.goto(`${base}/?shot=1`, { waitUntil: 'load', timeout: 180_000 });
   await page.waitForTimeout(1500);
   const cdp = await page.context().newCDPSession(page);
   const listeners = async () => {
@@ -190,11 +232,14 @@ try {
   const tHook = Date.now() - t0;
   await page.waitForFunction(() => window.__littlebig?.ready === true, null, { timeout: 120_000, polling: 100 });
   console.log(`booted in ${((Date.now() - t0) / 1000).toFixed(2)}s (hook after ${(tHook / 1000).toFixed(2)}s)`);
+  // --dive without --t starts the sim where the /play clip does (core/shots.ts DIVE_T0), so a dive
+  // run shows the clip's light and traffic and its last frame is the `landing` shot.
+  if (flags.dive && flags.t === undefined) flags.t = await page.evaluate(() => window.__littlebig.diveT0 ?? 0);
   if (flags.t !== undefined) await page.evaluate((t) => window.__littlebig.setTime(t), Number(flags.t));
 
   if (flags.boot) {
     const boot = await page.evaluate(() => window.__littlebig.boot());
-    for (const b of boot) console.log(`${String(b.ms).padStart(8)} ms  @${String(b.at).padStart(6)}  ${b.stage}`);
+    for (const b of boot) console.log(`${String(b.ms).padStart(8)} ms  @${String(b.at).padStart(6)}  ${b.stage}${b.wait !== undefined ? `  (compile wait ${b.wait} ms)` : ''}`);
   }
   if (flags.list) {
     const list = await page.evaluate(() => window.__littlebig.shots());

@@ -5,6 +5,8 @@
 // corner biome with low-frequency jitter: a crisp low-poly staircase up close, see colors.ts). The
 // vertex shader blends from facet to smooth colour with distance from the camera (terrain.blendNear
 // → terrain.blendFar), so orbit reads as clean painted continents and the street as chunky facets.
+// Facets on a border between soft-ground biomes (sand, grass, meadow, forest) always show their smooth
+// corner colours: the edge is a one-facet gradient, not a per-triangle sawtooth (colors.ts FACE_EDGE).
 // Rock and snow facets are 'crisp' (aFaceCol.a): they never blend, so the range stays a faceted
 // toy at every distance, and snow is half-desaturated so the golden key doesn't turn it cream.
 // Colours are stored as sRGB bytes and linearised in the shader (finer steps in dark greens).
@@ -19,17 +21,74 @@
 import { BufferAttribute, BufferGeometry, Vector2 } from 'three';
 import type { LBContext, System } from '../core/contracts';
 import { R } from '../world/config';
-import { chunkedMesh, terrainChunkBounds, type ChunkedMesh } from './chunked';
-import { faceColor, vertexColors } from './colors';
+import type { ToonMaterial } from '../render/toon';
+import { chunkedMesh, standInGeometry, terrainChunkBounds, type ChunkedMesh } from './chunked';
+import { FACE_CRISP, FACE_EDGE, faceColor, vertexColors } from './colors';
 import { terrainData } from './data';
 import { extendToon, grazingShadows, LOW_LIGHT_GRADE } from './shader-ext';
 
 export function createTerrainSystem(): System {
   let geometry: BufferGeometry | null = null;
   let chunks: ChunkedMesh | null = null;
+  let material: ToonMaterial | null = null;
+  /** The terrain material (made in prepare, so the driver compiles it while init builds). */
+  const makeMaterial = (ctx: LBContext) => {
+    const blendNear = ctx.params.number('terrain.blendNear', { label: 'terrain facet→smooth from (m)', min: 0, max: 200, value: 40 });
+    const blendFar = ctx.params.number('terrain.blendFar', { label: 'terrain facet→smooth to (m)', min: 1, max: 400, value: 130 });
+    const soft = ctx.params.number('terrain.soft', { label: 'terrain smooth-normal share up close', min: 0, max: 1, value: 0.35 });
+    const uBlend = { value: new Vector2(blendNear.value, blendFar.value) };
+    const uSoft = { value: soft.value };
+    ctx.params.onChange((p) => {
+      if (p === blendNear || p === blendFar) uBlend.value.set(blendNear.value, Math.max(blendNear.value + 1, blendFar.value));
+      if (p === soft) uSoft.value = soft.value;
+    });
+    const m = ctx.toon.material({
+      name: 'terrain',
+      vertexColors: true,
+      rim: 0.22,
+      patch: {
+        key: 'terrain',
+        uniforms: { uTerrainBlend: uBlend, uTerrainSoft: uSoft },
+        vertexPars: /* glsl */ `
+attribute vec4 aFaceCol;
+attribute vec3 aSmoothN;
+uniform vec2 uTerrainBlend;
+uniform float uTerrainSoft;
+varying float vSnow;`,
+        vertex: /* glsl */ `
+#ifdef USE_COLOR
+  {
+    vec3 lbTw = (modelMatrix * vec4(transformed, 1.0)).xyz;
+    // Rock and snow facets (aFaceCol.a = 1) stay crisp at every distance: a faceted toy range.
+    // Soft-ground biome edges (a = 0.5) always take the smooth corner colours: a gradient, no sawtooth.
+    float lbCrisp = step(0.75, aFaceCol.a);
+    float lbK = smoothstep(uTerrainBlend.x, uTerrainBlend.y, distance(lbTw, lbCamPos)) * (1.0 - lbCrisp);
+    vec3 lbC = mix(aFaceCol.rgb, color.rgb, max(lbK, step(0.25, aFaceCol.a) * (1.0 - lbCrisp)));
+    vSnow = smoothstep(0.8, 0.9, min(lbC.r, min(lbC.g, lbC.b)));
+    vColor.rgb = pow(lbC, vec3(2.2));
+    // Facets fade to smooth shading with distance too: no per-facet terminator mosaic from orbit.
+    // Soft ground keeps a share of the smooth normal even up close, so a curved meadow in low sun
+    // reads as gentle facets, not a light/dark checkerboard of ramp bands (rock stays fully crisp).
+    vNormal = normalize(normalMatrix * mix(normal, aSmoothN, max(lbK, uTerrainSoft * (1.0 - lbCrisp))));
+  }
+#endif`,
+        fragmentPars: 'varying float vSnow;',
+        // Snow reads white, not cream: the golden key light tints it only half as much.
+        fragment: /* glsl */ `
+  outgoingLight = mix(outgoingLight, vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))) * vec3(0.98, 1.0, 1.04), 0.55 * vSnow);
+  ${LOW_LIGHT_GRADE}`,
+      },
+    });
+    extendToon(m, grazingShadows);
+    return m;
+  };
   return {
     name: 'terrain',
     stage: 1,
+    prepare(ctx: LBContext) {
+      material = makeMaterial(ctx);
+      ctx.prewarm([ctx.toon.mesh(standInGeometry(ctx), material, { cast: true, receive: true })]);
+    },
     init(ctx: LBContext) {
       const t = terrainData(ctx.world.planet, ctx.q.terrainDetail);
       const vcol = vertexColors(t);
@@ -71,7 +130,8 @@ export function createTerrainSystem(): System {
         // Facet colour: the dominant corner biome with the facet's own slope (terrain/colors.ts).
         const cx = pos[o] + pos[o + 3] + pos[o + 6], cy = pos[o + 1] + pos[o + 4] + pos[o + 7], cz = pos[o + 2] + pos[o + 5] + pos[o + 8];
         const fslope = 1 - (nx * cx + ny * cy + nz * cz) / (Math.hypot(cx, cy, cz) || 1);
-        const crisp = faceColor(t, f, fslope, fc);
+        const kind = faceColor(t, f, fslope, fc);
+        const flag = kind === FACE_CRISP ? 255 : kind === FACE_EDGE ? 128 : 0;
         const r8 = Math.min(255, Math.round(fc[0] * 255));
         const g8 = Math.min(255, Math.round(fc[1] * 255));
         const b8 = Math.min(255, Math.round(fc[2] * 255));
@@ -82,7 +142,7 @@ export function createTerrainSystem(): System {
           fcol[o * 4 / 3 + k * 4] = r8;
           fcol[o * 4 / 3 + k * 4 + 1] = g8;
           fcol[o * 4 / 3 + k * 4 + 2] = b8;
-          fcol[o * 4 / 3 + k * 4 + 3] = crisp * 255;
+          fcol[o * 4 / 3 + k * 4 + 3] = flag;
         }
       }
       geometry = ctx.track(new BufferGeometry());
@@ -93,51 +153,7 @@ export function createTerrainSystem(): System {
       geometry.setAttribute('aSmoothN', new BufferAttribute(snor, 3, true));
       geometry.computeBoundingSphere();
 
-      const blendNear = ctx.params.number('terrain.blendNear', { label: 'terrain facet→smooth from (m)', min: 0, max: 200, value: 40 });
-      const blendFar = ctx.params.number('terrain.blendFar', { label: 'terrain facet→smooth to (m)', min: 1, max: 400, value: 130 });
-      const soft = ctx.params.number('terrain.soft', { label: 'terrain smooth-normal share up close', min: 0, max: 1, value: 0.35 });
-      const uBlend = { value: new Vector2(blendNear.value, blendFar.value) };
-      const uSoft = { value: soft.value };
-      ctx.params.onChange((p) => {
-        if (p === blendNear || p === blendFar) uBlend.value.set(blendNear.value, Math.max(blendNear.value + 1, blendFar.value));
-        if (p === soft) uSoft.value = soft.value;
-      });
-      const mat = ctx.toon.material({
-        name: 'terrain',
-        vertexColors: true,
-        rim: 0.22,
-        patch: {
-          key: 'terrain',
-          uniforms: { uTerrainBlend: uBlend, uTerrainSoft: uSoft },
-          vertexPars: /* glsl */ `
-attribute vec4 aFaceCol;
-attribute vec3 aSmoothN;
-uniform vec2 uTerrainBlend;
-uniform float uTerrainSoft;
-varying float vSnow;`,
-          vertex: /* glsl */ `
-#ifdef USE_COLOR
-  {
-    vec3 lbTw = (modelMatrix * vec4(transformed, 1.0)).xyz;
-    // Rock and snow facets (aFaceCol.a = 1) stay crisp at every distance: a faceted toy range.
-    float lbK = smoothstep(uTerrainBlend.x, uTerrainBlend.y, distance(lbTw, lbCamPos)) * (1.0 - aFaceCol.a);
-    vec3 lbC = mix(aFaceCol.rgb, color.rgb, lbK);
-    vSnow = smoothstep(0.8, 0.9, min(lbC.r, min(lbC.g, lbC.b)));
-    vColor.rgb = pow(lbC, vec3(2.2));
-    // Facets fade to smooth shading with distance too: no per-facet terminator mosaic from orbit.
-    // Soft ground keeps a share of the smooth normal even up close, so a curved meadow in low sun
-    // reads as gentle facets, not a light/dark checkerboard of ramp bands (rock stays fully crisp).
-    vNormal = normalize(normalMatrix * mix(normal, aSmoothN, max(lbK, uTerrainSoft * (1.0 - aFaceCol.a))));
-  }
-#endif`,
-          fragmentPars: 'varying float vSnow;',
-          // Snow reads white, not cream: the golden key light tints it only half as much.
-          fragment: /* glsl */ `
-  outgoingLight = mix(outgoingLight, vec3(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722))) * vec3(0.98, 1.0, 1.04), 0.55 * vSnow);
-  ${LOW_LIGHT_GRADE}`,
-        },
-      });
-      extendToon(mat, grazingShadows);
+      const mat = material ?? makeMaterial(ctx);
       // Only the chunks in view (and just outside it, for shadows cast into view) are drawn.
       chunks = chunkedMesh(ctx, geometry, mat, terrainChunkBounds(t), tris, { cast: true, receive: true, inflate: 40 });
       for (const m of chunks.meshes) ctx.scene.add(m);
@@ -150,6 +166,7 @@ varying float vSnow;`,
       chunks = null;
       geometry?.dispose();
       geometry = null;
+      material = null;
     },
   };
 }

@@ -396,9 +396,10 @@ void main() {
   float ph = uPhase + uTime * 0.05;
   // Shells: big soft masses in (direction, log-radius), scrolling outward: perspective-correct for
   // cloud lumps flowing past the eye.
+  // (Direction noise pinches into a pinwheel at the travel point: the shells fade out toward it.)
   float sh = noise3(vec3(dir * 1.6, s * 0.8 - ph * 0.55) + 7.3);
   sh = 0.65 * sh + 0.35 * noise3(vec3(dir * 3.4 + sh, s * 1.5 - ph * 0.9) + 2.2);
-  float shell = smoothstep(0.38, 0.72, sh);
+  float shell = mix(0.5, smoothstep(0.38, 0.72, sh), smoothstep(0.05, 0.4, r));
   // Wisps: domain-warped streaks, high frequency around the travel point, low along the rays.
   float warp = noise3(vec3(dir * 2.3, s * 0.9 - ph * 0.7) + 4.1);
   float n = noise3(vec3(dir * 5.5 + warp * 0.9, s * 1.2 - ph + warp * 0.6));
@@ -406,7 +407,9 @@ void main() {
   float streak = smoothstep(0.55, 0.82, n) * smoothstep(0.04, 0.32, r);
   // Fill: closes fast once inside; a thin haze before. The shells thin it a little in their gaps
   // (the fogged scene behind is the same mist colour, so nothing reads through but motion).
-  float fill = smoothstep(0.5, 0.92, uAmount) * (0.9 + 0.1 * shell);
+  // Capped below opaque, the shells modulating it: the mist keeps moving lumps and the cluster's
+  // other puffs show through as soft shapes, instead of a flat white card.
+  float fill = smoothstep(0.5, 0.92, uAmount) * (0.66 + 0.2 * shell);
   float a = clamp(max(max(fill, uAmount * uAmount * 0.45), streak * uWisp), 0.0, 1.0);
   vec3 col = mix(uShade, uLit, clamp(vUv.y * 0.35 + 0.15 + shell * 0.55 + streak * 0.4 * uWisp, 0.0, 1.0));
   gl_FragColor = vec4(col, a);

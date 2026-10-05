@@ -33,6 +33,12 @@ The palette easter eggs stay as they are.
 | GOLDENLINE time | 2 evenings | Arthur |
 | GOLDENLINE code | ~31k lines TS, three.js WebGPU + TSL | repo (`components/goldenline/`) |
 | Arthur's part | wrote the initial prompt · specified the details to focus on · defined the agent tasks · reviewed and playtested | Arthur |
+| LITTLEBIG (added 2026-10-05) | third game: a tiny cartoon planet, orbit → dive through the clouds → street-level walk; procedural, zero asset downloads; three.js WebGL (runs on phones and Safari); touch ok; route `/planet/` | orchestrator brief |
+| LITTLEBIG mode | one prompt from Arthur, run as a multi-agent harness: the orchestrator wrote `docs/littlebig/BRIEF.md` and `TASKS.md`, then ran 11 builder tasks in 4 phases (F0 → A1-A4 → B1-B4 → C1-C2), ≤ 4 agents at once | orchestrator + `docs/littlebig/TASKS.md` |
+| LITTLEBIG review | a fresh critic per build scored screenshots at each altitude; under 8.5 / 10 → refine round (all 8 world/life builds did); gate reviews between phases through three lenses (art & wow, life & flow, perf & size), owners fixed what they found | orchestrator |
+| LITTLEBIG time | 17 hours wall clock, overnight (Oct 4 15:02 → Oct 5 ~08:30 EEST), including two usage-limit pauses | orchestrator |
+| LITTLEBIG code | ~30k lines TS, 23 spec files | repo (`components/littlebig/`) |
+| Arthur's part (LITTLEBIG) | wrote the prompt, set the constraints (≤ 4 agents at once, quality first, small and fast), reviewed. He did **not** write the brief or define the agent tasks for LITTLEBIG. | Arthur, via the orchestrator |
 
 **Off-limits:** cost, token counts, restarts. **Cut by choice:** the "what went wrong" (failed M3
 gate) callout. The pipeline diagram shows the gates neutrally, with no ✗.
@@ -247,7 +253,9 @@ type PlayGame = {
 
 ## Out of scope
 
-- A third game or other "lab" items.
+- Other "lab" items. (A third game, LITTLEBIG, was added on 2026-10-05: an odd last card spans the
+  grid at `lg` as a landscape card, the home strip shows three tiles, and the method block gains
+  "03 · harnessed".)
 - Changing either game.
 - Fixing the lagoon "white slab" bore look the capture surfaced.
 - An AV1 or mobile-specific encode.

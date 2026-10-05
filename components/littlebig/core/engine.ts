@@ -30,6 +30,7 @@ import { SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { type BootEntry, LAYER_NO_INK, type LBContext, type Quality, type Services, type System, type Variant, type ViewSpec, type ViewState } from './contracts';
 import type { DebugDeps } from './debug';
+import { KIT } from './kit';
 import { ParamRegistry } from './params';
 import { Perf } from './perf';
 import { detectQuality, qualitySettings } from './quality';
@@ -66,6 +67,39 @@ export interface Engine {
 /** three's shadow pass draws a material's back faces into the map (WebGLShadowMap's shadowSide). */
 const SHADOW_SIDE: Record<Side, Side> = { [FrontSide]: BackSide, [BackSide]: FrontSide, [DoubleSide]: DoubleSide };
 
+/**
+ * ctx.world's lazy city getters, defined at module scope on purpose: the plan and index are cached
+ * for the page's lifetime (world/city/index.ts), so the closures inside them must never capture an
+ * engine. Written inline in createEngine, the minifier inlined getCityIndex() and createCityIndex()
+ * into the getter, and the cached index's closures (roofAt, the terrainH callback…) kept the first
+ * engine — renderer, scene, every system — alive after its window closed (production only).
+ */
+const WORLD_CITY: PropertyDescriptorMap = {
+  city: { get: getCityPlan, enumerable: true },
+  cityIndex: { get: getCityIndex, enumerable: true },
+};
+
+/**
+ * Adaptive resolution. The frame cost is mostly per pixel, so when the live loop misses frames (the
+ * median rAF interval over ~1 s above ADAPT_SLOW_MS: a 60 Hz display dropping to 30) the pixel ratio
+ * steps down the ladder (1.5 → 1.25 → 1 → 0.85). It steps back up after a calm hold, and a level
+ * that failed again soon after is retried later each time (8 s, 16 s… 64 s), so a scene that cannot
+ * hold it never oscillates. Only after the world is complete, never in shot mode (deterministic
+ * review frames), `?p.core.adaptive=false` turns it off. A resolution change only resizes the
+ * canvas and the post targets: no recompiles.
+ */
+const ADAPT_FLOOR = 0.85;
+const ADAPT_SLOW_MS = 18;
+const ADAPT_JANK_MS = 21;
+const ADAPT_HOLD_MS = 8000;
+function dprLadder(maxDpr: number): number[] {
+  const top = Math.min(window.devicePixelRatio || 1, maxDpr);
+  const out = [top];
+  for (let d = Math.ceil(top * 4 - 1e-6) / 4 - 0.25; d > ADAPT_FLOOR + 0.05; d -= 0.25) out.push(d);
+  if (top > ADAPT_FLOOR + 0.05) out.push(ADAPT_FLOOR);
+  return out;
+}
+
 const FIXED_DT = 1 / 60;
 const MAX_STEPS = 8;
 /** Time-slice budget bounds for stage-2 init work per frame (ms); the live value follows the display. */
@@ -78,9 +112,11 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   let last = t0;
   const boot = {
     entries,
-    mark(stage: string) {
+    mark(stage: string, wait?: number) {
       const now = performance.now();
-      entries.push({ stage, ms: Math.round((now - last) * 10) / 10, at: Math.round(now - t0) });
+      const e: BootEntry = { stage, ms: Math.round((now - last) * 10) / 10, at: Math.round(now - t0) };
+      if (wait !== undefined) e.wait = Math.round(wait);
+      entries.push(e);
       last = now;
     },
   };
@@ -105,7 +141,10 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFShadowMap;
   renderer.info.autoReset = false;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.maxDpr));
+  // Adaptive resolution: the pixel-ratio ladder from the tier's cap down to ADAPT_FLOOR (see tick).
+  let dprLevels = dprLadder(q.maxDpr);
+  let dprLevel = 0;
+  renderer.setPixelRatio(dprLevels[0]);
   boot.mark('renderer');
 
   const scene = new Scene();
@@ -130,16 +169,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // The city plan is built right after the sky has kicked off the shader warm-up (below), so its
   // cost overlaps the compile. Budget (A2): city plan + index ≤ 30 ms on the M3 — it is on the
   // first-frame path. Anything that touches ctx.world.city earlier builds it on demand.
-  const world = {
-    seed: SEED,
-    planet,
-    get city() {
-      return getCityPlan();
-    },
-    get cityIndex() {
-      return getCityIndex();
-    },
-  };
+  const world = Object.defineProperties({ seed: SEED, planet }, WORLD_CITY) as LBContext['world'];
 
   const tracked = new Set<{ dispose(): void }>();
   let sliceStart = performance.now();
@@ -150,7 +180,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   let disposed = false;
   let resolveDisposed: () => void = () => {};
   const disposedPromise = new Promise<void>((r) => (resolveDisposed = r));
-  const never = () => new Promise<void>(() => {});
+  const never = <T = void>() => new Promise<T>(() => {});
   const view: ViewState = {
     eye: new Vector3(),
     forward: new Vector3(0, 0, -1),
@@ -225,7 +255,10 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
         );
       });
     },
-    compile: () => compileNew(),
+    compile: async () => {
+      await compileNew();
+    },
+    prewarm: (objects) => prewarm(objects),
   };
   camera.layers.enable(LAYER_NO_INK);
   ctx.time.render = ctx.time.t;
@@ -343,6 +376,92 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     return p.catch(() => {});
   };
 
+  /** ctx.prewarm: kick colour + shadow compiles for stand-ins of meshes still being built. */
+  const prewarmed: Promise<unknown>[] = [];
+  const prewarm = (objects: Object3D[]) => {
+    if (disposed || !objects.length) return;
+    const group = new Scene();
+    for (const o of objects) {
+      o.traverse((x) => {
+        const m = x as Mesh;
+        for (const mat of [m.material, m.customDepthMaterial].flat() as Array<Material | undefined>) saltCold(mat);
+      });
+      group.add(o);
+    }
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(post?.offscreen ? warmRT : null);
+    let colour: Promise<unknown>;
+    try {
+      colour = renderer.compileAsync(group, camera, scene);
+    } finally {
+      renderer.setRenderTarget(prevRT);
+    }
+    prewarmed.push(Promise.all([colour.catch(() => {}), warmShadows(objects)]).finally(() => group.clear()));
+  };
+
+  /**
+   * Draw `roots` once, every descendant visible and unculled, clipped to one pixel of the target the
+   * frame draws into, colour and shadow pass: their buffers upload (2.5 MB of near-only geometry
+   * and instances otherwise landed mid-dive, 4–11 ms frames) and the driver builds their pipelines
+   * now, behind the reveal, instead of on the frame that first shows them. Nothing else is drawn.
+   */
+  const warmVis: Object3D[] = [];
+  const warmCull: Object3D[] = [];
+  const warmCount: InstancedMesh[] = [];
+  const warmDrawOn = params.toggle('core.warmDraw', { label: 'stage-2 warm draw (read at boot)', value: true }).value;
+  const warmDraw = (roots: Object3D[]) => {
+    if (!roots.length || !warmDrawOn) return;
+    // Everything else drawable is hidden for it; lights are not (they are part of every program's key).
+    const ch = scene.children;
+    for (const root of ch) {
+      if (roots.includes(root)) continue;
+      root.traverseVisible((o) => {
+        const d = o as Mesh & { isPoints?: boolean; isLine?: boolean; isSprite?: boolean };
+        if (d.isMesh || d.isPoints || d.isLine || d.isSprite) warmVis.push(o);
+      });
+    }
+    for (const o of warmVis) o.visible = false;
+    const hidden: Object3D[] = [];
+    for (const r of roots)
+      r.traverse((o) => {
+        if (!o.visible) {
+          hidden.push(o);
+          o.visible = true;
+        }
+        if (o.frustumCulled) {
+          warmCull.push(o);
+          o.frustumCulled = false;
+        }
+        const im = o as InstancedMesh;
+        if (im.isInstancedMesh && im.count === 0 && im.instanceMatrix.count > 0) {
+          warmCount.push(im);
+          im.count = 1; // (a zero-instance draw builds no pipeline)
+        }
+      });
+    try {
+      if (post?.offscreen) post.warm(scene, camera);
+      else {
+        renderer.setScissorTest(true);
+        renderer.setScissor(0, 0, 1, 1);
+        renderer.setViewport(0, 0, 1, 1);
+        renderer.render(scene, camera);
+      }
+    } catch (e) {
+      console.warn('[littlebig] warm draw', e);
+    } finally {
+      if (!post?.offscreen) {
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, width, height);
+        renderer.setScissor(0, 0, width, height);
+      }
+      for (const o of warmVis) o.visible = true;
+      for (const o of hidden) o.visible = false;
+      for (const o of warmCull) o.frustumCulled = true;
+      for (const im of warmCount) im.count = 0;
+      warmVis.length = warmCull.length = warmCount.length = 0;
+    }
+  };
+
   let cityBuilt = false;
   function buildCity() {
     if (cityBuilt) return;
@@ -353,33 +472,49 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     boot.mark('city plan');
   }
 
-  /** Roots of the scene before the current stage-2 init began (ctx.compile hides the others). */
+  /**
+   * Stage 2: the scene roots whose programs are warm (frames draw only these, see renderFrame), and
+   * the roots an in-flight ctx.compile() has claimed. Null outside stage 2.
+   */
   let initRoots: Set<Object3D> | null = null;
-  let compiledThisInit = false;
-  async function compileNew(): Promise<void> {
-    if (disposed) return never();
-    compiledThisInit = true;
+  const claimed = new Set<Object3D>();
+  /** Compile the programs of every root added since and not yet warm; resolves with the ms waited. */
+  async function compileNew(): Promise<number> {
+    if (disposed) return never<number>();
+    const t = performance.now();
     const watching = watchPrograms >= 0;
     watchPrograms = -1; // compiling here is the point; don't flag it
     applyCold();
-    const fresh = initRoots ? scene.children.filter((o) => !initRoots!.has(o)) : [];
+    // (Roots another init's compile has claimed are left to it: marking them warm here, before
+    // their programs are ready, would let a frame draw them.)
+    const fresh = initRoots ? scene.children.filter((o) => !initRoots!.has(o) && !claimed.has(o)) : [];
+    for (const o of fresh) claimed.add(o);
     const was = fresh.map((o) => o.visible);
     for (const o of fresh) o.visible = false; // compile() still traverses invisible objects
     try {
       await Promise.race([Promise.all([compileScene().catch(() => {}), warmShadows(fresh)]), disposedPromise]);
+      if (!disposed) warmDraw(fresh);
     } finally {
       fresh.forEach((o, i) => (o.visible = was[i]));
       if (watching || initRoots) watchPrograms = renderer.info.programs?.length ?? 0;
     }
-    if (disposed) return never();
+    if (disposed) return never<number>();
     // Warm now: frames may draw them (see renderFrame).
-    if (initRoots) for (const o of fresh) initRoots.add(o);
+    for (const o of fresh) {
+      claimed.delete(o);
+      initRoots?.add(o);
+    }
+    return performance.now() - t;
   }
 
   // Stage 1. Once the sky has made the lights and fog (which every lit program depends on), start
   // compiling — in parallel threads where the driver supports KHR_parallel_shader_compile — the
-  // toon variant every first-frame surface uses and the default shadow depth program, while
-  // terrain and ocean build their meshes on the main thread.
+  // sky's and the post chain's programs, the default shadow depth program and (System.prepare)
+  // the terrain's and ocean's, while terrain and ocean build their meshes on the main thread.
+  // (C2: the warm mesh's own colour program is not compiled any more: no first-frame surface used
+  // that plain toon variant since terrain and ocean got their own patches, so its ~0.5 s cold
+  // compile only held the first frame back, then was thrown away. It now only stands in for the
+  // default shadow depth program.)
   const warmGeo = new BufferGeometry();
   warmGeo.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
   warmGeo.setAttribute('normal', new BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), 3));
@@ -397,9 +532,18 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     boot.mark(`init ${s.name}`);
     progress(s.name);
     if (!warmKick && services.sky.sun) {
-      scene.add(warmMesh);
       applyCold();
       warmKick = Promise.all([compileScene().catch(() => {}), warmShadows([warmMesh]), post?.compile()]);
+      // The other stage-1 systems' materials, compiled while their inits build geometry.
+      for (const o of stage1) {
+        if (o === s || !o.prepare || failed.has(o)) continue;
+        try {
+          o.prepare(ctx);
+        } catch (e) {
+          fail(o, 'prepare', e);
+        }
+      }
+      boot.mark('prepare');
       buildCity();
     }
   }
@@ -418,6 +562,23 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   sizePost();
   camera.aspect = width / Math.max(1, height);
   camera.updateProjectionMatrix();
+  /** Canvas, post targets, projection and systems for the current size and pixel-ratio level. */
+  const applySize = () => {
+    const dpr = dprLevels[dprLevel];
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(width, height, false);
+    sizePost();
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    for (const s of systems) {
+      if (!s.resize || failed.has(s) || !initialised.has(s)) continue;
+      try {
+        s.resize(ctx, width, height, dpr);
+      } catch (e) {
+        fail(s, 'resize', e);
+      }
+    }
+  };
 
   // ── frame pieces ──
   let acc = 0;
@@ -513,12 +674,11 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // Warm every program the first frame needs — colour and shadow depth — in parallel where the
   // driver can (KHR_parallel_shader_compile), then draw it.
   try {
-    await Promise.all([compileScene(), warmShadows(scene.children), post?.compile()]);
+    await Promise.all([compileScene(), warmShadows(scene.children), post?.compile(), ...prewarmed]);
   } catch (e) {
     console.warn('[littlebig] compile', e);
   }
   boot.mark('compile');
-  scene.remove(warmMesh);
   (warmMesh.material as Material).dispose();
   warmGeo.dispose();
   const programsBefore = renderer.info.programs?.length ?? 0;
@@ -536,10 +696,59 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   let visible = !document.hidden;
   let onScreen = true;
 
+  // ── adaptive resolution (see ADAPT_FLOOR) ──
+  const adaptive = params.toggle('core.adaptive', { label: 'adaptive resolution', value: true });
+  let adaptN = 0;
+  let adaptSlow = 0;
+  let adaptJank = 0;
+  let adaptMs = 0;
+  let adaptCalm = 0;
+  let lastUpAt = -1e9;
+  let lastUpLevel = -1;
+  const retryAt = new Float64Array(8); // per ladder level: when stepping back up into it is allowed
+  const backoff = new Float64Array(8).fill(ADAPT_HOLD_MS);
+  const setDprLevel = (level: number, now: number) => {
+    dprLevel = level;
+    adaptN = adaptSlow = adaptJank = adaptMs = adaptCalm = 0;
+    applySize();
+    if (process.env.NODE_ENV !== 'production') console.info(`[littlebig] pixel ratio ${dprLevels[level]} (${Math.round(now / 100) / 10} s)`);
+  };
+  const adaptResolution = (interval: number, now: number) => {
+    if (shotMode || !adaptive.value || !isReady || dprLevels.length < 2) return;
+    // A stall (a GC, a tab coming back) is not a trend.
+    if (interval > 100) {
+      adaptN = adaptSlow = adaptJank = adaptMs = 0;
+      return;
+    }
+    adaptN++;
+    adaptMs += interval;
+    if (interval > ADAPT_SLOW_MS) adaptSlow++;
+    if (interval > ADAPT_JANK_MS) adaptJank++;
+    if (adaptMs < 1000) return;
+    const slow = adaptSlow * 2 > adaptN; // the median frame is late
+    const calm = adaptJank * 20 <= adaptN; // ≤ 5 % of frames late
+    adaptN = adaptSlow = adaptJank = adaptMs = 0;
+    if (slow && dprLevel < dprLevels.length - 1) {
+      // Dropped again soon after stepping up into this level: wait longer before the next try.
+      if (dprLevel === lastUpLevel && now - lastUpAt < 4000) backoff[dprLevel] = Math.min(64000, backoff[dprLevel] * 2);
+      retryAt[dprLevel] = now + backoff[dprLevel];
+      setDprLevel(dprLevel + 1, now);
+      return;
+    }
+    adaptCalm = calm ? adaptCalm + 1 : 0;
+    if (dprLevel > 0 && adaptCalm >= 3 && now >= retryAt[dprLevel - 1]) {
+      lastUpLevel = dprLevel - 1;
+      lastUpAt = now;
+      setDprLevel(dprLevel - 1, now);
+    }
+  };
+
   const tick = (now: number) => {
     raf = requestAnimationFrame(tick);
-    const interval = lastNow < 0 ? 1000 / 60 : now - lastNow;
+    const first = lastNow < 0;
+    const interval = first ? 1000 / 60 : now - lastNow;
     lastNow = now;
+    if (!first) adaptResolution(interval, now);
     const realDt = Math.min(0.1, interval / 1000);
     const a = performance.now();
     frame(ctx.time.frozen ? 0 : realDt * timeScale.value, realDt);
@@ -595,17 +804,56 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const ready = new Promise<void>((r) => (resolveReady = r));
   if (isReady) resolveReady();
   let stage2Started = false;
+  // Pipelined: the next system starts building (on the next frame) as soon as the current one asks
+  // for its compile, so one system's CPU work overlaps the driver compiling the previous ones'
+  // programs (a cold visit spends most of stage 2 waiting on shader compiles). At most one system
+  // builds at a time. A system's compile resolves only once the system before it has finished, so
+  // the reveals still run in systems.ts order (no cars on an empty plateau before the city).
   const runStage2 = async () => {
     if (stage2Started) return;
     stage2Started = true;
     reveal.start();
-    for (const s of stage2) {
-      if (disposed) return;
-      sliceStart = performance.now();
-      initRoots = new Set(scene.children);
-      compiledThisInit = false;
+    if (!stage2.length) return;
+    initRoots = new Set(scene.children);
+    let next = 0;
+    let finished = 0;
+    let allDone: () => void = () => {};
+    const all = new Promise<void>((r) => (allDone = r));
+    const onNextFrame = (fn: () => void) =>
+      requestAnimationFrame(() =>
+        setTimeout(() => {
+          if (disposed) return;
+          sliceStart = performance.now();
+          fn();
+        }, 0),
+      );
+    let prevDone: Promise<void> = Promise.resolve();
+    const startNext = () => {
+      if (disposed || next >= stage2.length) return;
+      const before = prevDone;
+      let done: () => void = () => {};
+      prevDone = new Promise<void>((r) => (done = r));
+      void runInit(stage2[next++], before).finally(done);
+    };
+    const runInit = async (s: System, before: Promise<void>) => {
+      let chained = false;
+      const chain = () => {
+        if (chained) return;
+        chained = true;
+        onNextFrame(startNext);
+      };
+      let compiled = false;
+      let wait = 0;
+      // The system's own view of the context: its ctx.compile() also starts the next system.
+      const sctx: LBContext = Object.create(ctx);
+      sctx.compile = async () => {
+        compiled = true;
+        chain();
+        wait += await compileNew();
+        await before; // reveal order
+      };
       try {
-        await s.init(ctx);
+        await s.init(sctx);
         if (disposed) {
           // Finished after the engine went away (it awaited something other than ctx.*): let it
           // release what it made; everything it added to the scene is already disposed.
@@ -613,7 +861,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
           return;
         }
         // Safety net for systems that did not call ctx.compile(): compile before first draw.
-        if (!compiledThisInit) await compileNew();
+        if (!compiled) await sctx.compile();
         if (disposed) return;
         initialised.add(s);
         // From here on any program built by a frame is a missed warm-up (the dev guard warns).
@@ -621,14 +869,17 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       } catch (e) {
         if (disposed) return;
         fail(s, 'init', e);
-      } finally {
-        initRoots = null;
       }
-      boot.mark(`init ${s.name}`);
+      chain();
+      boot.mark(`init ${s.name}`, wait);
       progress(s.name);
-      await ctx.yield();
-    }
+      if (++finished === stage2.length) allDone();
+    };
+    sliceStart = performance.now();
+    startNext();
+    await all;
     if (disposed) return;
+    initRoots = null;
     boot.mark('stage 2 done');
     watchPrograms = renderer.info.programs?.length ?? 0;
     entries.push({ stage: 'total', ms: Math.round(performance.now() - t0), at: Math.round(performance.now() - t0) });
@@ -638,8 +889,8 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   };
 
   // ── debug hook ──
-  // Loaded only in dev or with ?shot (its own chunk: debug.ts, and with it the named shots and the
-  // scripted dive, stay off the production path once nothing else imports them statically).
+  // Loaded only in dev or with ?shot (its own chunk: debug.ts with the named shots, the scripted
+  // dive and the shot viewpoints; nothing on the production path imports them).
   let uninstallDebug: () => void = () => {};
   const debugDeps: DebugDeps = {
     enabled: shotMode || process.env.NODE_ENV !== 'production',
@@ -702,9 +953,15 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     },
   };
   if (debugDeps.enabled) {
-    void import('./debug').then((m) => {
-      if (!disposed) uninstallDebug = m.installDebugHook(ctx, debugDeps);
-    });
+    // The kit first: the debug chunk's modules read it as they load (core/kit.ts says why).
+    void import('./debug-kit')
+      .then((k) => {
+        k.useKit(KIT);
+        return import('./debug');
+      })
+      .then((m) => {
+        if (!disposed) uninstallDebug = m.installDebugHook(ctx, debugDeps);
+      });
   }
 
   const engine: Engine = {
@@ -719,20 +976,13 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     resize(w, h) {
       width = Math.max(1, Math.round(w));
       height = Math.max(1, Math.round(h));
-      const dpr = Math.min(window.devicePixelRatio || 1, q.maxDpr);
-      renderer.setPixelRatio(dpr);
-      renderer.setSize(width, height, false);
-      sizePost();
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      for (const s of systems) {
-        if (!s.resize || failed.has(s) || !initialised.has(s)) continue;
-        try {
-          s.resize(ctx, width, height, dpr);
-        } catch (e) {
-          fail(s, 'resize', e);
-        }
+      // A new display (the window dragged to another screen) restarts the ladder at its top.
+      const ladder = dprLadder(q.maxDpr);
+      if (ladder[0] !== dprLevels[0]) {
+        dprLevels = ladder;
+        dprLevel = 0;
       }
+      applySize();
       if (!raf && !contextLost) renderFrame();
     },
     dispose() {

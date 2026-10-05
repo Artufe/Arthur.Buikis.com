@@ -7,7 +7,7 @@
 // buildings spring up in a cascade by distance (staggered one after another), houses with the
 // mid-rise, towers last and the tallest growing slowest.
 
-import { BufferAttribute, type BufferGeometry, Vector2 } from 'three';
+import { BufferAttribute, type BufferGeometry, DoubleSide, Vector2 } from 'three';
 import type { LBContext, System } from '../core/contracts';
 import { CITY_PLAN_RADIUS } from '../world/config';
 import { fromSphere } from '../world/city/frame';
@@ -70,6 +70,11 @@ export function createCitySystem(): System {
       const buildMat = ctx.toon.material({ name: 'city', vertexColors: true, reveal: 'instance', revealDuration: 0.8, rim: 0.32, patch: cityPatch(false, late) });
       const groundMat = ctx.toon.material({ name: 'city:ground', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true, late) });
       const paintMat = ctx.toon.material({ name: 'city:paint', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true, late) });
+      // Both faces into the shadow map: with back faces only (three's default for a front-sided
+      // material) light leaked through the seams of stacked segments and rows (thin lit lines across
+      // a shadow at floor levels); the front faces close them. Bias and normalBias keep lit faces
+      // free of acne.
+      buildMat.shadowSide = DoubleSide;
       paintMat.polygonOffset = true;
       paintMat.polygonOffsetFactor = -1;
       paintMat.polygonOffsetUnits = -4;
@@ -132,7 +137,7 @@ export function createCitySystem(): System {
       groundMesh.renderOrder = -2;
       paintMesh.renderOrder = -1;
       ctx.scene.add(groundMesh, paintMesh, buildMesh);
-      lights = buildPools(ctx, plan, index, facades, late);
+      lights = await buildPools(ctx, plan, index, facades, late);
       ctx.scene.add(lights.pools, lights.points);
       await ctx.yield();
 

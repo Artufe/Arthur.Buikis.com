@@ -7,6 +7,7 @@
 // (with hysteresis) and uploaded only up to the used count. All three meshes share one material.
 
 import { type BufferGeometry, Frustum, InstancedBufferAttribute, InstancedMesh, type Material, Matrix4, type PerspectiveCamera, Sphere, Vector3 } from 'three';
+import { hyp3 } from '../world/hyp';
 
 /** Enter the near set closer than this (m from the puff's surface), leave beyond OUT. */
 const NEAR_IN = 70;
@@ -124,7 +125,7 @@ export class PuffLod {
       const cy = s[k * 4 + 1];
       const cz = s[k * 4 + 2];
       const rho = s[k * 4 + 3] * 1.2 + 2;
-      const rc = Math.hypot(cx, cy, cz);
+      const rc = hyp3(cx, cy, cz);
       const cosA = (eyeLocal.x * cx + eyeLocal.y * cy + eyeLocal.z * cz) / (e * rc);
       const ang = Math.acos(Math.max(-1, Math.min(1, cosA)));
       let vis = ang < horizonEye + Math.acos(Math.min(1, R / (rc + rho))) + rho / rc;

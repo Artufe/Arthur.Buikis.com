@@ -47,7 +47,8 @@ import {
 } from '../world/sphere';
 import { buildingDistance, glideMargin, solidsIn, LandingFinder, type Landing } from './landing';
 import { CameraInput } from './input';
-import { approach, clipPlanes, computePose, createCamState, createPose, lensFov, lensShift, liftRamp, lookBlend, moveSpeed, springStep, timeToBox } from './model';
+import { approach, clipPlanes, computePose, createCamState, createPose, lensFov, lensShift, orbitFitFov, liftRamp, lookBlend, moveSpeed, springStep, timeToBox } from './model';
+import { hyp, hyp3 } from '../world/hyp';
 
 const DEG = Math.PI / 180;
 const LOG_MIN = Math.log(EYE_HEIGHT);
@@ -87,6 +88,17 @@ const LAND_SHAPES = [0.75, 0.5, 0.32];
 const FLY_SHAPES = [1];
 /** Glide samples for the landing clearance test. */
 const GLIDE_N = 48;
+/**
+ * The sea steer: a zoom heading below STEER_ALT over open sea (no land within STEER_CLEAR m) flies
+ * on to the nearest land, or the city when it is nearly as close, instead of bottoming out in a
+ * hover over flat blue (two thirds of the planet is water, so "spin, then scroll" mostly ended
+ * there). Once per descent: re-armed when the zoom heads back above STEER_REARM.
+ */
+const LOG_STEER = Math.log(160);
+const LOG_STEER_REARM = Math.log(260);
+const STEER_CLEAR = 30;
+/** The zoom may lower a steer flight's end altitude to this (m); further zoom carries on after it. */
+const LOG_STEER_FLOOR = Math.log(14);
 
 const smooth01 = (x: number) => {
   const t = Math.min(1, Math.max(0, x));
@@ -198,6 +210,11 @@ export function createCameraSystem(): System {
   let flyTurn = false;
   let flyHeadFrom = 0;
   let flyHeadTo = 0;
+  /** The current fly-to is a sea steer (zooming adjusts its altitude instead of cancelling it). */
+  let steer = false;
+  let steerDone = false;
+  /** Land directions for the sea steer (unit xyz; meadow-height land on a ~10 m lattice), built on first use. */
+  let landDirs: Float32Array | null = null;
   const stickView = { visible: false, active: false, x: 0, y: 0, ox: 0, oy: 0, touch: false };
 
   /**
@@ -248,7 +265,7 @@ export function createCameraSystem(): System {
     // the climb never exceeds ~CLIMB m/s, so a tower swells the camera up instead of jolting it.
     const margin = Math.min(0.6, (alt - 7) * 0.3);
     const width = Math.min(1.2, 0.3 + (alt - 7) * 0.06);
-    const sp = Math.hypot(pvx, pvz);
+    const sp = hyp(pvx, pvz);
     // Only panning (keys, stick, a thrown spin) looks ahead; a zoom anchor or a landing glide aims
     // beside buildings by construction, and keepOffWalls holds it off their walls.
     const panning = Math.abs(velF) + Math.abs(velR) > 0.2 || inertiaRate !== 0;
@@ -325,7 +342,7 @@ export function createCameraSystem(): System {
   /** Rotation taking unit a to unit b: writes the axis, returns the angle. */
   function arc(a: Vec3, b: Vec3, outAxis: Vec3): number {
     cross3(outAxis, a, b);
-    const l = Math.hypot(outAxis.x, outAxis.y, outAxis.z);
+    const l = hyp3(outAxis.x, outAxis.y, outAxis.z);
     if (l < 1e-12) return 0;
     outAxis.x /= l;
     outAxis.y /= l;
@@ -386,6 +403,8 @@ export function createCameraSystem(): System {
     landNone = false;
     pendingLand = null;
     flyTurn = false;
+    steer = false;
+    steerDone = false;
     if (glide !== undefined && glide > 0) {
       trackPlanVelocity(glide);
       stepReference(ctx, alt, glide);
@@ -430,7 +449,7 @@ export function createCameraSystem(): System {
     // The lens: the altitude FOV fitted to the canvas aspect, and a vertical shift (model.ts
     // lensShift): the camera axis pitches up by δ and the frustum shifts down to match, so the
     // frame's centre row still looks along pose.dir while verticals converge less.
-    lensV = lensFov(pose.fov, cam.aspect || 1);
+    lensV = orbitFitFov(lensFov(pose.fov, cam.aspect || 1), cam.aspect || 1, pose.alt, hyp3(pose.eye.x, pose.eye.y, pose.eye.z));
     const k = lensShift(pose.alt, pose.pitch);
     const delta = Math.atan(2 * k * Math.tan((lensV * DEG) / 2));
     const cd = Math.cos(delta);
@@ -441,7 +460,7 @@ export function createCameraSystem(): System {
     vx.crossVectors(vy, vz).normalize();
     m4.makeBasis(vx, vy, vz);
     cam.quaternion.setFromRotationMatrix(m4);
-    const altSea = Math.hypot(pose.eye.x, pose.eye.y, pose.eye.z) - R;
+    const altSea = hyp3(pose.eye.x, pose.eye.y, pose.eye.z) - R;
     clipPlanes(pose.alt, altSea, clip);
     if (clip.near !== lastNear || clip.far !== lastFar || lensV !== lastFov || k !== lastShift || cam.aspect !== lastAspect) {
       cam.near = clip.near;
@@ -478,7 +497,7 @@ export function createCameraSystem(): System {
     fromSphere(s.focus, plan);
     view.cityX = plan.x;
     view.cityZ = plan.z;
-    view.cityDist = Math.hypot(plan.x, plan.z);
+    view.cityDist = hyp(plan.x, plan.z);
     ctx.uniforms.lbCamAlt.value = view.altTerrain;
     ctx.uniforms.lbCamPos.value.copy(cam.position);
   }
@@ -582,7 +601,7 @@ export function createCameraSystem(): System {
   function flyGlide(ctx: LBContext, fx: number, fz: number, logFrom: number, l: Landing): number {
     const idx = ctx.world.cityIndex;
     const logTo = LOG_MIN;
-    const ang = Math.hypot(l.x - fx, l.z - fz) / (R + PLATEAU_HEIGHT);
+    const ang = hyp(l.x - fx, l.z - fz) / (R + PLATEAU_HEIGHT);
     const dur = flyDuration(ang, logTo - logFrom);
     const hopA = Math.min(1.2, ang * 1.5);
     const total = dur + 0.6;
@@ -682,7 +701,7 @@ export function createCameraSystem(): System {
     copy3(tA, s.fwd);
     cross3(tB, tA, s.focus); // right = fwd × up
     normalize3(tB);
-    const l = Math.hypot(f, r);
+    const l = hyp(f, r);
     if (l < 1e-9) return;
     axis.x = (tA.x * f + tB.x * r) / l;
     axis.y = (tA.y * f + tB.y * r) / l;
@@ -725,6 +744,73 @@ export function createCameraSystem(): System {
     }
   }
 
+  /** Land points on a Fibonacci lattice (~10 m apart): firm, low ground (no beach, no peaks). */
+  function getLandDirs(ctx: LBContext): Float32Array {
+    if (landDirs) return landDirs;
+    const N = 3000;
+    const tmp = new Float32Array(N * 3);
+    const d = v3();
+    let n = 0;
+    const ga = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (2 * (i + 0.5)) / N;
+      const r = Math.sqrt(1 - y * y);
+      d.x = Math.cos(ga * i) * r;
+      d.y = y;
+      d.z = Math.sin(ga * i) * r;
+      const h = ctx.world.planet.heightAt(d);
+      if (h < 1 || h > 10) continue;
+      tmp[n * 3] = d.x;
+      tmp[n * 3 + 1] = d.y;
+      tmp[n * 3 + 2] = d.z;
+      n++;
+    }
+    landDirs = tmp.slice(0, n * 3);
+    return landDirs;
+  }
+
+  /**
+   * Where a zoom aimed at `dir` over open sea should go instead (into out): the nearest land, or the
+   * city when it is not much further. False if `dir` is not open sea (land within STEER_CLEAR m).
+   */
+  function steerTarget(ctx: LBContext, dir: Vec3, out: Vec3): boolean {
+    if (!overSea(ctx, dir)) return false;
+    const L = getLandDirs(ctx);
+    let best = -2;
+    let bi = -1;
+    for (let i = 0; i < L.length; i += 3) {
+      const d = L[i] * dir.x + L[i + 1] * dir.y + L[i + 2] * dir.z;
+      if (d > best) {
+        best = d;
+        bi = i;
+      }
+    }
+    if (bi < 0) return false;
+    const angL = Math.acos(Math.min(1, best));
+    if (angL * R < STEER_CLEAR) return false;
+    planToDir(0, 0, tB);
+    const angC = angleBetween(dir, tB);
+    if (angC < angL * 1.5 + 0.25) copy3(out, tB);
+    else {
+      out.x = L[bi];
+      out.y = L[bi + 1];
+      out.z = L[bi + 2];
+    }
+    return true;
+  }
+
+  /** Start the sea steer once per descent when the zoom heads below LOG_STEER over open sea. */
+  function seaSteer(ctx: LBContext) {
+    if (s.logAltTarget > LOG_STEER_REARM) steerDone = false;
+    if (steerDone || flyT >= 0 || landOn || s.logAltTarget >= LOG_STEER || s.logAltTarget > s.logAlt - 0.02) return;
+    steerDone = true;
+    if (!steerTarget(ctx, anchorOn ? anchor : s.focus, tA)) return;
+    copy3(steerTo, tA);
+    startFly(ctx, steerTo, Math.max(Math.exp(LOG_STEER_FLOOR), Math.exp(s.logAltTarget)));
+    steer = true;
+  }
+  const steerTo = v3();
+
   function handleInput(ctx: LBContext, dt: number) {
     const inp = input!;
     const W = inp.width;
@@ -740,17 +826,32 @@ export function createCameraSystem(): System {
     if (inp.pinch !== 1) dz -= Math.log(inp.pinch) * 1.3;
     const zoomKeys = (inp.key('KeyE') || inp.key('Equal') || inp.key('NumpadAdd') ? -1 : 0) + (inp.key('KeyQ') || inp.key('Minus') || inp.key('NumpadSubtract') ? 1 : 0);
     if (zoomKeys) dz += zoomKeys * dt * 1.4;
-    if (dz !== 0) {
+    if (dz !== 0 && steer && flyT >= 0) {
+      // A sea steer in flight: the zoom sets where it ends (not below LOG_STEER_FLOOR: it has not
+      // looked for a landing spot); zooming out past where it started calls it off.
+      interacted = true;
+      flyLogTo = Math.min(LOG_MAX, Math.max(LOG_STEER_FLOOR, flyLogTo + dz));
+      if (flyLogTo > LOG_STEER_REARM) {
+        flyT = -1;
+        steer = false;
+        s.logAltTarget = flyLogTo;
+      }
+    } else if (dz !== 0) {
       s.logAltTarget = Math.min(LOG_MAX, Math.max(minLog(ctx), s.logAltTarget + dz));
       flyT = -1;
       interacted = true;
       if (landOn || landDone) anchorOn = false; // touching down: the landing owns the focus
-      else if (inp.wheel !== 0 || inp.pinch !== 1) {
+      else if (dz > 0 && pose.pitch > -55 * DEG) {
+        // Zooming out from a low, level view: straight up. The cursor ray grazes the horizon there,
+        // and its far ground point, held as the view tipped down, dragged the climb kilometres
+        // along the look direction (out of the street to an orbit far from the city).
+        anchorOn = false;
+      } else if (inp.wheel !== 0 || inp.pinch !== 1) {
         // Map-style: the world point under the cursor is locked once per gesture and held under the
         // cursor (holdAnchor). It is re-picked only when the cursor (or the pinch centre) moves more
         // than a few px; a small move pans with it. Keys, or a cursor on the sky, zoom straight.
         const at = inp.pinch !== 1 ? inp.pinchAt : inp.wheelAt;
-        if (!anchorOn || Math.hypot(at.x - lockPx.x, at.y - lockPx.y) > ANCHOR_REPICK_PX) {
+        if (!anchorOn || hyp(at.x - lockPx.x, at.y - lockPx.y) > ANCHOR_REPICK_PX) {
           anchorR = pickRadius(ctx);
           anchorOn = pick(ctx, at.x, at.y, W, H, anchor, anchorR);
           lockPx.x = at.x;
@@ -829,7 +930,7 @@ export function createCameraSystem(): System {
     const turnKeys = streetish ? (inp.key('ArrowRight') ? 1 : 0) - (inp.key('ArrowLeft') ? 1 : 0) : 0;
     let fwdIn = (inp.key('KeyW') || inp.key('ArrowUp') ? 1 : 0) - (inp.key('KeyS') || inp.key('ArrowDown') ? 1 : 0);
     let sideIn = (inp.key('KeyD') || (!streetish && inp.key('ArrowRight')) ? 1 : 0) - (inp.key('KeyA') || (!streetish && inp.key('ArrowLeft')) ? 1 : 0);
-    const kl = Math.hypot(fwdIn, sideIn);
+    const kl = hyp(fwdIn, sideIn);
     if (kl > 1) {
       fwdIn /= kl;
       sideIn /= kl;
@@ -838,7 +939,7 @@ export function createCameraSystem(): System {
       fwdIn = -st.y;
       sideIn = st.x;
     }
-    const mag = Math.min(1, Math.hypot(fwdIn, sideIn));
+    const mag = Math.min(1, hyp(fwdIn, sideIn));
     const run = inp.key('ShiftLeft') || inp.key('ShiftRight') || (st.active && mag > 0.97);
     const speed = moveSpeed(alt, w, run);
     const wantF = fwdIn * speed;
@@ -860,7 +961,7 @@ export function createCameraSystem(): System {
       rotateAxis(s.fwd, s.fwd, s.focus, -yawVel * dt);
       orthonormalizeTangent(s.fwd, s.focus);
     } else yawVel = 0;
-    const vel = Math.hypot(velF, velR);
+    const vel = hyp(velF, velR);
     if (vel > 1e-3) walk(ctx, velF, velR, vel * dt, streetish);
     else velF = velR = 0;
 
@@ -883,7 +984,7 @@ export function createCameraSystem(): System {
     apply(ctx);
     const inp = input!;
     if (!pick(ctx, anchorPx.x, anchorPx.y, inp.width, inp.height, tA, anchorR)) return; // on the sky: nothing to hold
-    const dep = -dot3(rayD, rayO) / Math.hypot(rayO.x, rayO.y, rayO.z);
+    const dep = -dot3(rayD, rayO) / hyp3(rayO.x, rayO.y, rayO.z);
     const k = kAlt * smooth01((Math.asin(Math.max(-1, Math.min(1, dep))) - 4 * DEG) / (10 * DEG));
     anchorK = k;
     const ang = arc(tA, anchor, axis);
@@ -900,7 +1001,7 @@ export function createCameraSystem(): System {
     copy3(aim, anchor);
     const idx = ctx.world.cityIndex;
     const top = R + PLATEAU_HEIGHT + 40;
-    const o = Math.hypot(rayO.x, rayO.y, rayO.z);
+    const o = hyp3(rayO.x, rayO.y, rayO.z);
     let t = o <= top ? 0 : raySphere(rayO, rayD, top);
     const tEnd = raySphere(rayO, rayD, R + anchorR);
     if (t < 0 || tEnd < 0) return;
@@ -908,7 +1009,7 @@ export function createCameraSystem(): System {
       tB.x = rayO.x + rayD.x * tt;
       tB.y = rayO.y + rayD.y * tt;
       tB.z = rayO.z + rayD.z * tt;
-      const len = Math.hypot(tB.x, tB.y, tB.z);
+      const len = hyp3(tB.x, tB.y, tB.z);
       normalize3(tB);
       fromSphere(tB, plan);
       if (plan.x * plan.x + plan.z * plan.z > CITY_PLAN_RADIUS * CITY_PLAN_RADIUS) return false;
@@ -982,7 +1083,7 @@ export function createCameraSystem(): System {
       if (Number.isFinite(prevPX) && dg > 1e-4) {
         mx = (x0 - prevPX) / dg;
         mz = (z0 - prevPZ) / dg;
-        const ml = Math.hypot(mx, mz);
+        const ml = hyp(mx, mz);
         if (ml > 40) {
           mx *= 40 / ml;
           mz *= 40 / ml;
@@ -1009,7 +1110,7 @@ export function createCameraSystem(): System {
       landP = 0;
       landPos.x = x0;
       landPos.z = z0;
-      landV = dt > 0 ? (Math.hypot(mx, mz) * Math.max(0, dg)) / dt : 0;
+      landV = dt > 0 ? (hyp(mx, mz) * Math.max(0, dg)) / dt : 0;
     }
     const span = landLog0 - LOG_MIN;
     // Monotone: zooming back up holds the glide where it is (no retracing, and nothing to stop when
@@ -1019,15 +1120,15 @@ export function createCameraSystem(): System {
     // sideways at 30+ m/s near the ground), easing into the spot (3.5/s of the distance left), and
     // changing by at most 90 m/s² either way (0.1 m per frame at 30 fps). The descent is held back to the glide's
     // pace; the altitude spring carries on from the held-back state (no kink in its velocity).
-    const left = Math.hypot(landX - landPos.x, landZ - landPos.z);
+    const left = hyp(landX - landPos.x, landZ - landPos.z);
     const vmax = Math.max(landV - 90 * dt, Math.min(3 + 1.5 * alt, 0.6 + 3.5 * left, landV + 90 * dt)) * dt;
-    if (p > landP && glidePos(p, glideTmp) && Math.hypot(glideTmp.x - landPos.x, glideTmp.z - landPos.z) > vmax) {
+    if (p > landP && glidePos(p, glideTmp) && hyp(glideTmp.x - landPos.x, glideTmp.z - landPos.z) > vmax) {
       let lo = landP;
       let hi = p;
       for (let i = 0; i < 14; i++) {
         const m = (lo + hi) / 2;
         glidePos(m, glideTmp);
-        if (Math.hypot(glideTmp.x - landPos.x, glideTmp.z - landPos.z) > vmax) hi = m;
+        if (hyp(glideTmp.x - landPos.x, glideTmp.z - landPos.z) > vmax) hi = m;
         else lo = m;
       }
       p = lo;
@@ -1040,7 +1141,7 @@ export function createCameraSystem(): System {
     glideTmp.x = landPos.x;
     glideTmp.z = landPos.z;
     glidePos(p, landPos);
-    if (dt > 0) landV = Math.hypot(landPos.x - glideTmp.x, landPos.z - glideTmp.z) / dt;
+    if (dt > 0) landV = hyp(landPos.x - glideTmp.x, landPos.z - glideTmp.z) / dt;
     const g = glideAt(p);
     const h01 = g * g * (3 - 2 * g);
     // A facade above the eye still pushes the path off: keepOffWalls' berth at the start (so the
@@ -1101,7 +1202,7 @@ export function createCameraSystem(): System {
       const lz = -dx * sn + dz * c;
       const ox = lx - Math.max(-b.w / 2, Math.min(b.w / 2, lx));
       const oz = lz - Math.max(-b.d / 2, Math.min(b.d / 2, lz));
-      const d = Math.hypot(ox, oz);
+      const d = hyp(ox, oz);
       if (d <= 1e-6 || d >= want) continue; // inside (the roof floor's business) or clear
       // (Weighed in as the roof rises from 0.5 m below the eye to 1.5 m above it: no jolt when a
       // descent sinks below a roof line.)
@@ -1187,8 +1288,12 @@ export function createCameraSystem(): System {
         // The stick is offered only on touch, only at street level.
         input.stick.enabled = input.touchSeen && lookBlend(Math.exp(s.logAlt)) > 0.95 && !ctx.debug.cameraLocked;
         input.poll();
-        if (!ctx.debug.cameraLocked) handleInput(ctx, dt);
+        if (!ctx.debug.cameraLocked) {
+          handleInput(ctx, dt);
+          seaSteer(ctx);
+        }
       }
+      if (flyT < 0) steer = false;
 
       // Fly-to: slerp the focus with an ease, arc the altitude up and back down.
       if (flyT >= 0) {

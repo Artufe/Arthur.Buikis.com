@@ -18,9 +18,9 @@ export type PlayReceiptRow = {
 };
 
 export type PlayGame = {
-  slug: 'snake' | 'goldenline';
+  slug: 'snake' | 'goldenline' | 'littlebig';
   title: string;
-  href: '/snake/' | '/surf/';
+  href: '/snake/' | '/surf/' | '/planet/';
   cmd: string;
   description: string;
   chip: { label: string; short?: string; tone: 'ok' | 'warn' };
@@ -34,6 +34,7 @@ export type PlayGame = {
 
 export type PlayStep = { label: string; highlight?: boolean };
 export type PlayLane = { id: string; name: string };
+export type PlayPhase = { label: string; note: string; lanes: PlayLane[] };
 
 export type PlayMethod = {
   oneShot: { tag: string; title: string; body: string; chain: PlayStep[]; scores: string };
@@ -49,8 +50,22 @@ export type PlayMethod = {
       tail: string[];
     };
   };
-  mine: string[];
-  sources: { label: string; href: string }[];
+  harnessed: {
+    tag: string;
+    title: string;
+    body: string;
+    pipeline: {
+      head: { label: string; note: string }[];
+      // A gate row follows a phase when it names one.
+      phases: (PlayPhase & { gate?: string })[];
+      lenses: string[]; // what every gate reviewed
+      loop: string; // the per-build critic loop, drawn as ↻ on each lane
+      tail: string[];
+    };
+    scores: string;
+  };
+  mine: { step: string; scope: string }[];
+  sources: { game: string; links: { label: string; href: string }[] }[];
 };
 
 export const games: PlayGame[] = [
@@ -109,6 +124,32 @@ export const games: PlayGame[] = [
     ],
     pr: { number: 44, date: 'sep 2026' },
   },
+  {
+    slug: 'littlebig',
+    title: 'LITTLEBIG',
+    href: '/planet/',
+    cmd: './littlebig --about',
+    description:
+      'A tiny cartoon planet. Spin it, then dive through the clouds and walk its streets. Everything is procedural: zero asset downloads.',
+    chip: { label: 'touch ok', tone: 'ok' },
+    touchCta: 'play',
+    // One clip for both themes (the game has no light / dark mode). Recipe: docs/play-media.md.
+    media: {
+      poster: '/play/littlebig.jpg',
+      video: '/play/littlebig.mp4',
+      alt: 'A tiny cartoon planet against deep blue space: a toy-bright downtown of towers and a clock tower rises on its curve, ringed by roads, red-roofed houses and green parkland, with puffy clouds and a striped hot-air balloon drifting past.',
+    },
+    caption: ['littlebig', 'three.js · webgl', 'overnight · 11 builders'],
+    receipt: [
+      { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
+      { label: 'Mode', value: '1 orchestrator + 11 builders' },
+      { label: 'Time', value: '17 hours' },
+      { label: 'Code', value: '~30k lines ts' },
+      { label: 'Tests', value: '23 spec files', desktopOnly: true },
+      { label: 'Source', value: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
+    ],
+    pr: { number: 49, date: 'oct 2026' },
+  },
 ];
 
 export const method: PlayMethod = {
@@ -163,18 +204,91 @@ export const method: PlayMethod = {
       tail: ['final review', 'PR #44'],
     },
   },
+  harnessed: {
+    tag: '03 · harnessed',
+    title: 'LITTLEBIG: one prompt, a harness of agents.',
+    body: 'One prompt from me, with the limits: quality first, small and fast, at most four agents at once. The orchestrator wrote the brief and split it into eleven builder tasks, then ran them in four phases.',
+    pipeline: {
+      head: [
+        { label: 'prompt', note: 'mine' },
+        { label: 'orchestrator', note: 'brief · task split · integration · gates' },
+      ],
+      phases: [
+        {
+          label: 'phase 1 · foundation',
+          note: '1 agent',
+          lanes: [{ id: 'F0', name: 'engine · contracts · world gen · camera' }],
+        },
+        {
+          label: 'phase 2 · world',
+          note: '≤ 4 at once',
+          lanes: [
+            { id: 'A1', name: 'terrain · ocean · nature' },
+            { id: 'A2', name: 'city' },
+            { id: 'A3', name: 'sky · clouds · light' },
+            { id: 'A4', name: 'camera' },
+          ],
+          gate: 'gate G1',
+        },
+        {
+          label: 'phase 3 · life and look',
+          note: '≤ 4 at once',
+          lanes: [
+            { id: 'B1', name: 'traffic' },
+            { id: 'B2', name: 'people' },
+            { id: 'B3', name: 'air' },
+            { id: 'B4', name: 'ink · post' },
+          ],
+          gate: 'gate G2',
+        },
+        {
+          label: 'phase 4 · site',
+          note: 'parallel',
+          lanes: [
+            { id: 'C1', name: 'site integration' },
+            { id: 'C2', name: 'load · size · perf' },
+          ],
+        },
+      ],
+      lenses: ['art & wow', 'life & flow', 'perf & size'],
+      loop: 'critic → refine',
+      tail: ['final review', 'PR #49'],
+    },
+    scores:
+      'Every build got a fresh critic that scored its screenshots at each altitude. Under 8.5 / 10 it went back for a refine round; all 8 world and life builds did.',
+  },
+  // The steps differ per game: say which game each one covers.
   mine: [
-    'Wrote the initial prompt',
-    'Specified the details to focus on',
-    'Defined the agent tasks',
-    'Reviewed and playtested',
+    { step: 'Wrote the prompts', scope: 'all three' },
+    { step: 'Chose what to focus on', scope: 'all three · plus the limits for littlebig' },
+    { step: 'Defined the agent tasks', scope: 'goldenline only · littlebig’s orchestrator split its own' },
+    { step: 'Reviewed the results', scope: 'all three' },
   ],
   sources: [
-    { label: 'BRIEF.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/BRIEF.md` },
-    { label: 'TASKS.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/TASKS.md` },
-    { label: 'DECISIONS.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/DECISIONS.md` },
-    { label: 'snake spec ↗', href: `${PLAY_REPO}/blob/master/docs/superpowers/specs/2026-09-25-snake-3d-design.md` },
-    { label: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
-    { label: 'PR #44 ↗', href: `${PLAY_REPO}/pull/44` },
+    {
+      game: 'snake',
+      links: [
+        { label: 'spec ↗', href: `${PLAY_REPO}/blob/master/docs/superpowers/specs/2026-09-25-snake-3d-design.md` },
+        { label: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
+      ],
+    },
+    {
+      game: 'goldenline',
+      links: [
+        { label: 'BRIEF.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/BRIEF.md` },
+        { label: 'TASKS.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/TASKS.md` },
+        { label: 'DECISIONS.md ↗', href: `${PLAY_REPO}/blob/master/docs/goldenline/DECISIONS.md` },
+        { label: 'PR #44 ↗', href: `${PLAY_REPO}/pull/44` },
+      ],
+    },
+    {
+      game: 'littlebig',
+      links: [
+        { label: 'BRIEF.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/BRIEF.md` },
+        { label: 'TASKS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/TASKS.md` },
+        { label: 'DECISIONS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/DECISIONS.md` },
+        { label: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
+      ],
+    },
   ],
 };

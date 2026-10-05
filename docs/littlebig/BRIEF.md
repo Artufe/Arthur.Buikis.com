@@ -41,7 +41,11 @@ driving through a house, an untextured-looking surface or a placeholder colour.
 - **Zero asset downloads.** Every mesh, colour, texture and sound is procedural, generated at boot
   from a fixed seed. No `public/` assets for the game itself: no images, models, fonts or KTX2.
   Small `DataTexture`s generated in code are fine.
-- **Small.** LITTLEBIG's own JS ≤ **80 KB gzip** (three itself excluded). Avoid heavy addons.
+- **Small.** LITTLEBIG's own production JS ≤ **150 KB gzip** (three itself excluded; re-baselined
+  from 80 KB in phase 4, see `DECISIONS.md` and `PERF.md`). **Not met:** 168 KB ships today
+  (`PERF.md` has the measurement and what is left to cut). The orchestrator accepted the 18 KB
+  overage for this release: no dead code is left, and every remaining cut is a feature the dive
+  shows. Avoid heavy addons.
 - **Fast.** From the engine chunk arriving to the first frame of the planet: ≤ **400 ms** on the
   dev machine (Apple M3). Everything visible inside ≤ **1.5 s**. World generation is time-sliced
   across frames: the planet shows first, then the rest *animates in*. Buildings spring up out of the

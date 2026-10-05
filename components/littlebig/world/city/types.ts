@@ -351,4 +351,13 @@ export interface CityIndex {
   groundH(x: number, z: number): number;
   /** Point obstacles from features with a collision radius: [x, z, r] interleaved. collide() includes them. */
   readonly obstacles: Float64Array;
+  /**
+   * Zero-allocation inputs for the per-frame hot paths (C2): V8 boxes (allocates) every double
+   * passed to or returned from a call it does not inline, so a sim calling classify(x, z) hundreds
+   * of times a step allocates on each. Write x, z (and r) into q[0], q[1] (q[2]), then call
+   * classifyQ() / collideQ(out): same results as classify / collide, nothing allocated.
+   */
+  readonly q: Float64Array;
+  classifyQ(): GroundClass;
+  collideQ(out: { x: number; z: number }): boolean;
 }

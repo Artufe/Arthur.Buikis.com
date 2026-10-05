@@ -173,16 +173,19 @@ export function vertexColor(t: TerrainData, i: number, out: RGB): RGB {
   if (b === Biome.Grass || b === Biome.Meadow) {
     // Flower fields warm the colour a few percent (the blooms themselves are ground cover).
     mixInto(out, WARM, 0.12 * t.flower[i] * (1 - t.plateau[i]));
-    // Farmland patchwork and the hedgerow lines between the fields.
+    // Farmland patchwork and the hedgerow lines between the fields: faint in the smooth colour
+    // (seen from far: a one-vertex line interpolates into a jagged dark zigzag, the bare first
+    // frame's "veins"); the facet colour and nature's hedgerow bushes draw them up close.
     fieldTint(t.field[i], out, t.plateau[i]);
-    if (t.field[i] >= 0) mixInto(out, HEDGE, 0.5 * (1 - smooth(0.6, 2.2, t.hedge[i])));
+    if (t.field[i] >= 0) mixInto(out, HEDGE, 0.16 * (1 - smooth(0.6, 2.2, t.hedge[i])));
   } else if (b === Biome.City) {
     // The plateau base under the city: meadow tone patches, so the first frame (before the city's
     // ground springs in) reads as landscape, not a flat disc.
+    // (No hedgerow lines here: under the city they were the first frame's dark stair-stepped
+    // "veins" across a bare lime disc, before the city's ground covers them.)
     biomeColor(Biome.Meadow, 2, 0, t.moist[i], t.tone[i], _meadow);
     mixInto(out, _meadow, 0.25);
     fieldTint(t.field[i], out, 1);
-    if (t.field[i] >= 0) mixInto(out, HEDGE, 0.5 * (1 - smooth(0.6, 2.2, t.hedge[i])));
   }
   // Steep faces turn rocky (not the beach, the city or snow).
   if (b !== Biome.City && b !== Biome.Snow && b !== Biome.Beach && isLand(b) && slope > 0.14 && h > 2.2) {
@@ -208,10 +211,20 @@ export function dominantBiome(t: TerrainData, f: number): BiomeId {
   return bc as BiomeId;
 }
 
+/** Soft ground: biome borders between these blend per vertex (FACE_EDGE). */
+const softGround = (b: number) => b === Biome.Beach || b === Biome.Grass || b === Biome.Meadow || b === Biome.Forest;
+
+/** faceColor's return values: a facet in the plain facet colour, kept crisp, or a soft-ground biome edge. */
+export const FACE_PLAIN = 0;
+export const FACE_CRISP = 1;
+export const FACE_EDGE = 2;
+
 /**
- * The facet colour of face f (sRGB 0..1) into out; returns 1 when the facet is 'crisp' (rock,
- * snow, steep rocky slopes: kept faceted at every distance), else 0. `fslope` is 1 − n·up of the
- * facet's own normal.
+ * The facet colour of face f (sRGB 0..1) into out. Returns FACE_CRISP when the facet is 'crisp'
+ * (rock, snow, steep rocky slopes: kept faceted at every distance), FACE_EDGE on a border between
+ * soft-ground biomes (sand / grass / meadow / forest corners: the shader shows its smooth corner
+ * colours, so a sand–grass edge is a clean gradient one facet wide, not a per-triangle sawtooth),
+ * else FACE_PLAIN. `fslope` is 1 − n·up of the facet's own normal.
  */
 export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): number {
   const I = t.ico.indices;
@@ -249,7 +262,7 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
     if (fid >= 0) {
       farmed = true;
       fieldTint(fid, out, dom === Biome.City ? 1 : p);
-      if ((fa !== fb || fa !== fcl) && Math.min(t.hedge[a], t.hedge[b], t.hedge[c]) < 1.6) mixInto(out, HEDGE, 0.6);
+      if (dom !== Biome.City && (fa !== fb || fa !== fcl) && Math.min(t.hedge[a], t.hedge[b], t.hedge[c]) < 1.6) mixInto(out, HEDGE, 0.6);
     }
     // Flower fields: the same faint warm tint as the smooth colour, never a per-facet speckle.
     const fl = ((t.flower[a] + t.flower[b] + t.flower[c]) / 3) * (1 - p);
@@ -261,6 +274,7 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
     mixInto(out, _rock, 0.5 * hash3(f, 0xf21));
   }
   if (p > 0 && p < 1 && dom !== Biome.Beach && !farmed) mixInto(out, C.city, smooth(0.55, 1, p));
+  const edge = crisp === 0 && p <= 0 && (B[a] !== B[b] || B[a] !== B[c]) && softGround(B[a]) && softGround(B[b]) && softGround(B[c]);
   // Value jitter: mostly the low-frequency field (soft patches), a little per facet; warmth too.
   const quiet = p >= 1 ? 0.8 : 1;
   const jl = (t.jit[a] + t.jit[b] + t.jit[c]) / 3;
@@ -269,7 +283,7 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
   out[0] *= j * (1 + w);
   out[1] *= j;
   out[2] *= j * (1 - w);
-  return crisp;
+  return crisp ? FACE_CRISP : edge ? FACE_EDGE : FACE_PLAIN;
 }
 
 const cache = new WeakMap<TerrainData, Uint8Array>();

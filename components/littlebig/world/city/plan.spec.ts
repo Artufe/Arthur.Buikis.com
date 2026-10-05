@@ -1,3 +1,4 @@
+import '../../core/kit-fill'; // before the review tooling (core/kit.ts)
 import { describe, expect, it } from 'vitest';
 import { getCityIndex, getCityPlan } from '.';
 import { CITY_PLAN_RADIUS, CURB_H, ROAD_H } from '../config';
@@ -8,6 +9,9 @@ import { BED_H, buildCityPlan } from './plan';
 import { obbOverlapGap } from './spatial';
 import type { Building } from './types';
 import { obbOverlap, validatePlan } from './validate';
+import { registerShotViews } from './views';
+
+registerShotViews(); // the review-shot viewpoints (rooftops, horizon, dusk) resolve through views.ts
 
 describe('city plan', () => {
   const plan = getCityPlan();

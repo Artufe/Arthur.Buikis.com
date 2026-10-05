@@ -280,21 +280,33 @@ function paintPoly(P: Geo, pl: Polyline, sd: number[], h: number) {
   }
 }
 
-/** A painted turn arrow on a lane ending at arc length s1 (its tip), for the set of turns allowed. */
+/**
+ * A painted turn arrow on a lane ending at arc length s1 (its tip), for the set of turns allowed.
+ * A turn is a straight arm off the shaft at 45° with its head centred on the arm's end and square to
+ * it (an offset head on a skewed arm read as a sawtooth at street level).
+ */
 function turnArrow(P: Geo, pl: Polyline, s1: number, turns: Set<Turn>, h: number) {
   const w = 0.09; // half shaft width
   const s0 = s1 - 3.0;
   const straight = turns.has('straight');
-  const shaftEnd = straight ? s1 - 0.9 : s1 - 1.35;
+  const sb = s1 - 1.9; // where a turn arm leaves the shaft
+  const shaftEnd = straight ? s1 - 0.9 : sb + w;
   paintPoly(P, pl, [s0, -w, shaftEnd, -w, shaftEnd, w, s0, w], h);
   if (straight) paintPoly(P, pl, [s1 - 0.95, -0.34, s1, 0, s1 - 0.95, 0.34], h);
+  const u = Math.SQRT1_2; // the arm's direction (s, outward) = (u, u); its normal (−u, u)
+  const aw = 0.1;
+  const len = 0.42;
+  const hw = 0.27;
+  const hl = 0.42;
   for (const t of ['left', 'right'] as const) {
     if (!turns.has(t)) continue;
     const sg = t === 'right' ? 1 : -1;
-    const sb = s1 - 1.75;
-    // a short arm out to the side, then its head
-    paintPoly(P, pl, [sb - w, 0, sb + 0.55, sg * 0.5, sb + 0.55 + w * 1.6, sg * 0.5 - sg * w * 1.2, sb + w, -sg * w * 0.2], h);
-    paintPoly(P, pl, [sb + 0.25, sg * 0.42, sb + 0.95, sg * 0.82, sb + 0.95, sg * 0.3], h);
+    // (s, outward) → (s, d)
+    const at = (a: number, o: number) => [a, sg * o];
+    const ex = sb + u * len;
+    const ey = u * len;
+    paintPoly(P, pl, [...at(sb + u * aw, -u * aw), ...at(ex + u * aw, ey - u * aw), ...at(ex - u * aw, ey + u * aw), ...at(sb - u * aw, u * aw)], h);
+    paintPoly(P, pl, [...at(ex + u * hw, ey - u * hw), ...at(ex + u * hl, ey + u * hl), ...at(ex - u * hw, ey + u * hw)], h);
   }
 }
 

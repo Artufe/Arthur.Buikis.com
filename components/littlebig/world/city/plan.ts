@@ -20,8 +20,7 @@ import { buildLayout, type Layout } from './layout';
 import { hermitePoints, nearestOn, offset, polyline, reversed, sampleAt, trim } from './path';
 import { featureRadius, obbDistance } from './index-grid';
 import { KeepOut, segPointDist } from './spatial';
-import { getPlanet } from '../planet';
-import { pickDusk, Skyline, type WalkSpot } from './views';
+import { shotViewSolver, type ShotViewInputs } from './shot-views';
 import type { Area, Building, BuildingStyle, CityPlan, Feature, Polyline, RoadEdge, RoofKind, Viewpoint, WalkEdge, WalkKind, Zone } from './types';
 
 /** Sidewalk top; downtown lots and the plaza are paved flush with it (4 mm lower, tucked under its edge). */
@@ -1211,42 +1210,6 @@ function pickViewpoints(seed: number, g: RoadGraph, layout: Layout, buildings: B
     }
   }
   const street = best!;
-  // rooftops, horizon and dusk serve the review shots only: they are computed on first read
-  // (non-enumerable memoised getters), off the first-frame `city plan` path.
-  let skyMemo: Skyline | null = null;
-  const skyline = () => (skyMemo ??= new Skyline(buildings, features));
-  const computeRooftops = (): Viewpoint => {
-    const sky = skyline();
-    // Rooftops (16 m, the shot pitches to −24°): far enough out (58–70 m) that the plateau's curve
-    // drops the whole clock tower into frame, over open ground, with clear lines to its top, middle
-    // and foot — a view in over downtown at the tower. Fallback: the old downtown-edge spot.
-    const ra = layout.rot + Math.PI * 0.75;
-    let rooftops: Viewpoint = { x: Math.cos(ra) * 30, z: Math.sin(ra) * 30, heading: heading(-Math.cos(ra), -Math.sin(ra)) };
-    {
-      const ct = buildings.find((b) => b.landmark === 'clocktower');
-      if (ct) {
-        const eye = 16.4;
-        // nearest-to-64 m ring first; the first ring with a clear spot wins (over a road if possible)
-        for (const D of [64, 62.5, 65.5, 61, 67, 59.5, 68.5, 58, 70]) {
-          let found: Viewpoint | null = null;
-          for (let a = 0; a < Math.PI * 2 && !(found && !keep.discClear(found.x, found.z, 1)); a += Math.PI / 60) {
-            const x = ct.x + Math.cos(a) * D;
-            const z = ct.z + Math.sin(a) * D;
-            if (Math.hypot(x, z) > CITY_PLAN_RADIUS - 6) continue;
-            if (sky.topAt(x, z) > 8 || sky.buildingClearance(x, z, 4) < 3) continue;
-            const skip = ct.w / 2 + 0.6;
-            if (!sky.lineClear(x, z, eye, ct.x, ct.z, ct.h, skip) || !sky.lineClear(x, z, eye, ct.x, ct.z, ct.h * 0.5, skip) || !sky.lineClear(x, z, eye, ct.x, ct.z, 3, skip)) continue;
-            if (!found || !keep.discClear(x, z, 1)) found = { x, z, heading: heading(ct.x - x, ct.z - z) };
-          }
-          if (found) {
-            rooftops = found;
-            break;
-          }
-        }
-      }
-    }
-    return rooftops;
-  };
   // Plaza: far enough back that the clock and the fountain are in frame at eye height (≥ 22 m from
   // the tower: on a corner of the loop's outer sidewalk, looking across the street into the plaza),
   // offset so the fountain sits beside the tower, not behind it.
@@ -1279,71 +1242,15 @@ function pickViewpoints(seed: number, g: RoadGraph, layout: Layout, buildings: B
       break;
     }
   }
-  const computeHorizon = (): Viewpoint => {
-    const sky = skyline();
-    // Horizon: on the ring's outer sidewalk where it runs past the park, looking along the ring. The
-    // camera stands 6 m up, level with the lamp heads (4.6–5.5 m) and the crowns: keep its column
-    // 3 m clear of every lamp head, crown and wall, and the first 14 m ahead clear of crowns.
-    let horizon: Viewpoint = { x: 0, z: 0, heading: 0 };
-    {
-      const phi = parkPhi - 0.32;
-      const tx0 = Math.cos(phi) * 62;
-      const tz0 = Math.sin(phi) * 62;
-      let bestH = Infinity;
-      for (const e of g.edges) {
-        if (e.kind !== 'ring') continue;
-        for (let si = 0; si <= e.centre.length; si += 1) {
-          sampleAt(e.centre, si, sp);
-          const dPhi = Math.hypot(sp.x - tx0, sp.z - tz0);
-          if (dPhi > 40) continue;
-          const outward = Math.sign(sp.x * -sp.tz + sp.z * sp.tx) || 1;
-          const along = sp.tx * -Math.sin(phi) + sp.tz * Math.cos(phi) > 0 ? 1 : -1;
-          const dx = sp.tx * along;
-          const dz = sp.tz * along;
-          for (const k of [0.5, 0.3, 0.7]) {
-            const hoff = outward * (e.width / 2 + e.sidewalk * k);
-            const x = sp.x - sp.tz * hoff;
-            const z = sp.z + sp.tx * hoff;
-            if (sky.postClearance(x, z, 6, 3.5) < 3 || sky.buildingClearance(x, z, 4) < 3) continue;
-            // nothing tall standing in the middle of the view for 10 m (a lamp head 4 m ahead fills a quarter of the frame)
-            if (sky.coneClearance(x, z, dx, dz, 38, 11, 3.5) < 10) continue;
-            const score = dPhi + Math.abs(k - 0.5) * 2;
-            if (score < bestH) {
-              bestH = score;
-              horizon = { x, z, heading: heading(dx, dz) };
-            }
-          }
-        }
-      }
-    }
-    return horizon;
-  };
-  const computeDusk = (): Viewpoint => {
-    const sky = skyline();
-    // Dusk: a sidewalk spot whose view toward the setting sun (at the shot's own time there) shows an
-    // unbroken horizon within ±1.5° of the disc (views.ts pickDusk); falls back to the most westward
-    // open view.
-    const spots: WalkSpot[] = [];
-    for (const w of W.edges) {
-      if (w.kind !== 'sidewalk' && w.kind !== 'corner') continue;
-      for (let si = 0.5; si < w.path.length; si += 1) {
-        sampleAt(w.path, si, sp);
-        let endDist = Infinity;
-        for (const n of g.nodes) if (n.kind === 'end') endDist = Math.min(endDist, Math.hypot(sp.x - n.x, sp.z - n.z));
-        spots.push({ x: sp.x, z: sp.z, tx: sp.tx, tz: sp.tz, straight: w.kind === 'sidewalk', endDist });
-      }
-    }
-    const dusk: Viewpoint = pickDusk(sky, getPlanet(seed), spots, CITY_PLAN_RADIUS, (x, z) => !obstacleNear(x, z, 1.2)) ?? { ...street, heading: -Math.PI / 2 };
-    return dusk;
-  };
+  // rooftops, horizon and dusk serve the review shots only: computed on first read (non-enumerable
+  // memoised getters) by world/city/views.ts, which the review tooling registers (core/shots.ts):
+  // the sight-line code stays off the production path and off the first-frame `city plan` mark.
   const vps = { street, plaza: plazaVp } as unknown as CityPlan['viewpoints'];
-  const lazy = (name: string, fn: () => Viewpoint) => {
+  const inputs: ShotViewInputs = { seed, g, layout, buildings, features, walkEdges: W.edges, parkPhi, keep, street, obstacleNear };
+  for (const name of ['rooftops', 'horizon', 'dusk'] as const) {
     let v: Viewpoint | null = null;
-    Object.defineProperty(vps, name, { enumerable: false, get: () => (v ??= fn()) });
-  };
-  lazy('rooftops', computeRooftops);
-  lazy('horizon', computeHorizon);
-  lazy('dusk', computeDusk);
+    Object.defineProperty(vps, name, { enumerable: false, get: () => (v ??= shotViewSolver()(name, inputs)) });
+  }
   return vps;
 }
 

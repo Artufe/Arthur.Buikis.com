@@ -4,7 +4,7 @@
 
 import type { BootEntry, LBContext, ViewSpec } from './contracts';
 import { DIVE_SECONDS } from '../camera/dive';
-import { diveAt, SHOTS } from './shots';
+import { DIVE_T0, diveAt, SHOTS } from './shots';
 
 export interface PerfResult {
   frames: number;
@@ -54,6 +54,8 @@ export interface LittlebigHook {
   dive(u: number, glide?: number, dt?: number): void;
   /** Nominal length of the scripted dive at 1× (s). */
   readonly diveSeconds: number;
+  /** Sim time the /play clip's dive starts at (the shot tool's `--dive` default for `--t`). */
+  readonly diveT0: number;
   /** Measure n frames serially (CPU + GPU, synced). */
   perf(frames?: number): Promise<PerfResult>;
   boot(): BootEntry[];
@@ -131,6 +133,7 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
       deps.frameNow(Math.max(0, dt ?? glide ?? 0));
     },
     diveSeconds: DIVE_SECONDS,
+    diveT0: DIVE_T0,
     async perf(frames = 120) {
       const raf = ctx.perf.summarize();
       deps.pauseLoop();

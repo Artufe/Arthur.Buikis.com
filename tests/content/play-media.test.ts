@@ -16,6 +16,7 @@ describe('/play media', () => {
 
   it.each(all)('$slug clip $video exists and stays within budget', ({ slug, video }) => {
     expect(existsSync(file(video))).toBe(true);
+    // GOLDENLINE's trailer earned a bigger budget (its spray); LITTLEBIG's descent stays small.
     expect(statSync(file(video)).size).toBeLessThan((slug === 'goldenline' ? 6 : 2) * MB);
   });
 });

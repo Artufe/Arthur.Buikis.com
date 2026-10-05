@@ -13,14 +13,17 @@
 // day nothing crosses the bloom threshold and the sun's glow is analytic.
 //
 // Tiers: `high` R11G11B10F scene target (RGBA16F without EXT_color_buffer_float), five bloom
-// levels, tilt-shift, FXAA. `low` keeps the look (ink, grade, the night bloom with three levels)
-// on an sRGB8 scene target, without tilt-shift, FXAA or the night-side darkening. Without
-// renderable half-float targets createPost returns null and the engine renders directly.
+// levels, tilt-shift, FXAA. `low` keeps the look (ink, grade) on an sRGB8 scene target, without
+// the night bloom (BRIEF §1: no expensive post on low; it cost 3.4-4.6 ms whenever night ground
+// was in view, and the emissive windows and light pools carry the night on their own), tilt-shift,
+// FXAA or the night-side darkening. Without renderable half-float targets createPost returns null
+// and the engine renders directly.
 //
 // Zero per-frame allocation: every matrix, vector and target is made once; setSize() resizes.
 
 import {
   BufferGeometry,
+  type Camera,
   Color,
   DepthTexture,
   Float32BufferAttribute,
@@ -32,6 +35,7 @@ import {
   Mesh,
   NearestFilter,
   NoBlending,
+  type Object3D,
   OrthographicCamera,
   RGBAFormat,
   RGBFormat,
@@ -66,6 +70,12 @@ export interface Post {
   readonly stats: { ground: number; city: number; tilt: number };
   /** Compile every post program (call during the boot warm-up). */
   compile(): Promise<unknown>;
+  /**
+   * Draw `scene` once into the scene target, clipped to one pixel (the next frame overwrites it):
+   * the engine's stage-2 warm draw, so buffer uploads and the driver's pipeline builds for new
+   * objects happen at boot, against the target they will really be drawn into, not mid-dive.
+   */
+  warm(scene: Object3D, camera: Camera): void;
   dispose(): void;
 }
 
@@ -293,8 +303,9 @@ export function createPost(renderer: WebGLRenderer, full: boolean, params: Param
     // The visible ground reaching the night side counts from orbit (lit windows are pixels there and
     // the frustum holds the whole disc) or under the eye itself; in between, the city's lights are
     // the per-building test (frustum-aware), and the few lights outside it do not need the pass.
-    stats.ground = p.bloom.value > 0 ? Math.max(nightInView(eyeLen, cosSun, R, 0) * smooth(0.25, 0.6, far), nightInView(R, cosSun, R, 0)) : 0;
-    stats.city = p.bloom.value > 0 && stats.ground < 1 ? cityNight(ctx) : 0;
+    const bloomOn = high && p.bloom.value > 0;
+    stats.ground = bloomOn ? Math.max(nightInView(eyeLen, cosSun, R, 0) * smooth(0.25, 0.6, far), nightInView(R, cosSun, R, 0)) : 0;
+    stats.city = bloomOn && stats.ground < 1 ? cityNight(ctx) : 0;
     stats.tilt = tilt;
     const nightK = Math.max(stats.ground, stats.city);
     if (nightK > 0) {
@@ -362,6 +373,21 @@ export function createPost(renderer: WebGLRenderer, full: boolean, params: Param
     get offscreen() {
       return p.on.value;
     },
+    warm(scene, camera) {
+      const prev = renderer.getRenderTarget();
+      sceneRT.viewport.set(0, 0, 1, 1);
+      sceneRT.scissor.set(0, 0, 1, 1);
+      sceneRT.scissorTest = true;
+      try {
+        renderer.setRenderTarget(sceneRT);
+        renderer.render(scene, camera);
+      } finally {
+        sceneRT.viewport.set(0, 0, size.x, size.y);
+        sceneRT.scissor.set(0, 0, size.x, size.y);
+        sceneRT.scissorTest = false;
+        renderer.setRenderTarget(prev);
+      }
+    },
     compile() {
       // Programs depend on the bound target's colour space: compile each pass against the target
       // it draws into.
@@ -370,7 +396,7 @@ export function createPost(renderer: WebGLRenderer, full: boolean, params: Param
       const aa = p.fxaa.value;
       try {
         for (const [m, t] of [[pre, quarterRT], [comp, aa ? ldrRT : null], [fxaa, null]] as const) {
-          if (m === fxaa && !aa) continue;
+          if ((m === fxaa && !aa) || (m === pre && !high)) continue;
           quad.material = m;
           renderer.setRenderTarget(t);
           jobs.push(renderer.compileAsync(postScene, ortho).catch(() => {}));

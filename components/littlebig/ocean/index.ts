@@ -18,12 +18,13 @@
 
 import { BufferAttribute, BufferGeometry } from 'three';
 import type { LBContext, System } from '../core/contracts';
+import type { ToonMaterial } from '../render/toon';
 import { PALETTE } from '../render/palette';
 import { R } from '../world/config';
 import { icoHeights } from '../world/ico-heights';
 import { icosphere } from '../world/icosphere';
 import { terrainData } from '../terrain/data';
-import { chunkedMesh, terrainChunkBounds, type ChunkedMesh } from '../terrain/chunked';
+import { chunkedMesh, standInGeometry, terrainChunkBounds, type ChunkedMesh } from '../terrain/chunked';
 import { extendToon, softShadows } from '../terrain/shader-ext';
 import { SWELL_GLSL } from './swell';
 
@@ -39,66 +40,37 @@ const glslColor = (c: { r: number; g: number; b: number }) => `vec3(${c.r.toFixe
 export function createOceanSystem(): System {
   let geometry: BufferGeometry | null = null;
   let chunks: ChunkedMesh | null = null;
-  return {
-    name: 'ocean',
-    stage: 1,
-    init(ctx: LBContext) {
-      const detail = ctx.q.terrainDetail;
-      const ico = icosphere(detail);
-      const heights = icoHeights(ctx.world.planet, detail);
-      const n = ico.vertexCount;
-      const P = ico.positions;
-      const pos = new Float32Array(n * 3);
-      const depth = new Float32Array(n);
-      // Seabed slope (rise per metre) per vertex, from the terrain's smooth normals: the foam turns
-      // depth into metres from the shore with it (even foam width on flat and steep shores).
-      const tdata = terrainData(ctx.world.planet, detail);
-      const slope = tdata.slope;
-      const grad = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        grad[i] = Math.max(0.12, Math.sqrt(2 * Math.max(0, slope[i])));
-        pos[i * 3] = P[i * 3] * R;
-        pos[i * 3 + 1] = P[i * 3 + 1] * R;
-        pos[i * 3 + 2] = P[i * 3 + 2] * R;
-        depth[i] = Math.max(-1.5, Math.min(14, -heights[i]));
-      }
-      geometry = ctx.track(new BufferGeometry());
-      geometry.setAttribute('position', new BufferAttribute(pos, 3));
-      // A sphere's normal is its direction.
-      geometry.setAttribute('normal', new BufferAttribute(P, 3));
-      geometry.setAttribute('aDepth', new BufferAttribute(depth, 1));
-      geometry.setAttribute('aGrad', new BufferAttribute(grad, 1));
-      geometry.setIndex(new BufferAttribute(ico.indices, 1));
-      geometry.computeBoundingSphere();
+  let material: ToonMaterial | null = null;
+  /** The ocean material (made in prepare, so the driver compiles it while the inits build). */
+  const makeMaterial = (ctx: LBContext) => {
+    const swell = ctx.params.number('ocean.swell', { label: 'ocean swell amplitude (m)', min: 0, max: 0.6, value: 0.22 });
+    // The kit's hemisphere fill is strong (shade on land must stay a colour); on water it washed
+    // the deep blue out to pale cyan from orbit, so the sea takes only part of it.
+    const fill = ctx.params.number('ocean.fill', { label: 'ocean share of the sky fill', min: 0, max: 1.5, value: 0.5 });
+    const fres = ctx.params.number('ocean.fresnel', { label: 'ocean sky reflection (near)', min: 0, max: 1.5, value: 0.75 });
+    const foam = ctx.params.number('ocean.foam', { label: 'ocean foam amount', min: 0, max: 2, value: 1 });
+    const uSwell = { value: swell.value };
+    const uFoam = { value: foam.value };
+    const uFres = { value: fres.value };
+    ctx.params.onChange((p) => {
+      if (p === swell) uSwell.value = swell.value;
+      if (p === foam) uFoam.value = foam.value;
+      if (p === fres) uFres.value = fres.value;
+      if (p === fill) mat.userData.lbUniforms.lbFill.value = fill.value;
+    });
 
-      const swell = ctx.params.number('ocean.swell', { label: 'ocean swell amplitude (m)', min: 0, max: 0.6, value: 0.22 });
-      // The kit's hemisphere fill is strong (shade on land must stay a colour); on water it washed
-      // the deep blue out to pale cyan from orbit, so the sea takes only part of it.
-      const fill = ctx.params.number('ocean.fill', { label: 'ocean share of the sky fill', min: 0, max: 1.5, value: 0.5 });
-      const fres = ctx.params.number('ocean.fresnel', { label: 'ocean sky reflection (near)', min: 0, max: 1.5, value: 0.75 });
-      const foam = ctx.params.number('ocean.foam', { label: 'ocean foam amount', min: 0, max: 2, value: 1 });
-      const uSwell = { value: swell.value };
-      const uFoam = { value: foam.value };
-      const uFres = { value: fres.value };
-      ctx.params.onChange((p) => {
-        if (p === swell) uSwell.value = swell.value;
-        if (p === foam) uFoam.value = foam.value;
-        if (p === fres) uFres.value = fres.value;
-        if (p === fill) mat.userData.lbUniforms.lbFill.value = fill.value;
-      });
-
-      // Linear-space palette constants baked into the shader.
-      const lagoon = SHALLOW.clone().lerp(FOAM, 0.2);
-      const mid = SHALLOW.clone().lerp(DEEP, 0.6);
-      const mat = ctx.toon.material({
-        name: 'ocean',
-        vertexColors: false,
-        rim: 0.1,
-        fill: fill.value,
-        patch: {
-          key: 'ocean',
-          uniforms: { uSwell, uFoam, uFres },
-          vertexPars: /* glsl */ `
+    // Linear-space palette constants baked into the shader.
+    const lagoon = SHALLOW.clone().lerp(FOAM, 0.2);
+    const mid = SHALLOW.clone().lerp(DEEP, 0.6);
+    const mat = ctx.toon.material({
+      name: 'ocean',
+      vertexColors: false,
+      rim: 0.1,
+      fill: fill.value,
+      patch: {
+        key: 'ocean',
+        uniforms: { uSwell, uFoam, uFres },
+        vertexPars: /* glsl */ `
 attribute float aDepth;
 attribute float aGrad;
 uniform float uSwell;
@@ -108,7 +80,7 @@ varying float vSwell;
 varying float vFar;
 varying vec3 vWaterCol;
 ${SWELL_GLSL}`,
-          vertex: /* glsl */ `
+        vertex: /* glsl */ `
   {
     vec3 lbP = (modelMatrix * vec4(transformed, 1.0)).xyz;
     float lbD = distance(lbP, lbCamPos);
@@ -127,7 +99,7 @@ ${SWELL_GLSL}`,
     c = mix(c, ${glslColor(mid)}, smoothstep(0.8, 2.6, aDepth));
     vWaterCol = mix(c, ${glslColor(DEEP)}, smoothstep(2.2, 5.5, aDepth));
   }`,
-          fragmentPars: /* glsl */ `
+        fragmentPars: /* glsl */ `
 uniform float uFoam;
 uniform float uFres;
 varying float vDepth;
@@ -145,9 +117,9 @@ float lbVNoise(vec3 p) {
   vec3 f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(lbHash3(i), lbHash3(i + vec3(1, 0, 0)), f.x), mix(lbHash3(i + vec3(0, 1, 0)), lbHash3(i + vec3(1, 1, 0)), f.x), f.y),
-             mix(mix(lbHash3(i + vec3(0, 0, 1)), lbHash3(i + vec3(1, 0, 1)), f.x), mix(lbHash3(i + vec3(0, 1, 1)), lbHash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+           mix(mix(lbHash3(i + vec3(0, 0, 1)), lbHash3(i + vec3(1, 0, 1)), f.x), mix(lbHash3(i + vec3(0, 1, 1)), lbHash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }`,
-          fragment: /* glsl */ `
+        fragment: /* glsl */ `
   {
     float lbNt = lbNightAt(vLbWorld);
     float lbDay = 1.0 - lbNt;
@@ -222,16 +194,16 @@ float lbVNoise(vec3 p) {
     vec3 lbGd = lbSn - H;
     float lbGa = length(vec3(lbGd.x, lbGd.y * 0.4, lbGd.z));
     if (vFar > 0.0 && lbGa < 0.08) {
-      float core = exp(-lbGr * lbGr * 20000.0) * 0.55;
-      vec3 gp = vLbWorld * 0.42;
-      vec3 gc = floor(gp);
-      float gt = floor(lbTime * 2.5);
-      float gl = lbHash3(gc + gt * 13.0);
-      vec3 go = vec3(lbHash3(gc + 1.7), lbHash3(gc + 4.1), lbHash3(gc + 8.9)) * 0.5 + 0.25;
-      float gd = length(fract(gp) - go);
-      float aaF = max(fwidth(gp.x) + fwidth(gp.y), 1e-3);
-      float pt = step(0.8, gl) * (1.0 - smoothstep(0.1, 0.1 + aaF * 1.5, gd));
-      glintFar = max(core, pt * (1.0 - smoothstep(0.02, 0.075, lbGa)));
+    float core = exp(-lbGr * lbGr * 20000.0) * 0.55;
+    vec3 gp = vLbWorld * 0.42;
+    vec3 gc = floor(gp);
+    float gt = floor(lbTime * 2.5);
+    float gl = lbHash3(gc + gt * 13.0);
+    vec3 go = vec3(lbHash3(gc + 1.7), lbHash3(gc + 4.1), lbHash3(gc + 8.9)) * 0.5 + 0.25;
+    float gd = length(fract(gp) - go);
+    float aaF = max(fwidth(gp.x) + fwidth(gp.y), 1e-3);
+    float pt = step(0.8, gl) * (1.0 - smoothstep(0.1, 0.1 + aaF * 1.5, gd));
+    glintFar = max(core, pt * (1.0 - smoothstep(0.02, 0.075, lbGa)));
     }
     float glint = mix(glintNear, glintFar, vFar);
     // Sparkles: tiny star points on a 0.33 m lattice that re-roll a few times a second.
@@ -246,22 +218,61 @@ float lbVNoise(vec3 p) {
     vec3 lbGlintC = mix(vec3(1.0), ${glslColor(ACCENT)} * 1.25, 0.55 * vFar + 0.25);
     outgoingLight += lbSunColor * (glint * mix(0.55, 0.8, vFar) * lbGlintC + sparkle * 0.9) * lbDay * (1.0 - lbFoam);
   }`,
-        },
-      });
-      extendToon(mat, (shader) => {
-        // Water colour from the vertex stage (diffuse), and flat facets near the camera.
-        shader.fragmentShader = shader.fragmentShader
-          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= vWaterCol;')
-          .replace(
-            '#include <normal_fragment_begin>',
-            `#include <normal_fragment_begin>
+      },
+    });
+    extendToon(mat, (shader) => {
+      // Water colour from the vertex stage (diffuse), and flat facets near the camera.
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= vWaterCol;')
+        .replace(
+          '#include <normal_fragment_begin>',
+          `#include <normal_fragment_begin>
   {
     vec3 lbFn = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
     normal = normalize(mix(lbFn, normal, vFar));
   }`,
-          );
-      });
-      extendToon(mat, softShadows(0.55));
+        );
+    });
+    extendToon(mat, softShadows(0.55));
+    return mat;
+  };
+  return {
+    name: 'ocean',
+    stage: 1,
+    prepare(ctx: LBContext) {
+      material = makeMaterial(ctx);
+      ctx.prewarm([ctx.toon.mesh(standInGeometry(ctx), material, { cast: false, receive: true })]);
+    },
+    init(ctx: LBContext) {
+      const detail = ctx.q.terrainDetail;
+      const ico = icosphere(detail);
+      const heights = icoHeights(ctx.world.planet, detail);
+      const n = ico.vertexCount;
+      const P = ico.positions;
+      const pos = new Float32Array(n * 3);
+      const depth = new Float32Array(n);
+      // Seabed slope (rise per metre) per vertex, from the terrain's smooth normals: the foam turns
+      // depth into metres from the shore with it (even foam width on flat and steep shores).
+      const tdata = terrainData(ctx.world.planet, detail);
+      const slope = tdata.slope;
+      const grad = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        grad[i] = Math.max(0.12, Math.sqrt(2 * Math.max(0, slope[i])));
+        pos[i * 3] = P[i * 3] * R;
+        pos[i * 3 + 1] = P[i * 3 + 1] * R;
+        pos[i * 3 + 2] = P[i * 3 + 2] * R;
+        depth[i] = Math.max(-1.5, Math.min(14, -heights[i]));
+      }
+      geometry = ctx.track(new BufferGeometry());
+      geometry.setAttribute('position', new BufferAttribute(pos, 3));
+      // A sphere's normal is its direction.
+      geometry.setAttribute('normal', new BufferAttribute(P, 3));
+      geometry.setAttribute('aDepth', new BufferAttribute(depth, 1));
+      geometry.setAttribute('aGrad', new BufferAttribute(grad, 1));
+      geometry.setIndex(new BufferAttribute(ico.indices, 1));
+      geometry.computeBoundingSphere();
+
+      const mat = material ?? makeMaterial(ctx);
       chunks = chunkedMesh(ctx, geometry, mat, terrainChunkBounds(tdata), ico.triangleCount, { cast: false, receive: true, inflate: 2 });
       for (const m of chunks.meshes) ctx.scene.add(m);
     },
@@ -273,6 +284,7 @@ float lbVNoise(vec3 p) {
       chunks = null;
       geometry?.dispose();
       geometry = null;
+      material = null;
     },
   };
 }

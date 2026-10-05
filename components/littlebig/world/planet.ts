@@ -280,8 +280,10 @@ export function createPlanet(seed: number): Planet {
     // Beaches ring every shore (the city's bays too), wider in some coves than others.
     if (h < 1.25 + 0.4 * nDetail.simplex3(d.x * 6.5, d.y * 6.5, d.z * 6.5)) return Biome.Beach;
     const m = mountainAt(d);
-    const jitter = 1.6 * nDetail.simplex3(d.x * 23, d.y * 23, d.z * 23);
-    if (h + jitter > 18.5) return Biome.Snow;
+    // Snow: a cap on every peak (a line at 18.5 m left 2–3 stray white facets on a grey blob from
+    // above), lower in the heart of the range, with a ragged (not single-facet) edge.
+    const jitter = 1.3 * nDetail.simplex3(d.x * 17, d.y * 17, d.z * 17);
+    if (h + jitter > 16.2 - 1.6 * smooth(0.45, 0.9, m)) return Biome.Snow;
     if (m > 0.35 && h > 8) return Biome.Rock;
     const moist = moistureAt(d);
     if (moist > 0.58 && h > 2.2) return Biome.Forest;

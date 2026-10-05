@@ -25,7 +25,11 @@ export function qualitySettings(quality: Quality): QualitySettings {
   return quality === 'low' && coarse ? { ...q, maxDpr: Math.min(q.maxDpr, 1.25) } : q;
 }
 
+// high caps DPR at 1.5: the frame cost is mostly per pixel (the post chain runs at full resolution),
+// so DPR 2 on a retina laptop doubled it (1280×800: 15 → 33 ms over the city) for edges FXAA and the
+// ink line already keep clean. The engine also steps the ratio down (adaptive resolution) when
+// frames are missed (down to 0.85, core/engine.ts `adaptResolution`).
 export const QUALITY: Record<Quality, QualitySettings> = {
-  high: { maxDpr: 2, shadowMapSize: 2048, terrainDetail: 6, antialias: false, density: 1, post: true },
+  high: { maxDpr: 1.5, shadowMapSize: 2048, terrainDetail: 6, antialias: false, density: 1, post: true },
   low: { maxDpr: 1.5, shadowMapSize: 1024, terrainDetail: 5, antialias: false, density: 0.45, post: false },
 };

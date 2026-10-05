@@ -106,6 +106,25 @@ export function lensFov(vfov: number, aspect: number): number {
 }
 
 /**
+ * Portrait canvases from orbit: widen the vertical FOV until the whole planet fits 85 % of the
+ * frame's width. lensFov's portrait widening alone left a phone held upright (390×844: horizontal
+ * FOV ≈ 28°) cropping both limbs of a planet that subtends ≈ 34° at alt 380, so the toy planet was
+ * never whole. Blends in from 120 m (where the view is already straight down) to 260 m, capped at
+ * 80° (it fits from ~340 m up: the default orbit and the zoom-out ceiling); landscape canvases are
+ * untouched. `eyeDist` is the eye's distance from the planet centre.
+ */
+export function orbitFitFov(vfov: number, aspect: number, alt: number, eyeDist: number): number {
+  if (aspect >= 1 || eyeDist <= R) return vfov;
+  const w = smooth((alt - ALT_TOPDOWN) / (260 - ALT_TOPDOWN));
+  if (w <= 0) return vfov;
+  // The disc's silhouette on the image plane has radius tan(half its angle) (it is centred: the
+  // view looks straight down from here); 85 % of the frame's half-width.
+  const half = Math.asin(Math.min(1, R / eyeDist));
+  const needV = (2 * Math.atan(Math.tan(half) / 0.85 / Math.max(0.2, aspect))) / DEG;
+  return Math.max(vfov, Math.min(80, vfov + (needV - vfov) * w));
+}
+
+/**
  * Vertical lens shift (fraction of the frame height, ≥ 0) for an altitude and view pitch: the
  * architectural / tilt-shift trick. The camera's axis pitches up and the frustum shifts down by the
  * same angle at frame centre, so the centre ray stays at `pitch` while the image plane stands more

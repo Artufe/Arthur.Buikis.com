@@ -2,6 +2,7 @@
 // Builders allocate (boot time only); samplers are zero-alloc (per frame).
 
 import type { PathSample, Polyline } from './types';
+import { hyp } from '../hyp';
 
 /** Max distance between consecutive samples (m). BRIEF §5: ≤ 1 m. */
 export const MAX_STEP = 1.0;
@@ -21,7 +22,7 @@ export function polyline(raw: ArrayLike<number>, closed = false, step = MAX_STEP
     if (out.length) {
       const px = out[out.length - 2];
       const pz = out[out.length - 1];
-      const d = Math.hypot(x - px, z - pz);
+      const d = hyp(x - px, z - pz);
       if (d < 1e-6) continue;
       const parts = Math.ceil(d / step - 1e-9);
       for (let p = 1; p < parts; p++) out.push(px + ((x - px) * p) / parts, pz + ((z - pz) * p) / parts);
@@ -34,7 +35,7 @@ export function polyline(raw: ArrayLike<number>, closed = false, step = MAX_STEP
 function finish(pts: number[], closed: boolean): Polyline {
   const n = pts.length >> 1;
   const s = new Float64Array(n);
-  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+  for (let i = 1; i < n; i++) s[i] = s[i - 1] + hyp(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
   return { pts: Float64Array.from(pts), s, length: n ? s[n - 1] : 0, closed };
 }
 
@@ -60,7 +61,7 @@ export function catmullRom(ctrl: ArrayLike<number>, closed = false, step = MAX_S
   const out: number[] = [];
   const segs = closed ? n : n - 1;
   for (let i = 0; i < segs; i++) {
-    const len = Math.hypot(P(i + 1, 0) - P(i, 0), P(i + 1, 1) - P(i, 1));
+    const len = hyp(P(i + 1, 0) - P(i, 0), P(i + 1, 1) - P(i, 1));
     const k = Math.max(2, Math.ceil(len / step));
     for (let j = 0; j < k; j++) {
       const t = j / k;
@@ -88,7 +89,7 @@ export function hermitePoints(
   x1: number, z1: number, tx1: number, tz1: number,
   step = MAX_STEP * 0.5, tangentScale = 0.55,
 ): number[] {
-  const chord = Math.hypot(x1 - x0, z1 - z0);
+  const chord = hyp(x1 - x0, z1 - z0);
   const m = chord * tangentScale * 2;
   const n = Math.max(2, Math.ceil((chord * 1.3) / step) + 1);
   const out: number[] = [];
@@ -139,8 +140,8 @@ export function offset(pl: Polyline, d: number): Polyline {
       bx = ax;
       bz = az;
     }
-    const la = Math.hypot(ax, az) || 1;
-    const lb = Math.hypot(bx, bz) || 1;
+    const la = hyp(ax, az) || 1;
+    const lb = hyp(bx, bz) || 1;
     // right normals of each segment: (−tz, tx)
     const n1x = -az / la;
     const n1z = ax / la;
@@ -148,7 +149,7 @@ export function offset(pl: Polyline, d: number): Polyline {
     const n2z = bx / lb;
     let mx = n1x + n2x;
     let mz = n1z + n2z;
-    const ml = Math.hypot(mx, mz) || 1;
+    const ml = hyp(mx, mz) || 1;
     mx /= ml;
     mz /= ml;
     const cos = Math.max(0.5, mx * n1x + mz * n1z); // mitre limit 2×
@@ -201,7 +202,7 @@ export function sampleAt(pl: Polyline, s: number, out: PathSample): PathSample {
   const z0 = pl.pts[i * 2 + 1];
   const dx = pl.pts[i * 2 + 2] - x0;
   const dz = pl.pts[i * 2 + 3] - z0;
-  const l = Math.hypot(dx, dz) || 1;
+  const l = hyp(dx, dz) || 1;
   out.x = x0 + dx * t;
   out.z = z0 + dz * t;
   out.tx = dx / l;
@@ -243,14 +244,14 @@ export const last = (pl: Polyline) => ({ x: pl.pts[pl.pts.length - 2], z: pl.pts
 export function startTangent(pl: Polyline): { x: number; z: number } {
   const dx = pl.pts[2] - pl.pts[0];
   const dz = pl.pts[3] - pl.pts[1];
-  const l = Math.hypot(dx, dz) || 1;
+  const l = hyp(dx, dz) || 1;
   return { x: dx / l, z: dz / l };
 }
 export function endTangent(pl: Polyline): { x: number; z: number } {
   const n = pl.pts.length;
   const dx = pl.pts[n - 2] - pl.pts[n - 4];
   const dz = pl.pts[n - 1] - pl.pts[n - 3];
-  const l = Math.hypot(dx, dz) || 1;
+  const l = hyp(dx, dz) || 1;
   return { x: dx / l, z: dz / l };
 }
 

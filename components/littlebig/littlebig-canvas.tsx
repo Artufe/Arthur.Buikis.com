@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Engine } from './core/engine';
+import { provideHandoff, takeHandoff } from './handoff';
 
 type Phase = 'loading' | 'running' | 'nogl' | 'error';
 
@@ -15,6 +16,9 @@ const HINT_STREET = 'wasd walk · drag to look · space jump · scroll out to fl
 const HINT_STREET_PAGE = 'wasd walk · click to look · space jump · scroll out to fly';
 const HINT_ORBIT_TOUCH = 'drag to spin · pinch to dive · double-tap to fly';
 const HINT_STREET_TOUCH = 'left thumb walks · drag to look · pinch out to fly';
+// Hovering low over open water (the zoom's floor there): how to get back to land.
+const HINT_SEA = 'scroll out to fly · double-click land to fly there';
+const HINT_SEA_TOUCH = 'pinch out to fly · double-tap land to fly there';
 /** Idle before the hint first shows, or shows a new line (ms); idle before it repeats one already seen. */
 const HINT_IDLE = 2000;
 const HINT_REPEAT_IDLE = 9000;
@@ -46,6 +50,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
     if (!canvas || !wrap) return;
     let cancelled = false;
     let ro: ResizeObserver | null = null;
+    let offHandoff = () => {};
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const onRestored = () => !cancelled && setGeneration((g) => g + 1);
     // (Registered before the engine's own listener, which releases the engine on loss.)
@@ -71,7 +76,9 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
         if (cancelled) return;
         let engine: Engine;
         try {
-          const resume = resumeRef.current ?? undefined;
+          // After a context loss: where the player was. On /planet: where the window's player was
+          // when they pressed ↗ (handoff.ts).
+          const resume = resumeRef.current ?? (variant === 'page' ? takeHandoff() : null) ?? undefined;
           resumeRef.current = null;
           engine = await createEngine({ canvas, variant, reducedMotion, search: window.location.search, resume });
         } catch (e) {
@@ -93,6 +100,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
         });
         ro.observe(wrap);
         engine.start();
+        if (variant === 'window') offHandoff = provideHandoff(() => ({ view: engine.ctx.services.camera.getView(), t: engine.ctx.time.t }));
         setPhase('running');
       } catch (e) {
         console.error('[littlebig]', e);
@@ -108,6 +116,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       canvas.removeEventListener('webglcontextrestored', onRestored);
       window.clearTimeout(slowTimer);
       ro?.disconnect();
+      offHandoff();
       engineRef.current?.dispose();
       engineRef.current = null;
     };
@@ -126,8 +135,22 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       const cam = e.ctx.services.camera;
       const touch = cam.stick?.().touch ?? false;
       if (touch) setTouchUi(true);
-      const street = e.ctx.view.street;
-      const text = street ? (touch ? HINT_STREET_TOUCH : variant === 'page' ? HINT_STREET_PAGE : HINT_STREET) : touch ? HINT_ORBIT_TOUCH : HINT_ORBIT;
+      const v = e.ctx.view;
+      const street = v.street;
+      const sea = !street && v.alt < 14 && e.ctx.world.planet.heightAt(v.focus) < -0.3;
+      const text = street
+        ? touch
+          ? HINT_STREET_TOUCH
+          : variant === 'page'
+            ? HINT_STREET_PAGE
+            : HINT_STREET
+        : sea
+          ? touch
+            ? HINT_SEA_TOUCH
+            : HINT_SEA
+          : touch
+            ? HINT_ORBIT_TOUCH
+            : HINT_ORBIT;
       const idle = performance.now() - Math.max(since, cam.lastInputAt());
       const on = idle > (text === lastShown && !showing ? HINT_REPEAT_IDLE : HINT_IDLE);
       if (on) lastShown = text;

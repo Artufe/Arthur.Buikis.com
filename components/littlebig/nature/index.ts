@@ -30,6 +30,7 @@ import { createGroundCover, type GroundCover } from './ground-cover';
 import { createNatureCollider } from './collide';
 import { chunkAboveHorizon, chunkBounds, ChunkedKind, chunkOfFace, CHUNKS, type ChunkBounds } from './chunks';
 import { NATURE_KINDS, NatureFlag, NatureKind, scatterNatureSteps, type NatureScatter } from './scatter';
+import { hyp3 } from '../world/hyp';
 
 /** Round trees: near mesh fully visible below LOD_FROM, far mesh fully visible above LOD_TO (altTerrain, m). */
 const LOD_FROM = 110;
@@ -323,7 +324,7 @@ export function createNatureSystem(): System {
         const set = byKind[k]!;
         const j = slot[i];
         const x = s.pos[i * 3], y = s.pos[i * 3 + 1], z = s.pos[i * 3 + 2];
-        const len = Math.hypot(x, y, z);
+        const len = hyp3(x, y, z);
         let ux = x / len, uy = y / len, uz = z / len;
         // Sunk into the facet so nothing hovers over a slope (bushes: their lowest lumps' rims).
         let sink = k === NatureKind.Bush ? 0.08 + 0.1 * s.h[i] : 0.06;
@@ -337,11 +338,11 @@ export function createNatureSystem(): System {
             ny += N[vi * 3 + 1];
             nz += N[vi * 3 + 2];
           }
-          const nl = Math.hypot(nx, ny, nz) || 1;
+          const nl = hyp3(nx, ny, nz) || 1;
           ux = ux * 0.35 + (nx / nl) * 0.65;
           uy = uy * 0.35 + (ny / nl) * 0.65;
           uz = uz * 0.35 + (nz / nl) * 0.65;
-          const ul = Math.hypot(ux, uy, uz);
+          const ul = hyp3(ux, uy, uz);
           ux /= ul;
           uy /= ul;
           uz /= ul;
@@ -412,7 +413,7 @@ export function createNatureSystem(): System {
         else if (k === NatureKind.Rock && s.h[i] > 1.1) r = 0.4 * s.w[i];
         if (!r) continue;
         const x = s.pos[i * 3], y = s.pos[i * 3 + 1], z = s.pos[i * 3 + 2];
-        const l = Math.hypot(x, y, z);
+        const l = hyp3(x, y, z);
         cdirs[nc * 3] = x / l;
         cdirs[nc * 3 + 1] = y / l;
         cdirs[nc * 3 + 2] = z / l;

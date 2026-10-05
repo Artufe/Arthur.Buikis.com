@@ -189,7 +189,10 @@ void main() {
   float sunAt = airSun(v);
   // From orbit the night limb turns indigo sooner (only the band near the terminator stays lit /
   // rose), so the night disc is not ringed in daylight blue.
-  float night = 1.0 - smoothstep(mix(-0.26, -0.15, uSpace), 0.05, sunAt);
+  // (From orbit the band is still wide enough that the glow beyond the limb fades round the
+  // terminator: a narrow one ended the day-side halo in a straight vertical edge above and below
+  // the disc, where the terminator plane cuts the rim.)
+  float night = 1.0 - smoothstep(mix(-0.26, -0.3, uSpace), mix(0.05, 0.16, uSpace), sunAt);
   float dusk = smoothstep(-0.3, -0.02, sunAt) * (1.0 - smoothstep(0.02, 0.3, sunAt));
   float sd = dot(v, uSunDir);
   float sdn = sd * 0.5 + 0.5;

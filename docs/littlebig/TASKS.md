@@ -283,7 +283,7 @@ strip, tests for these, the llms routes, the sitemap, `docs/play-media.md`, and
 
 **Owns:** cross-cutting perf fixes. Coordinate edits through the orchestrator.
 
-- **Bundle:** measure the LITTLEBIG chunk (≤ 80 KB gz excluding three).
+- **Bundle:** measure the LITTLEBIG chunk (≤ 150 KB gz excluding three; re-baselined from 80 KB in phase 4, see `DECISIONS.md` [C2] and `PERF.md`).
 - **Boot:** the timeline against the BRIEF §1 budgets, shader warm-up, time-slicing, and a worker
   if it pays.
 - **Frame time:** draw calls and frame time on the scripted dive.

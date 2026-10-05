@@ -2,11 +2,20 @@
 // Used by A1 (where trees may go), A4 (camera / FPV collision), B2 (people avoid buildings) and
 // validate.ts (the plan invariants).
 
-import { AREA_H, CURB_H, ROAD_H } from '../config';
-import { pointInPolygon } from './graph';
+import { AREA_H, CURB_H, PLATEAU_HEIGHT, ROAD_H } from '../config';
+import type { Vec3 } from '../sphere';
+import { planToDir } from './frame';
+import { hyp } from '../hyp';
 import type { Building, CityIndex, CityPlan, Feature, GroundClass } from './types';
 
 const CELL = 8;
+
+// Zero allocation (BRIEF §1): no Math.hypot here (V8's builtin allocates an array of its arguments
+// on every call); world/hyp.ts is V8's own algorithm, bit for bit, so every result is unchanged
+// (the inlined copies below, marked hyp(…), are the same expression). The hot queries (classifyQ / collideQ) also keep
+// doubles off non-inlined call boundaries (V8 boxes such arguments and return values): inputs come
+// in through the index's Float64Array `q`, the helpers they call take objects or integers.
+
 
 /** Default collision radius of a point feature (Feature.r overrides). */
 const FEATURE_R: Record<string, number> = { streetlight: 0.2, lamp: 0.2, hydrant: 0.18, tree: 0.4, flag: 0.15, bench: 0.5, 'bus-stop': 0.6, fountain: 1.6, planter: 0.5, 'cafe-table': 0.45, statue: 0.8 };
@@ -15,8 +24,13 @@ export function featureRadius(f: Feature): number {
 }
 
 export interface CityIndexOptions {
-  /** Terrain height relative to the plateau (m) at a plan point outside the plan (groundH there). */
-  terrainH?(x: number, z: number): number;
+  /**
+   * The planet's surface, for groundH outside the plan (terrain height relative to the plateau).
+   * An object, not a closure: the index is cached for the page's lifetime, and a closure created
+   * where the minifier inlines the caller (the engine's `world` getter) captured the engine's whole
+   * scope, so production kept the first engine alive after its window closed.
+   */
+  terrain?: { surfaceAt(dir: Vec3): number };
 }
 
 /** Signed distance from (x, z) to building b's footprint (negative inside). */
@@ -32,7 +46,7 @@ export function obbDistance(b: Building, x: number, z: number): number {
   const qz = Math.abs(lz) - b.d / 2;
   const ox = Math.max(qx, 0);
   const oz = Math.max(qz, 0);
-  return Math.hypot(ox, oz) + Math.min(Math.max(qx, qz), 0);
+  return hyp(ox, oz) + Math.min(Math.max(qx, qz), 0);
 }
 
 /**
@@ -62,6 +76,7 @@ export function stadiumMasts(b: Building): number[] {
 }
 
 const rings = new WeakMap<Building, number[]>();
+const _dir: Vec3 = { x: 0, y: 0, z: 0 };
 const _cp = { x: 0, z: 0, d: 0 };
 /**
  * Closest point (local frame) on a closed local ring to local (lx, lz), and the signed distance
@@ -121,7 +136,7 @@ function segDist(px: number, pz: number, x0: number, z0: number, x1: number, z1:
   const dz = z1 - z0;
   const l2 = dx * dx + dz * dz || 1;
   const t = Math.max(0, Math.min(1, ((px - x0) * dx + (pz - z0) * dz) / l2));
-  return Math.hypot(x0 + dx * t - px, z0 + dz * t - pz);
+  return hyp(x0 + dx * t - px, z0 + dz * t - pz);
 }
 
 export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): CityIndex {
@@ -218,53 +233,73 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
   // Dedup stamps for multi-cell queries.
   const bStamp = new Uint32Array(plan.buildings.length);
   let stamp = 0;
-
-  const cellAt = (x: number, z: number) => cells[cellOf(z) * dim + cellOf(x)];
-
-  const inIntersection = (x: number, z: number, c: Cell, pad: number) => {
-    for (const id of c.node) {
-      const n = plan.nodes[id];
-      const d = Math.hypot(x - n.x, z - n.z);
-      if (d > n.radius + 3 + pad) continue;
-      if (pad > 0 ? d < n.radius + pad : pointInPolygon(plan.intersections[id].outline, x, z)) return true;
+  const nextStamp = () => {
+    stamp = (stamp + 1) >>> 0;
+    if (stamp === 0) {
+      bStamp.fill(0);
+      stamp = 1;
     }
-    return false;
+    return stamp;
   };
 
-  const classify = (x: number, z: number): GroundClass => {
-    if (Math.hypot(x, z) > plan.radius) return 'outside';
-    const c = cellAt(x, z);
-    for (const id of c.b) if (obbDistance(plan.buildings[id], x, z) <= 0) return 'building';
-    if (inIntersection(x, z, c, 0)) return 'intersection';
-    let side = false;
-    for (const sid of c.seg) {
-      const e = plan.edges[segEdge[sid]];
-      const d = segDist(x, z, segPts[sid * 4], segPts[sid * 4 + 1], segPts[sid * 4 + 2], segPts[sid * 4 + 3]);
-      if (d <= e.width / 2) return 'road';
-      if (d <= e.width / 2 + e.sidewalk) side = true;
+  // Flat per-building and per-segment data for the hot loops (same values the plan objects give).
+  const nB = plan.buildings.length;
+  const bX = new Float64Array(nB);
+  const bZ = new Float64Array(nB);
+  const bC = new Float64Array(nB);
+  const bS = new Float64Array(nB);
+  const bHW = new Float64Array(nB);
+  const bHD = new Float64Array(nB);
+  const bRound = new Uint8Array(nB); // the stadium: its wall is the superellipse ring
+  plan.buildings.forEach((b, id) => {
+    bX[id] = b.x;
+    bZ[id] = b.z;
+    bC[id] = Math.cos(b.angle);
+    bS[id] = Math.sin(b.angle);
+    bHW[id] = b.w / 2;
+    bHD[id] = b.d / 2;
+    bRound[id] = b.landmark === 'stadium' ? 1 : 0;
+  });
+  const segHW = Float64Array.from(segEdge, (e) => plan.edges[e].width / 2);
+  const segHS = Float64Array.from(segEdge, (e) => plan.edges[e].width / 2 + plan.edges[e].sidewalk);
+  const cellIx = (v: number) => {
+    const i = Math.floor((v + R) / CELL);
+    return i < 0 ? 0 : i > dim - 1 ? dim - 1 : i;
+  };
+  const cellAt = (x: number, z: number) => cells[cellOf(z) * dim + cellOf(x)];
+
+  /** Query inputs (x, z, r) for classifyQ / collideQ: see the note at the top of the file. */
+  const q = new Float64Array(4);
+
+  /** Point (q[0], q[1]) in polygon (graph.ts pointInPolygon, reading q). */
+  const pip = (poly: ArrayLike<number>): boolean => {
+    const x = q[0];
+    const z = q[1];
+    let inside = false;
+    const n = poly.length >> 1;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = poly[i * 2];
+      const zi = poly[i * 2 + 1];
+      const xj = poly[j * 2];
+      const zj = poly[j * 2 + 1];
+      if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
     }
-    if (side) return 'sidewalk';
-    for (const wid of c.walk) {
-      const o = wid * 5;
-      if (segDist(x, z, walkSeg[o], walkSeg[o + 1], walkSeg[o + 2], walkSeg[o + 3]) <= walkSeg[o + 4]) return 'sidewalk';
-    }
-    const a = areaAt(x, z, c);
-    if (a < 0) return 'free';
-    const k = plan.areas[a].kind;
-    return k === 'plaza' ? 'plaza' : k === 'park' ? 'park' : k === 'garden' ? 'garden' : k === 'lot' ? 'lot' : k === 'water' ? 'water' : 'free';
+    return inside;
   };
 
   /**
-   * The area under (x, z), or -1. Water first (a pond lies inside the park polygon it is cut into),
-   * lots last (courtyard beds, lanes and squares sit inside the block's lot).
+   * The area under (q[0], q[1]) in cell c, or -1. Water first (a pond lies inside the park polygon
+   * it is cut into), lots last (courtyard beds, lanes and squares sit inside the block's lot).
    */
-  const areaAt = (x: number, z: number, c: Cell): number => {
+  const areaAtQ = (c: Cell): number => {
     let lot = -1;
     let other = -1;
-    for (const id of c.area) {
+    const ids = c.area;
+    for (let k = 0; k < ids.length; k++) {
+      const id = ids[k];
       const a = plan.areas[id];
       if (a.kind === 'lot' ? lot >= 0 : other >= 0 && a.kind !== 'water') continue;
-      if (!pointInPolygon(a.outline, x, z)) continue;
+      if (!pip(a.outline)) continue;
       if (a.kind === 'water') return id;
       if (a.kind === 'lot') lot = id;
       else other = id;
@@ -272,8 +307,81 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     return other >= 0 ? other : lot;
   };
 
+  const classifyQ = (): GroundClass => {
+    const x = q[0];
+    const z = q[1];
+    const mo = Math.max(Math.abs(x), Math.abs(z));
+    if ((mo === 0 ? 0 : Math.sqrt((x / mo) * (x / mo) + (z / mo) * (z / mo)) * mo) > plan.radius) return 'outside'; // hyp(x, z)
+    const c = cells[cellIx(z) * dim + cellIx(x)];
+    // buildings (obbDistance ≤ 0: inside the box on both axes)
+    const cb = c.b;
+    for (let k = 0; k < cb.length; k++) {
+      const id = cb[k];
+      const dx = x - bX[id];
+      const dz = z - bZ[id];
+      const co = bC[id];
+      const si = bS[id];
+      if (Math.abs(dx * co + dz * si) - bHW[id] <= 0 && Math.abs(-dx * si + dz * co) - bHD[id] <= 0) return 'building';
+    }
+    // intersections
+    const cn = c.node;
+    for (let k = 0; k < cn.length; k++) {
+      const n = plan.nodes[cn[k]];
+      const dx = x - n.x;
+      const dz = z - n.z;
+      const m = Math.max(Math.abs(dx), Math.abs(dz));
+      if ((m === 0 ? 0 : Math.sqrt((dx / m) * (dx / m) + (dz / m) * (dz / m)) * m) > n.radius + 3) continue; // hyp(dx, dz)
+      if (pip(plan.intersections[cn[k]].outline)) return 'intersection';
+    }
+    // roads and their sidewalks
+    let side = false;
+    const cs = c.seg;
+    for (let k = 0; k < cs.length; k++) {
+      const sid = cs[k];
+      const x0 = segPts[sid * 4];
+      const z0 = segPts[sid * 4 + 1];
+      const sx = segPts[sid * 4 + 2] - x0;
+      const sz = segPts[sid * 4 + 3] - z0;
+      const l2 = sx * sx + sz * sz || 1;
+      const t = Math.max(0, Math.min(1, ((x - x0) * sx + (z - z0) * sz) / l2));
+      const ex = x0 + sx * t - x;
+      const ez = z0 + sz * t - z;
+      const m = Math.max(Math.abs(ex), Math.abs(ez));
+      const d = m === 0 ? 0 : Math.sqrt((ex / m) * (ex / m) + (ez / m) * (ez / m)) * m; // hyp(ex, ez)
+      if (d <= segHW[sid]) return 'road';
+      if (d <= segHS[sid]) side = true;
+    }
+    if (side) return 'sidewalk';
+    // corner sidewalks
+    const cw = c.walk;
+    for (let k = 0; k < cw.length; k++) {
+      const o = cw[k] * 5;
+      const x0 = walkSeg[o];
+      const z0 = walkSeg[o + 1];
+      const sx = walkSeg[o + 2] - x0;
+      const sz = walkSeg[o + 3] - z0;
+      const l2 = sx * sx + sz * sz || 1;
+      const t = Math.max(0, Math.min(1, ((x - x0) * sx + (z - z0) * sz) / l2));
+      const ex = x0 + sx * t - x;
+      const ez = z0 + sz * t - z;
+      const m = Math.max(Math.abs(ex), Math.abs(ez));
+      const d = m === 0 ? 0 : Math.sqrt((ex / m) * (ex / m) + (ez / m) * (ez / m)) * m;
+      if (d <= walkSeg[o + 4]) return 'sidewalk';
+    }
+    const a = areaAtQ(c);
+    if (a < 0) return 'free';
+    const kd = plan.areas[a].kind;
+    return kd === 'plaza' ? 'plaza' : kd === 'park' ? 'park' : kd === 'garden' ? 'garden' : kd === 'lot' ? 'lot' : kd === 'water' ? 'water' : 'free';
+  };
+
+  const classify = (x: number, z: number): GroundClass => {
+    q[0] = x;
+    q[1] = z;
+    return classifyQ();
+  };
+
   const isClear = (x: number, z: number, r: number): boolean => {
-    if (Math.hypot(x, z) + r > plan.radius) return false;
+    if (hyp(x, z) + r > plan.radius) return false;
     const i0 = cellOf(x - r), i1 = cellOf(x + r), j0 = cellOf(z - r), j1 = cellOf(z + r);
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
@@ -285,7 +393,7 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
         }
         for (const id of c.node) {
           const n = plan.nodes[id];
-          if (Math.hypot(x - n.x, z - n.z) < n.radius + r) return false;
+          if (hyp(x - n.x, z - n.z) < n.radius + r) return false;
         }
         for (const wid of c.walk) {
           const o = wid * 5;
@@ -306,106 +414,148 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     return h;
   };
 
-  const buildingsNear = (x: number, z: number, r: number, out: number[]): number => {
-    stamp = (stamp + 1) >>> 0;
-    if (stamp === 0) {
-      bStamp.fill(0);
-      stamp = 1;
-    }
+  /**
+   * Buildings whose footprint (footprintDistance) comes within q[2] of (q[0], q[1]), into nearIds;
+   * returns the count. Boxes inline (obbDistance with hyp); the stadium through footprintDistance.
+   */
+  const nearIds = new Int32Array(Math.max(1, nB));
+  const nearQ = (): number => {
+    const x = q[0];
+    const z = q[1];
+    const r = q[2];
+    const st = nextStamp();
     let n = 0;
-    out.length = 0;
-    const i0 = cellOf(x - r), i1 = cellOf(x + r), j0 = cellOf(z - r), j1 = cellOf(z + r);
+    const i0 = cellIx(x - r), i1 = cellIx(x + r), j0 = cellIx(z - r), j1 = cellIx(z + r);
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
-        const c = cells[j * dim + i];
-        for (const id of c.b) {
-          if (bStamp[id] === stamp) continue;
-          bStamp[id] = stamp;
-          if (footprintDistance(plan.buildings[id], x, z) <= r) out[n++] = id;
+        const cb = cells[j * dim + i].b;
+        for (let k = 0; k < cb.length; k++) {
+          const id = cb[k];
+          if (bStamp[id] === st) continue;
+          bStamp[id] = st;
+          let d: number;
+          if (bRound[id]) d = footprintDistance(plan.buildings[id], x, z);
+          else {
+            const dx = x - bX[id];
+            const dz = z - bZ[id];
+            const co = bC[id];
+            const si = bS[id];
+            const qx = Math.abs(dx * co + dz * si) - bHW[id];
+            const qz = Math.abs(-dx * si + dz * co) - bHD[id];
+            const ox = Math.max(qx, 0);
+            const oz = Math.max(qz, 0);
+            const m = Math.max(ox, oz);
+            d = (m === 0 ? 0 : Math.sqrt((ox / m) * (ox / m) + (oz / m) * (oz / m)) * m) + Math.min(Math.max(qx, qz), 0);
+          }
+          if (d <= r) nearIds[n++] = id;
         }
       }
     }
     return n;
   };
 
-  const near: number[] = [];
+  const buildingsNear = (x: number, z: number, r: number, out: number[]): number => {
+    q[0] = x;
+    q[1] = z;
+    q[2] = r;
+    const n = nearQ();
+    out.length = n;
+    for (let i = 0; i < n; i++) out[i] = nearIds[i];
+    return n;
+  };
+
   const maxRoofNear = (x: number, z: number, r: number): number => {
-    const n = buildingsNear(x, z, r, near);
+    q[0] = x;
+    q[1] = z;
+    q[2] = r;
+    const n = nearQ();
     let h = 0;
-    for (let i = 0; i < n; i++) h = Math.max(h, plan.buildings[near[i]].h);
+    for (let i = 0; i < n; i++) h = Math.max(h, plan.buildings[nearIds[i]].h);
     return h;
   };
 
-  const collide = (x: number, z: number, r: number, out: { x: number; z: number }): boolean => {
+  /** collide() with its inputs in q (x, z, r): see the note at the top of the file. */
+  const collideQ = (out: { x: number; z: number }): boolean => {
+    let x = q[0];
+    let z = q[1];
+    const r = q[2];
     let moved = false;
     // A few relaxation passes handle corners between two buildings.
     for (let pass = 0; pass < 3; pass++) {
-      const n = buildingsNear(x, z, r, near);
+      q[0] = x;
+      q[1] = z;
+      q[2] = r;
+      const n = nearQ();
       let any = false;
       // Point obstacles (discs): push out radially.
-      const i0 = cellOf(x - r - 2), i1 = cellOf(x + r + 2), j0 = cellOf(z - r - 2), j1 = cellOf(z + r + 2);
+      const i0 = cellIx(x - r - 2), i1 = cellIx(x + r + 2), j0 = cellIx(z - r - 2), j1 = cellIx(z + r + 2);
       for (let j = j0; j <= j1; j++) {
         for (let i = i0; i <= i1; i++) {
-          for (const oid of cells[j * dim + i].obs) {
+          const co = cells[j * dim + i].obs;
+          for (let k = 0; k < co.length; k++) {
+            const oid = co[k];
             const ox = obstacles[oid * 3];
             const oz = obstacles[oid * 3 + 1];
             const rr = obstacles[oid * 3 + 2] + r;
             const dx = x - ox;
             const dz = z - oz;
-            const d = Math.hypot(dx, dz);
+            const m = Math.max(Math.abs(dx), Math.abs(dz));
+            const d = m === 0 ? 0 : Math.sqrt((dx / m) * (dx / m) + (dz / m) * (dz / m)) * m; // hyp(dx, dz)
             if (d >= rr) continue;
-            const k = d > 1e-9 ? (rr - d) / d : 0;
-            x += d > 1e-9 ? dx * k : rr;
-            z += d > 1e-9 ? dz * k : 0;
+            const kk = d > 1e-9 ? (rr - d) / d : 0;
+            x += d > 1e-9 ? dx * kk : rr;
+            z += d > 1e-9 ? dz * kk : 0;
             any = true;
             moved = true;
           }
         }
       }
       for (let k = 0; k < n; k++) {
-        const b = plan.buildings[near[k]];
-        const c = Math.cos(b.angle);
-        const s = Math.sin(b.angle);
-        const dx = x - b.x;
-        const dz = z - b.z;
+        const id = nearIds[k];
+        const c = bC[id];
+        const s = bS[id];
+        const dx = x - bX[id];
+        const dz = z - bZ[id];
         const lx = dx * c + dz * s;
         const lz = -dx * s + dz * c;
-        if (b.landmark === 'stadium') {
+        if (bRound[id]) {
           // the rounded wall: push out along the closest point's outward direction
+          const b = plan.buildings[id];
           let ring = rings.get(b);
           if (!ring) rings.set(b, (ring = stadiumRing(b)));
-          const q = ringClosest(ring, lx, lz);
-          if (q.d >= r) continue;
-          let nx = lx - q.x;
-          let nz = lz - q.z;
-          const l = Math.hypot(nx, nz);
+          const cp = ringClosest(ring, lx, lz);
+          if (cp.d >= r) continue;
+          let nx = lx - cp.x;
+          let nz = lz - cp.z;
+          const l = hyp(nx, nz);
           if (l > 1e-9) {
             nx /= l;
             nz /= l;
-            if (q.d < 0) {
+            if (cp.d < 0) {
               nx = -nx;
               nz = -nz;
             }
           } else {
-            const lc = Math.hypot(lx, lz) || 1;
+            const lc = hyp(lx, lz) || 1;
             nx = lx / lc;
             nz = lz / lc;
           }
-          const push = r - q.d;
+          const push = r - cp.d;
           x += (nx * c - nz * s) * push;
           z += (nx * s + nz * c) * push;
           any = true;
           moved = true;
           continue;
         }
-        const hw = b.w / 2;
-        const hd = b.d / 2;
+        const hw = bHW[id];
+        const hd = bHD[id];
         // closest point on the box (local)
         const cx = Math.max(-hw, Math.min(hw, lx));
         const cz = Math.max(-hd, Math.min(hd, lz));
         let nx = lx - cx;
         let nz = lz - cz;
-        let d = Math.hypot(nx, nz);
+        const m = Math.max(Math.abs(nx), Math.abs(nz));
+        const d = m === 0 ? 0 : Math.sqrt((nx / m) * (nx / m) + (nz / m) * (nz / m)) * m; // hyp(nx, nz)
         let push = 0;
         if (d > 1e-9) {
           if (d >= r) continue;
@@ -425,7 +575,6 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
             nz = Math.sign(lz) || 1;
             push = pz + r;
           }
-          d = 0;
         }
         // back to plan space
         x += (nx * c - nz * s) * push;
@@ -438,6 +587,13 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
     out.x = x;
     out.z = z;
     return moved;
+  };
+
+  const collide = (x: number, z: number, r: number, out: { x: number; z: number }): boolean => {
+    q[0] = x;
+    q[1] = z;
+    q[2] = r;
+    return collideQ(out);
   };
 
   const nearestRoad = (x: number, z: number, maxDist: number, out: { edge: number; dist: number; s: number }): number => {
@@ -453,7 +609,7 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
           const dz = z1 - z0;
           const l2 = dx * dx + dz * dz || 1;
           const t = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
-          const d = Math.hypot(x0 + dx * t - x, z0 + dz * t - z);
+          const d = hyp(x0 + dx * t - x, z0 + dz * t - z);
           if (d < out.dist && d <= maxDist) {
             out.dist = d;
             out.edge = segEdge[sid];
@@ -475,13 +631,15 @@ export function createCityIndex(plan: CityPlan, opts: CityIndexOptions = {}): Ci
       case 'building':
         return ROAD_H + CURB_H;
       case 'outside':
-        return opts.terrainH ? opts.terrainH(x, z) : 0;
+        return opts.terrain ? opts.terrain.surfaceAt(planToDir(x, z, _dir)) - PLATEAU_HEIGHT : 0;
       default: {
-        const a = areaAt(x, z, cellAt(x, z));
+        q[0] = x;
+        q[1] = z;
+        const a = areaAtQ(cellAt(x, z));
         return a >= 0 ? areaH[a] : 0;
       }
     }
   };
 
-  return { plan, classify, isClear, roofAt, maxRoofNear, buildingsNear, collide, nearestRoad, groundH, obstacles };
+  return { plan, classify, isClear, roofAt, maxRoofNear, buildingsNear, collide, nearestRoad, groundH, obstacles, q, classifyQ, collideQ };
 }

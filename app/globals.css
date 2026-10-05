@@ -1175,14 +1175,55 @@ html:not(.dark) .only-dark,
 .play-receipt dd { margin: 0; }
 .play-receipt a { color: var(--accent); text-underline-offset: 4px; }
 
+/* An odd last card (LITTLEBIG, the third) spans the two-column grid as a landscape card: the clip
+   at the same size as the cards above, its copy and receipt beside it. The side copy is hidden
+   everywhere else, and the hover overlay drops the title and description it repeats. */
+.play-game-side { display: none; }
+@media (min-width: 1024px) {
+  .play-grid > .play-game:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto 1fr auto;
+    column-gap: 2.5rem; /* the grid's gap-10 */
+  }
+  .play-grid > .play-game:last-child:nth-child(odd) > .play-card { grid-column: 1; grid-row: 1 / -1; }
+  .play-grid > .play-game:last-child:nth-child(odd) > .play-game-idx { grid-column: 2; grid-row: 1; }
+  .play-grid > .play-game:last-child:nth-child(odd) > .play-game-side {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 18px 0;
+    border-top: 2px solid var(--border);
+  }
+  .play-grid > .play-game:last-child:nth-child(odd) > .play-receipt { grid-column: 2; grid-row: 3; }
+  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-title,
+  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-desc { display: none; }
+  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-cmd { margin-bottom: 12px; }
+}
+.play-game-side-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(44px, 4.4vw, 72px);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--fg);
+}
+.play-game-side-desc { max-width: 46ch; margin: 16px 0 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+
 /* Touch screens have no hover: a compact caption band is always on, and one tap opens the game. */
 @media (hover: none) {
   .play-ov {
     padding: 16px;
-    background: linear-gradient(to top, rgb(8 8 6 / 0.92) 0%, rgb(8 8 6 / 0.6) 38%, transparent 62%);
+    /* Reaches high enough for LITTLEBIG's bright sky and white clouds, not just the darker clips. */
+    background: linear-gradient(to top, rgb(8 8 6 / 0.92) 0%, rgb(8 8 6 / 0.7) 45%, rgb(8 8 6 / 0.35) 80%, transparent);
     opacity: 1;
   }
   .play-ov > * { transform: none; }
+  .play-ov-title,
+  .play-ov-desc { text-shadow: 0 1px 10px rgb(0 0 0 / 0.55); }
   .play-ov-cmd,
   .play-ov-path,
   .play-ov-btn-desk { display: none; }
@@ -1234,6 +1275,10 @@ html:not(.dark) .only-dark,
 .play-tile:hover .play-tile-badge,
 .play-tile-link:focus-visible .play-tile-badge { opacity: 1; transform: none; }
 .play-tile-cap { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; font-size: 11px; }
+/* Three tiles to a row: every caption takes two lines (name · engine, then time · mode). */
+@media (min-width: 640px) {
+  .play-tile-cap > :last-child { flex-basis: 100%; }
+}
 
 @media (hover: none) {
   .play-tile-badge { opacity: 1; transform: none; }

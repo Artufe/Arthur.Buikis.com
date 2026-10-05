@@ -3,12 +3,16 @@
 // Add your own shots here (additive): name → { view, t }.
 
 import { buildDivePath, DIVE_SECONDS, divePoseAt, type DivePath, type DivePose } from '../camera/dive';
-import { CITY_LAT, CITY_LON, CITY_SURFACE_R, CURB_H, EYE_HEIGHT, ROAD_H } from '../world/config';
-import { planHeadingToWorld, planToDir } from '../world/city/frame';
 import type { Viewpoint } from '../world/city/types';
-import { latLonFromDir } from '../world/sphere';
-import { eveningTimeAt, timeAtHourAngle } from '../world/sun';
+import { registerShotViews } from '../world/city/views';
 import type { LBContext, ViewSpec } from './contracts';
+import { K } from './debug-kit';
+
+// Review tooling (the debug chunk): engine modules come through the kit, not imports (core/kit.ts).
+const { CITY_LAT, CITY_LON, CITY_SURFACE_R, CURB_H, EYE_HEIGHT, ROAD_H, planHeadingToWorld, planToDir, latLonFromDir, eveningTimeAt, timeAtHourAngle, cloudsShotView } = K;
+
+// The plan's rooftops / horizon / dusk viewpoints are solved by views.ts, loaded only with the shots.
+registerShotViews();
 
 export interface ShotDef {
   /** What the shot is for (printed by --list). */
@@ -31,13 +35,14 @@ export function viewAt(vp: Viewpoint, alt: number, pitch?: number): ViewSpec {
 }
 
 /**
- * Sim time (s) the /play clip starts at: render it with `--dive 301 --t DIVE_T0`, so its last frame
- * (the poster and loop point, at DIVE_T0 + DIVE_SECONDS) is the `landing` shot's light and life. Picked
- * by scanning T0 ∈ [0, 6] for a loop point and final second with no walker or vehicle near the lens,
- * nobody walking at it and people + cars in view (docs/littlebig/shots/A4-G2fix/scan2.mjs). The sims
- * are chaotic (±0.25 s changes the frame), so re-scan whenever traffic or people change.
+ * Sim time (s) the /play clip starts at: it is rendered with `--dive 301 --t DIVE_T0`, so its last
+ * frame (the poster and loop point, at DIVE_T0 + DIVE_SECONDS) is the `landing` shot's light and life.
+ * Picked by `scripts/play-media/littlebig-scan.mjs` over T0 ∈ [0, 14] (loop point and final second
+ * with no walker or vehicle near the lens, nobody walking at it, people + cars in view), then by eye;
+ * recipe in `docs/play-media.md`. The sims are chaotic (±0.25 s changes the frame), so re-scan
+ * whenever traffic or people change.
  */
-export const DIVE_T0 = 1;
+export const DIVE_T0 = 11;
 
 /**
  * The `street` shot stands on A2's viewpoint stepped 0.9 m toward the building side and turned 6°
@@ -60,13 +65,8 @@ function planLL(x: number, z: number) {
 export const SHOTS: Record<string, ShotDef> = {
   orbit: { about: 'whole planet from 380 m, city in view, the dusk terminator on the right', view: () => ({ lat: CITY_LAT - 6, lon: CITY_LON + 26, alt: 380, heading: 0 }) },
   city: { about: 'top-down over the city from 120 m', view: () => ({ lat: CITY_LAT, lon: CITY_LON, alt: 120, heading: 0 }) },
-  clouds: {
-    about: 'in the cloud layer (44 m), looking across it at the city (pitch −35°: the layer, not a top-down)',
-    view: () => {
-      const ll = planLL(0, 70);
-      return { lat: ll.lat, lon: ll.lon, alt: 44, heading: 0, pitch: -35 };
-    },
-  },
+  // (The clouds frame this view with two anchored clusters: clouds/dive-anchors.ts.)
+  clouds: { about: 'in the cloud layer (44 m), looking across it at the city (pitch −35°: the layer, not a top-down)', view: cloudsShotView },
   // Pitched up to −24° (the curve's −35° puts everything above the 16 m eye out of frame): from the
   // viewpoint's 58–70 m the plateau's curve drops the whole clock tower into view (A2).
   rooftops: { about: 'rooftop height (16 m), in over downtown at the clock tower', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24) },

@@ -182,7 +182,7 @@ const fall = (d2: number, r: number) => {
   return t > 0 ? (t * t) / (1 + 7 * r2) : 0;
 };
 
-export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, facades: number[], late: { value: number }): CityLights {
+export async function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, facades: number[], late: { value: number }): Promise<CityLights> {
   const lamps = poolLayout(plan);
   // neighbours whose pools overlap (a handful each)
   const nb: number[][] = lamps.map(() => []);
@@ -217,7 +217,10 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
     pcell.push(0, 0);
     ptint.push(0, 0, 0, 0);
   };
-  lamps.forEach((L, li) => {
+  for (let li = 0; li < lamps.length; li++) {
+    // (Time-sliced: ~200 ground queries per lamp; one long task on a slow phone otherwise.)
+    if ((li & 7) === 7) await ctx.yield();
+    const L = lamps[li];
     const gh = index.groundH(L.hx, L.hz);
     toSphere(L.hx, L.hz, gh + (L.globe ? GLOBE_H : LAMP_H - 0.12), p);
     pushPoint(p.x, p.y, p.z, L.globe ? 0.7 : 0.8, L.globe ? 18 : 25);
@@ -264,7 +267,7 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
         idx.push(a, c, b, a, d, c);
       }
     }
-  });
+  }
   const geo = ctx.track(new BufferGeometry());
   geo.setAttribute('position', new BufferAttribute(pos, 3));
   geo.setAttribute('aUv', new BufferAttribute(uv, 2));

@@ -23,7 +23,8 @@
  *     accent: [0.95, 0.72, 0.35],       // bright color in highlights
  *   });
  *
- * No deps. Auto-pauses when offscreen / tab hidden. Under
+ * No deps. Auto-pauses when offscreen / tab hidden; handle.pause(true|false)
+ * holds it from outside (the site does while a game window is open). Under
  * prefers-reduced-motion it renders a single static frame instead.
  */
 (function (root) {
@@ -102,7 +103,7 @@
   function mount(canvas, opts){
     opts = opts || {};
     const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: false });
-    if(!gl){ console.warn('[hero-shader] WebGL unavailable'); return { set(){}, stop(){} }; }
+    if(!gl){ console.warn('[hero-shader] WebGL unavailable'); return { set(){}, pause(){}, stop(){} }; }
 
     const prog = gl.createProgram();
     gl.attachShader(prog, compile(gl, VERT, gl.VERTEX_SHADER));
@@ -196,8 +197,12 @@
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    let raf, running = true, t0 = performance.now();
+    let raf = 0, running = true, t0 = performance.now();
+    // held: paused by the host (a game window is open over the page). The loop stops outright and
+    // the canvas keeps showing its last frame; the clock skips the held time so nothing jumps.
+    let held = false, heldAt = 0;
     function frame(){
+      if(held){ raf = 0; return; }
       if(!running){ raf = requestAnimationFrame(frame); return; }
       resize();
       const t = (performance.now() - t0) / 1000;
@@ -267,6 +272,13 @@
       set(opts){
         Object.assign(state, opts);
         if(!animating) renderStatic();
+      },
+      pause(on){
+        on = !!on;
+        if(on === held) return;
+        held = on;
+        if(held){ heldAt = performance.now(); cancelAnimationFrame(raf); raf = 0; }
+        else { t0 += performance.now() - heldAt; if(animating && !raf) frame(); }
       },
       stop(){
         stopAnimation();

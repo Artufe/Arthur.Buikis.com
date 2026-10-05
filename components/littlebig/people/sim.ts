@@ -32,6 +32,7 @@
 // sim, so the same t always gives the same world.
 
 import type { CityIndex, CityPlan, Feature, PathSample, Polyline, WalkEdge } from '../world/city/types';
+import { CURB_H, EYE_HEIGHT, ROAD_H } from '../world/config';
 import { hash3, hashSeed, Rng } from '../world/rng';
 
 /** Body radius for collisions (shoulders ~0.44 m wide). */
@@ -65,6 +66,8 @@ const SETTLE_DT = 1 / 30;
 export const SETTLE_STEPS = Math.round(SETTLE_S / SETTLE_DT);
 /** Seconds of unwanted standstill after which a walker turns back. */
 const STUCK_S = 3.5;
+/** How far ahead (m, plus its radius) a walker sees a filming camera (`step`'s `lens`). */
+const LENS_REACH = 5;
 
 export const enum Pose {
   Walk = 0,
@@ -72,6 +75,90 @@ export const enum Pose {
   Stand = 2,
   Cafe = 3,
   Lean = 4,
+}
+
+/** Below this altitude (m) a camera settling onto the street, or standing still, is a lens walkers make way for. */
+const LENS_ALT = 6;
+/** The berth (m) walkers give a lens: past it at this much, or (narrow pavements) they turn round before it. */
+const LENS_R = 1.6;
+/** Fixed steps between the speed samples (0.1 s at 60 Hz), the history ring, and the furthest look ahead (m). */
+const LENS_LAG = 6;
+const LENS_HIST = 16;
+const LENS_RUN = 15;
+/** A settling camera comes to rest at eye height over the pavement (m, ViewState.altTerrain). */
+const LENS_EYE = EYE_HEIGHT + ROAD_H + CURB_H;
+
+/**
+ * How walkers see the camera, from its plan position and altitude each fixed step (`step`'s camOn,
+ * camX/camZ, camR and lens). A walking player is avoided like a standing person (r 0.75, below
+ * 3 m). A camera standing still, or settling down onto the pavement (the dive, scroll or fly-to: a
+ * continuous descent, so no cut clears the lens), is a lens from LENS_ALT down: seen from further
+ * ahead and given LENS_R, so nobody walks up to it, parks in front of it, or brushes past it at
+ * arm's length. While it settles, the lens is where it will come to rest (x, z): its plan position
+ * run on by its glide (horizontal / vertical speed × the height left to eye level, × 1.5 for the
+ * flare: on the scripted dive it closes from 4.6 m short of the landing at 5.5 m up to within 0.1 m
+ * from 2.4 m), or by its
+ * stopping distance (v² / 2a) once it brakes, whichever is shorter. Walkers near the landing then
+ * turn round before it touches down, not as the camera sweeps up to them.
+ */
+export class LensWatch {
+  on = false;
+  r = 0.75;
+  lens = false;
+  /** Where walkers see the camera (plan m). */
+  x = 0;
+  z = 0;
+  /** Recent plan positions (a ring of fixed steps), for the speed and braking now and 0.1 s ago. */
+  private readonly hx = new Float64Array(LENS_HIST);
+  private readonly hz = new Float64Array(LENS_HIST);
+  private readonly ha = new Float64Array(LENS_HIST);
+  private n = 0;
+  private alt = Infinity;
+  private still = 0;
+  private settle = 0;
+
+  update(dt: number, x: number, z: number, alt: number, inCity: boolean): void {
+    // a camera cut (> 4 m in one step): the speed history starts over
+    if (this.n > 0) {
+      const l = (this.n - 1) % LENS_HIST;
+      if ((x - this.hx[l]) ** 2 + (z - this.hz[l]) ** 2 > 16) this.n = 0;
+    }
+    const k = this.n % LENS_HIST;
+    this.hx[k] = x;
+    this.hz[k] = z;
+    this.ha[k] = alt;
+    this.n++;
+    const p1 = (this.n - 1 - LENS_LAG + LENS_HIST * 4) % LENS_HIST;
+    const mx = x - this.hx[(this.n - 2 + LENS_HIST) % LENS_HIST];
+    const mz = z - this.hz[(this.n - 2 + LENS_HIST) % LENS_HIST];
+    this.still = this.n > 1 && mx * mx + mz * mz < (0.3 * dt) ** 2 ? Math.min(1, this.still + dt) : 0;
+    // (a scripted 30 fps descent moves on every other 60 Hz step: the settle flag holds 0.6 s)
+    this.settle = inCity && alt < LENS_ALT && alt < this.alt - 0.02 * dt ? 0.6 : Math.max(0, this.settle - dt);
+    this.alt = alt;
+    const still = this.still >= 0.5;
+    this.lens = inCity && alt < LENS_ALT && (still || this.settle > 0);
+    this.on = inCity && (alt < 3 || this.lens);
+    this.r = this.lens ? LENS_R : 0.75;
+    this.x = x;
+    this.z = z;
+    if (!this.lens || still || this.n <= 2 * LENS_LAG) return;
+    // speed over the last LENS_LAG steps and the LENS_LAG before
+    const p2 = (p1 - LENS_LAG + LENS_HIST * 4) % LENS_HIST;
+    const w = LENS_LAG * dt;
+    const vx = (x - this.hx[p1]) / w;
+    const vz = (z - this.hz[p1]) / w;
+    const v1x = (this.hx[p1] - this.hx[p2]) / w;
+    const v1z = (this.hz[p1] - this.hz[p2]) / w;
+    const v = Math.sqrt(vx * vx + vz * vz);
+    if (v < 0.05) return;
+    const brake = (Math.sqrt(v1x * v1x + v1z * v1z) - v) / w;
+    const sink = (this.ha[p1] - alt) / w;
+    let run = sink > 0.05 ? (1.5 * v * Math.max(0, alt - LENS_EYE)) / sink : LENS_RUN;
+    if (brake > 0.5) run = Math.min(run, (v * v) / (2 * brake));
+    run = Math.min(run, LENS_RUN);
+    this.x = x + (vx / v) * run;
+    this.z = z + (vz / v) * run;
+  }
 }
 
 export interface Obstacle {
@@ -328,6 +415,8 @@ export class PeopleSim {
   private nIv = 0;
   private readonly smp = new Sample();
   private readonly col = new XZ();
+  /** The CityIndex's zero-allocation query inputs (CityIndex.q; classifyQ / collideQ). */
+  private readonly iq: Float64Array;
   private readonly near = new SL();
   private readonly near2 = new SL();
   private readonly seed: number;
@@ -337,6 +426,7 @@ export class PeopleSim {
   constructor(plan: CityPlan, index: CityIndex, seed: number, traits: WalkerTraits[], idlers: Idler[], dogOwners: number[] = []) {
     this.plan = plan;
     this.index = index;
+    this.iq = index.q;
     this.seed = seed;
     this.idlers = idlers;
     const n = (this.n = traits.length);
@@ -766,13 +856,16 @@ export class PeopleSim {
 
   /**
    * One fixed step. `busy` is written (cleared first), `blocked` read. (camX, camZ) is the player's
-   * plan position, avoided like a standing person of radius camR while camOn.
+   * plan position, avoided like a standing person of radius camR while camOn. `lens`: the camera is
+   * filming (standing still, or settling down onto the pavement): it is seen from further ahead, and
+   * a walker it leaves no room to pass turns back there and then instead of walking up to it and
+   * standing in the lens.
    */
-  step(dt: number, t: number, busy: Uint8Array, blocked: Uint8Array, camX: number, camZ: number, camOn: boolean, camR = 0.75): void {
+  step(dt: number, t: number, busy: Uint8Array, blocked: Uint8Array, camX: number, camZ: number, camOn: boolean, camR = 0.75, lens = false): void {
     this.snap();
     busy.fill(0);
     this.buildGrid();
-    const { x, z, px, pz, vx, vz, hx, hz, u, lat, edge, dir, commit, stuck, jam, info, gridHead, gridNext, gridR, smp, ivLo, ivHi, ivAlong, near } = this;
+    const { x, z, px, pz, vx, vz, hx, hz, u, lat, edge, dir, commit, stuck, jam, info, gridHead, gridNext, gridR, smp, ivLo, ivHi, ivAlong, near, iq } = this;
     const N = this.gridN;
     const maxPush = PUSH_SPEED * dt;
     for (let i = 0; i < this.n; i++) {
@@ -869,13 +962,18 @@ export class PeopleSim {
           }
         }
       }
+      let camQ = -1;
+      let lensBack = false;
       if (camOn) {
         const rx = camX - xi;
         const rz = camZ - zi;
         const along = rx * tx + rz * tz;
         const side = rx * nx + rz * nz;
         // stop short a body length early: nobody walks up to the lens
-        if (along > -0.25 && along < 3.5 + camR && Math.abs(side) < camR + 0.85 && nIv < 48) {
+        if (along > -0.25 && along < (lens ? LENS_REACH : 3.5) + camR && Math.abs(side) < camR + 0.85 && nIv < 48) {
+          camQ = nIv;
+          // heading at a filming camera, inside its berth: turn round now (below), not at its feet
+          lensBack = lens && along > 0 && Math.abs(side) < camR && !(commit[i] && f.crossing);
           ivLo[nIv] = latCur + side - camR;
           ivHi[nIv] = latCur + side + camR;
           ivAlong[nIv++] = Math.max(0, along - 0.8);
@@ -906,6 +1004,8 @@ export class PeopleSim {
       const li = lat[i];
       let a = Infinity;
       for (let q = 0; q < nIv; q++) if (li > ivLo[q] && li < ivHi[q] && ivAlong[q] < a) a = ivAlong[q];
+      // (or no way round its berth)
+      if (lens && camQ >= 0 && Number.isNaN(bestLat) && li > ivLo[camQ] && li < ivHi[camQ] && !(commit[i] && f.crossing)) lensBack = true;
       if (Number.isNaN(bestLat)) {
         // no room: hold the line and stop short of the nearest conflict
         bestLat = li;
@@ -943,7 +1043,7 @@ export class PeopleSim {
         : ui > 0.2 && ui < f.len - 0.2 && latNew < hi - room + 0.02 && latNew > lo + room - 0.02;
       // (and nothing to bump into out on the carriageway)
       const onCarriageway = f.crossing && ui > (d > 0 ? f.kerbA : f.kerbB) + 0.3 && ui < kerbOut - 0.3;
-      if (!inRoom && !onCarriageway && this.index.collide(nxp, nzp, BODY_R, this.col)) {
+      if (!inRoom && !onCarriageway && ((iq[0] = nxp), (iq[1] = nzp), (iq[2] = BODY_R), this.index.collideQ(this.col))) {
         nxp = this.col.x;
         nzp = this.col.z;
       }
@@ -1005,8 +1105,8 @@ export class PeopleSim {
       }
       // Never off the kerb except when committed to a crossing: if a shove would push us off, keep
       // our own step, else stand.
-      if (!inRoom && (!f.crossing || (!commit[i] && !this.offPaving(xi, zi))) && this.offPaving(nxp, nzp)) {
-        const own = !this.offPaving(sx, sz);
+      if (!inRoom && (!f.crossing || (!commit[i] && !((iq[0] = xi), (iq[1] = zi), this.offPavingQ()))) && ((iq[0] = nxp), (iq[1] = nzp), this.offPavingQ())) {
+        const own = !((iq[0] = sx), (iq[1] = sz), this.offPavingQ());
         nxp = own ? sx : xi;
         nzp = own ? sz : zi;
       }
@@ -1049,7 +1149,7 @@ export class PeopleSim {
       if (queue) stuck[i] += dt * 0.2;
       else if (held && !(commit[i] && ui > kerbOut - 1.5)) stuck[i] += dt;
       else stuck[i] = Math.max(0, stuck[i] - dt * 2);
-      if (stuck[i] > STUCK_S + (i % 7) * 0.3) {
+      if (lensBack || stuck[i] > STUCK_S + (i % 7) * 0.3) {
         stuck[i] = 0;
         dir[i] = -d as 1 | -1;
         u[i] = f.len - ui;
@@ -1063,7 +1163,7 @@ export class PeopleSim {
   }
 
   private stepDogs(dt: number): void {
-    const { dx, dz, dhx, dhz, col } = this;
+    const { dx, dz, dhx, dhz, col, iq } = this;
     for (let k = 0; k < this.dOwner.length; k++) {
       const i = this.dOwner[k];
       if (!this.on[i]) continue;
@@ -1088,12 +1188,12 @@ export class PeopleSim {
         safe = l < (di > 0 ? f.hiR : f.hiL) && l > -(di > 0 ? f.hiL : f.hiR) && Math.abs(rx * this.tX[i] + rz * this.tZ[i]) < 1;
       }
       if (!safe) {
-        if (this.index.collide(nx, nz, 0.17, col)) {
+        if (((iq[0] = nx), (iq[1] = nz), (iq[2] = 0.17), this.index.collideQ(col))) {
           nx = col.x;
           nz = col.z;
         }
         // never onto the carriageway unless the owner is crossing (and always free to get off it)
-        if (this.offPaving(nx, nz) && !this.offPaving(dx[k], dz[k]) && !(f.crossing && this.commit[i])) {
+        if (((iq[0] = nx), (iq[1] = nz), this.offPavingQ()) && !((iq[0] = dx[k]), (iq[1] = dz[k]), this.offPavingQ()) && !(f.crossing && this.commit[i])) {
           nx = dx[k];
           nz = dz[k];
         }
@@ -1118,7 +1218,14 @@ export class PeopleSim {
   }
 
   offPaving(x: number, z: number): boolean {
-    const k = this.index.classify(x, z);
+    this.iq[0] = x;
+    this.iq[1] = z;
+    return this.offPavingQ();
+  }
+
+  /** offPaving at (iq[0], iq[1]): no doubles cross the call (see CityIndex.q). */
+  private offPavingQ(): boolean {
+    const k = this.index.classifyQ();
     return k === 'road' || k === 'intersection' || k === 'building' || k === 'water';
   }
 

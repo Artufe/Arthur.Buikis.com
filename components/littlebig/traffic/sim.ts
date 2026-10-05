@@ -36,6 +36,7 @@
 
 import { nearestOn, sampleAt } from '../world/city/path';
 import type { CityIndex, CityPlan, PathSample, Polyline, Turn } from '../world/city/types';
+import { hyp } from '../world/hyp';
 
 export interface VehicleKind {
   name: string;
@@ -836,7 +837,7 @@ function sweep(plan: CityPlan, c: number, k: VehicleKind): number[] {
     }
     const dx = fx - ps.x;
     const dz = fz - ps.z;
-    const l = Math.hypot(dx, dz) || 1;
+    const l = hyp(dx, dz) || 1;
     out.push((fx + ps.x) / 2, (fz + ps.z) / 2, dx / l, dz / l);
   }
   return out;

@@ -246,10 +246,20 @@ function buildRing(dir: Vec3, radius: number, base: number, rng: Rng, out: numbe
  * shadow shape reads next to its cloud from orbit).
  */
 export function coverageMap(layout: CloudLayout, w: number, h: number): Uint8Array {
+  const it = coverageMapSteps(layout, w, h);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** coverageMap as a generator that yields every few puffs (time-sliced init). */
+export function* coverageMapSteps(layout: CloudLayout, w: number, h: number): Generator<void, Uint8Array> {
   const acc = new Float32Array(w * h);
   const p = layout.puffs;
   const d = v3();
   for (let i = 0; i < layout.count; i++) {
+    if ((i & 7) === 7) yield;
     const x = p[i * 4];
     const y = p[i * 4 + 1];
     const z = p[i * 4 + 2];

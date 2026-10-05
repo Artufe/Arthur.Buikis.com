@@ -3,9 +3,8 @@
 //
 // The plan is A2's (plan.ts: layout.ts → graph.ts → blocks.ts → buildings, areas, features).
 
-import { PLATEAU_HEIGHT, SEED } from '../config';
+import { SEED } from '../config';
 import { getPlanet } from '../planet';
-import { planToDir } from './frame';
 import { createCityIndex } from './index-grid';
 import { buildCityPlan } from './plan';
 import type { CityIndex, CityPlan } from './types';
@@ -22,12 +21,10 @@ export function getCityPlan(): CityPlan {
   return plan;
 }
 
-const _d = { x: 0, y: 0, z: 0 };
 export function getCityIndex(): CityIndex {
-  if (!index) {
-    const planet = getPlanet(SEED);
-    index = createCityIndex(getCityPlan(), { terrainH: (x, z) => planet.surfaceAt(planToDir(x, z, _d)) - PLATEAU_HEIGHT });
-  }
+  // No closure here (see CityIndexOptions.terrain): this module-level cache must not capture the
+  // scope of whatever function the minifier inlines it into.
+  if (!index) index = createCityIndex(getCityPlan(), { terrain: getPlanet(SEED) });
   return index;
 }
 
