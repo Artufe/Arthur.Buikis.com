@@ -90,8 +90,17 @@ export class CameraInput {
   doubleClick = false;
   readonly doubleAt: PointerPos = { x: 0, y: 0 };
 
-  /** A plain click (press + release without dragging) happened this frame. */
+  /** A plain click (press + release without dragging) happened this frame, at this position. */
   click = false;
+  readonly clickAt: PointerPos = { x: 0, y: 0 };
+
+  /**
+   * Esc was pressed this frame and taken by the camera (a ride or the bird is exiting). The camera
+   * sets `escapeWanted`; while it says yes, Esc is caught before the floating window's own Esc
+   * (which would close the window) and before the page.
+   */
+  escape = false;
+  escapeWanted: () => boolean = () => false;
 
   /** performance.now() of the last user input (hint row). */
   lastInput = 0;
@@ -164,6 +173,24 @@ export class CameraInput {
     on(document, 'focusin', (e: FocusEvent) => {
       if (isEditable(e.target)) this.keys.clear();
     });
+    // Esc out of a ride / the bird: caught on the window in the capture phase, ahead of the
+    // floating window's close-on-Esc, but only while the game has the user's attention.
+    on(
+      window,
+      'keydown',
+      (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.defaultPrevented || !this.escapeWanted() || isEditable(e.target)) return;
+        const a = document.activeElement;
+        const host = canvas.parentElement;
+        const attending = variant === 'page' || this.hover || a === canvas || a === document.body || a === null || (host !== null && host.contains(a));
+        if (!attending) return;
+        this.escape = true;
+        this.touch();
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { capture: true },
+    );
     on(document, 'pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
     });
@@ -221,6 +248,7 @@ export class CameraInput {
     this.pinch = 1;
     this.doubleClick = false;
     this.click = false;
+    this.escape = false;
     this.dragStarted = false;
     this.dragEnded = false;
     this.downs.clear();
@@ -401,6 +429,8 @@ export class CameraInput {
   private tap(x: number, y: number, type: string) {
     const now = performance.now();
     this.click = true;
+    this.clickAt.x = x;
+    this.clickAt.y = y;
     this.clickMouse = type === 'mouse';
     // Touch double-tap (mouse gets the native dblclick).
     if (type !== 'mouse') {
@@ -430,7 +460,7 @@ export class CameraInput {
     if (this.variant === 'window' && document.activeElement !== this.canvas) return;
     // A good guest: typing into the palette (or any field) never moves the camera.
     if (isEditable(e.target) || isEditable(document.activeElement)) return;
-    const game = /^(Key[WASDQE]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|ShiftRight|Equal|Minus|NumpadAdd|NumpadSubtract)$/.test(e.code);
+    const game = /^(Key[WASDQE]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|ShiftRight|Equal|Minus|NumpadAdd|NumpadSubtract|BracketLeft|BracketRight)$/.test(e.code);
     if (!game) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (down) {

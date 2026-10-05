@@ -13,6 +13,11 @@
 // meshes. Across a 4 m band either side of the switch the two meshes are drawn with
 // COMPLEMENTARY dither by fragment distance (each pixel by exactly one of them). Shadows dither
 // out over 60–100 m altTerrain.
+//
+// v2 (L1): every vehicle is a Trackable ('car:<n>', 'truck:<n>', 'bus:<n>', view 'chase';
+// traffic/track.ts). The fleet is always simulated and drawn wherever it is in view, so a ridden one
+// needs nothing special; outside 'explore' the camera is no obstacle in the street (a chase camera
+// low behind a car would otherwise stop the traffic behind it).
 
 import { BufferGeometry, DynamicDrawUsage, Frustum, InstancedBufferAttribute, type InstancedMesh, Matrix4, Vector2 } from 'three';
 import type { LBContext, System } from '../core/contracts';
@@ -24,6 +29,7 @@ import { v3, type Vec3 } from '../world/sphere';
 import { createFleetLights, type FleetLights } from './lights';
 import { bodyColours, buildVehicle, VARIANT_COLOURS } from './mesh';
 import { createTrafficSim, FLEET, KINDS, type TrafficSim } from './sim';
+import { stopsByLane, vehicleCards, vehicleDetail, vehiclePose } from './track';
 import { hyp } from '../world/hyp';
 
 /** Sim seconds the fleet has already driven at t = 0, and the most of t replayed exactly on a jump. */
@@ -210,6 +216,8 @@ export function createTrafficSystem(): System {
   let buz = new Float64Array(0);
   let revealStart = 0;
   let revealDone = false;
+  const untrack: Array<() => void> = [];
+  let stops: ReturnType<typeof stopsByLane> | null = null;
   const vp = new Vector2();
   const lodR = { value: new Vector2(30, 38) };
   const frustum = new Frustum();
@@ -499,6 +507,8 @@ export function createTrafficSystem(): System {
         p.mesh.castShadow = true;
       }
       ctx.scene.add(...packs.map((p) => p.mesh), lights.beams, lights.sparks);
+      // review scripts (shot mode only) read the fleet through the scene graph
+      if (ctx.shotMode) packs[0].mesh.userData.trafficSim = sim;
       await ctx.compile();
 
       // reveal: the fleet pops onto the streets one after another, centre outward
@@ -511,6 +521,30 @@ export function createTrafficSystem(): System {
       lights.sparkMat.uniforms.uReveal.value = r0;
       revealDone = ctx.reveal.instant;
       ctx.services.traffic = { collide };
+      // v2 (L1): the fleet as Trackables
+      vehicleCards(sim, vari, ctx.world.seed).forEach((card, i) => {
+        const K = KINDS[sim!.kind[i]];
+        untrack.push(
+          ctx.services.track.register({
+            id: card.id,
+            kind: card.kind,
+            label: card.label,
+            sub: card.sub,
+            view: 'chase',
+            radius: Math.round(Math.hypot(K.len, K.width, K.height) * 50) / 100,
+            pose(c, out) {
+              if (!sim) return false;
+              vehiclePose(sim, i, c.time.alpha, out);
+              return true;
+            },
+            detail(c) {
+              if (!sim) return '';
+              stops ??= stopsByLane(c.world.city);
+              return vehicleDetail(sim, c.world.city, i, stops);
+            },
+          }),
+        );
+      });
     },
     fixedUpdate(ctx) {
       if (!sim) return;
@@ -518,7 +552,7 @@ export function createTrafficSystem(): System {
       const v = ctx.view;
       // the player in the street (walking, or the top of a 3 m jump) is an obstacle: vehicles stop
       // short of the eye instead of driving through it
-      sim.setObstacle(v.altTerrain < 4 && v.cityDist < ctx.world.city.radius + 10, v.cityX, v.cityZ);
+      sim.setObstacle(v.mode === 'explore' && v.altTerrain < 4 && v.cityDist < ctx.world.city.radius + 10, v.cityX, v.cityZ);
       sim.step(ctx.time.fixedDt, c.busy.length ? c.busy : null, c.blocked.length ? c.blocked : null);
     },
     update(ctx) {
@@ -540,6 +574,8 @@ export function createTrafficSystem(): System {
       roll.fill(0);
     },
     dispose(ctx) {
+      for (const off of untrack) off();
+      untrack.length = 0;
       if (ctx.services.traffic?.collide === collide) delete ctx.services.traffic;
       sim = null;
       lights = null;

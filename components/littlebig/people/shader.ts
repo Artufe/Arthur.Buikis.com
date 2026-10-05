@@ -14,6 +14,9 @@
 // The GLSL carries no comments or indentation: it ships as text. PP_COLOR (set on the colour
 // material only; three defines DEPTH_PACKING for the fragment stage alone) guards the normal
 // rebuild, which the depth program lacks.
+// v2 (L1): uPpRide is the look row of the walker whose eyes the camera rides (−1: none): its head,
+// face and hair (and the backpack, whose straps would poke up beside the missing neck) are hidden
+// in the colour pass only, so its shadow keeps its head.
 
 import type { Texture } from 'three';
 import type { ToonPatch } from '../render/toon';
@@ -56,6 +59,7 @@ const PARS = /* glsl */ `
 attribute float aPart;
 attribute vec4 aAnim;
 uniform sampler2D uPpl;
+uniform float uPpRide;
 varying float vPpVis;
 varying float vPpLit;
 const ivec4 PT[${PT.length}] = ivec4[](${PT.map((a) => `ivec4(${a})`).join()});
@@ -133,6 +137,9 @@ bool kid = (fl & 64) != 0;
 bool sitting = pose == 1 || pose == 3;
 ivec4 pt = PT[part];
 hide = ((pt.y >> hs) & 1) == 0 || (fl & pt.z) != pt.z || (sitting && part == ${P.SKIRT});
+#ifdef PP_COLOR
+if (abs(rowF - uPpRide) < 0.5 && ((part >= ${P.HEAD} && part <= ${P.HAIRF}) || part == ${P.BACKPACK})) hide = true;
+#endif
 float hipA = 0.0, kneeA = 0.0, shA = 0.0, elA = 0.0, abd = 0.08;
 float bob = 0.0, roll = 0.0, twist = 0.0, lean = 0.0;
 float yaw = aAnim.w, pitch = 0.0;
@@ -266,6 +273,6 @@ const FRAG_PARS = 'varying float vPpVis;\nvarying float vPpLit;';
 const DISCARD = 'if (vPpVis < lbBayer4(gl_FragCoord.xy)) discard;';
 const FRAG = `${DISCARD}\noutgoingLight += diffuseColor.rgb * vec3(1.0, 0.68, 0.36) * (0.85 * vPpLit);`;
 
-export function peoplePatch(tex: Texture): ToonPatch {
-  return { key: 'people', vertexPars: PARS, vertex: VERT, fragmentPars: FRAG_PARS, fragment: FRAG, depthFragment: DISCARD, uniforms: { uPpl: { value: tex } } };
+export function peoplePatch(tex: Texture, ride: { value: number }): ToonPatch {
+  return { key: 'people', vertexPars: PARS, vertex: VERT, fragmentPars: FRAG_PARS, fragment: FRAG, depthFragment: DISCARD, uniforms: { uPpl: { value: tex }, uPpRide: ride } };
 }

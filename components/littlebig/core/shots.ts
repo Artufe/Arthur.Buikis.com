@@ -9,7 +9,7 @@ import type { LBContext, ViewSpec } from './contracts';
 import { K } from './debug-kit';
 
 // Review tooling (the debug chunk): engine modules come through the kit, not imports (core/kit.ts).
-const { CITY_LAT, CITY_LON, CITY_SURFACE_R, CURB_H, EYE_HEIGHT, ROAD_H, planHeadingToWorld, planToDir, latLonFromDir, eveningTimeAt, timeAtHourAngle, cloudsShotView } = K;
+const { CITY_LAT, CITY_LON, CITY_SURFACE_R, CURB_H, EYE_HEIGHT, PLATEAU_HEIGHT, ROAD_H, planHeadingToWorld, planToDir, latLonFromDir, eveningTimeAt, timeAtHourAngle, cloudsShotView } = K;
 
 // The plan's rooftops / horizon / dusk viewpoints are solved by views.ts, loaded only with the shots.
 registerShotViews();
@@ -20,6 +20,10 @@ export interface ShotDef {
   view(ctx: LBContext): ViewSpec;
   /** Sim time (s), or a function of the resolved view. Default 0: late afternoon over the city. */
   t?: number | ((view: ViewSpec) => number);
+  /** v2 (D1): then ride this Trackable, settled (the camera director's ride). */
+  ride?: string;
+  /** v2 (D1): then fly the bird, holding this input for `secs` of flight before the frame. */
+  bird?: { steer: number; climb: number; secs: number };
 }
 
 const DEG = 180 / Math.PI;
@@ -94,6 +98,22 @@ export const SHOTS: Record<string, ShotDef> = {
       return { lat: ll.lat, lon: ll.lon, alt: 46, heading: 0, pitch: -12 };
     },
   },
+  station: {
+    about: 'the sky station from ~30 m behind and above, the planet below (v2 S1)',
+    view: (ctx) => spaceView(ctx, 'station:0', 40, 2.6, 150, 40),
+    t: 40,
+  },
+  skywatch: {
+    about: 'night at the plateau edge, looking up: the sky station gliding over, still sunlit (v2 S1)',
+    view: (ctx) => skyView(ctx, 'station:0', 102.6),
+    t: 102.6,
+  },
+  // ── v2 rides and the bird (D1): the view and time, then the ride / flight, settled ──
+  chase: { about: 'v2: riding a car (chase), from the city view: behind and above it down the street', view: () => ({ lat: CITY_LAT, lon: CITY_LON, alt: 120, heading: 0 }), ride: 'car:3' },
+  flight: { about: 'v2: riding flight lb 117 (chase) over the capital: the planet curving below', view: () => ({ lat: CITY_LAT, lon: CITY_LON, alt: 120, heading: 0 }), ride: 'plane:1' },
+  eyes: { about: "v2: a walker's eyes (first person) on the street shot's sidewalk", view: streetView, ride: 'person:12' },
+  alongside: { about: 'v2: riding alongside the sky station: high and beside it, over the planet', view: () => ({ lat: CITY_LAT - 6, lon: CITY_LON + 26, alt: 380, heading: 0 }), ride: 'station:0' },
+  bird: { about: 'v2: the bird over downtown, 1.2 s into a gentle right climb from the rooftops shot', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24), bird: { steer: 0.3, climb: 0.2, secs: 1.2 } },
   dusk: {
     about: 'street at sunset, looking west: the sun disc touching the horizon',
     view: (ctx) => viewAt(ctx.world.city.viewpoints.dusk, EYE_HEIGHT),
@@ -101,7 +121,103 @@ export const SHOTS: Record<string, ShotDef> = {
     // and the visible horizon dips ~8° at eye height: the disc meets it at about −(dip − 1°).
     t: (v) => eveningTimeAt(v.lat, v.lon, -(DUSK_DIP - 1)),
   },
+  // ── v2 region (R1): add --p region.debug=1 for the network overlay ──
+  'region-west': { about: 'v2: orbit over the west of the capital (millbrook by the windmills, the mill road, the lagoon airport)', view: (ctx) => regionView(ctx, (r) => mixDir(r.settlements[0].dir, town(r, 'millbrook'), 0.6), 300) },
+  'region-east': { about: 'v2: orbit over the east (the rim road, the hairpin up to snowberry, the cove road and bridge to coral cove)', view: (ctx) => regionView(ctx, (r) => mixDir(r.settlements[0].dir, mixDir(town(r, 'snowberry') ?? r.settlements[0].dir, town(r, 'coral-cove'), 0.5), 0.7), 300), t: 300 },
+  'region-south': { about: 'v2: orbit over the south (port pebble on its cape, the coast road, the harbour road)', view: (ctx) => regionView(ctx, (r) => mixDir(r.settlements[0].dir, town(r, 'port-pebble'), 0.6), 300) },
+  'region-far': { about: 'v2: orbit over the far continent (far haven, its airport, the ferry in)', view: (ctx) => regionView(ctx, (r) => town(r, 'far-haven'), 300), t: 240 },
+  'town-port-pebble': { about: 'v2: port pebble (harbour) from 62 m (over the clouds), straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'port-pebble'), 62, -90), t: 450 },
+  'town-millbrook': { about: 'v2: millbrook (farm village) from 62 m, straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'millbrook'), 62, -90), t: 60 },
+  'town-snowberry': { about: 'v2: snowberry (alpine village) from 62 m, straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'snowberry'), 62, -90), t: 300 },
+  'town-coral-cove': { about: 'v2: coral cove (island resort) from 62 m, straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'coral-cove'), 62, -90), t: 300 },
+  'town-far-haven': { about: 'v2: far haven (city) from 110 m, straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'far-haven'), 110, -90), t: 240 },
+  'gate-0': { about: 'v2: gate plaza 0 from 32 m: the city turnaround meets the roundabout', view: (ctx) => regionView(ctx, (r) => r.gates[0]?.dir ?? null, 32, -90) },
+  'gate-1': { about: 'v2: gate plaza 1 from 32 m', view: (ctx) => regionView(ctx, (r) => r.gates[1]?.dir ?? null, 32, -90) },
+  'gate-2': { about: 'v2: gate plaza 2 from 32 m', view: (ctx) => regionView(ctx, (r) => r.gates[2]?.dir ?? null, 32, -90) },
+  'gate-street': { about: 'v2: a gate plaza at street level, from the capital looking out through it', view: gateStreetView },
+  'bridge-0': { about: 'v2: the cove bridge from the side (26 m off, 14 m up): the water under the span', view: (ctx) => bridgeView(ctx, 'cove road'), t: 300 },
+  'bridge-1': { about: 'v2 R1: the cove road bridge to coral cove, from 30 m, straight down', view: (ctx) => regionView(ctx, (r) => bridgeMid(r, 'cove road'), 30, -90), t: 300 },
+  'town-clover': { about: 'v2 R1: clover (farm village at the end of the far highway) from 62 m, straight down', view: (ctx) => regionView(ctx, (r) => town(r, 'clover'), 62, -90), t: 240 },
+  'alpine-pass': { about: "v2 R1: the alpine road's hairpin up the pass to snowberry, from 90 m", view: (ctx) => regionView(ctx, (r) => roadMid(r, 'alpine road'), 90, -90), t: 300 },
+  lookout: { about: 'v2 R1: the lookout car park on the far continent and its road, from 60 m, straight down', view: (ctx) => regionView(ctx, (r) => lookoutAt(r, 'the lookout'), 60, -90), t: 150 },
+  'lighthouse-point': { about: 'v2 R1: the lighthouse road and its car park on the N headland, from 45 m, straight down', view: (ctx) => regionView(ctx, (r) => lookoutAt(r, 'lighthouse point'), 45, -90) },
+  'town-port-pebble-low': { about: 'v2 R1: port pebble from 30 m up over the harbour road, looking down the main street to the quay', view: (ctx) => regionView(ctx, (r) => town(r, 'port-pebble'), 30, -55, 180), t: 450 },
+  'airport-lbx': { about: "v2: the capital's lagoon airport from 60 m", view: (ctx) => regionView(ctx, (r) => r.airports[0]?.centre ?? null, 60, -90) },
+  'airport-fhv': { about: "v2: far haven's airport from 60 m", view: (ctx) => regionView(ctx, (r) => r.airports[1]?.centre ?? null, 60, -90), t: 240 },
 };
+
+type RegionData = LBContext['world']['region'];
+type Dir = { x: number; y: number; z: number };
+const town = (r: RegionData, id: string): Dir | null => r.settlements.find((s) => s.id === id)?.dir ?? null;
+const lookoutAt = (r: RegionData, name: string): Dir | null => {
+  const l = r.lookouts.find((x) => x.name === name);
+  return l ? r.nodes[l.node].dir : null;
+};
+function mixDir(a: Dir, b: Dir | null, t: number): Dir {
+  if (!b) return a;
+  const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, z = a.z + (b.z - a.z) * t;
+  const l = Math.hypot(x, y, z) || 1;
+  return { x: x / l, y: y / l, z: z / l };
+}
+/** A view over a region feature (falls back to the capital when the world has none). */
+function regionView(ctx: LBContext, pick: (r: RegionData) => Dir | null, alt: number, pitch?: number, heading = 0): ViewSpec {
+  const d = pick(ctx.world.region) ?? ctx.world.region.settlements[0].dir;
+  const ll = latLonFromDir(d);
+  const v: ViewSpec = { lat: ll.lat, lon: ll.lon, alt, heading };
+  if (pitch !== undefined) v.pitch = pitch;
+  return v;
+}
+/** The middle of the first region road called `name`. */
+function roadMid(r: RegionData, name: string): Dir | null {
+  const e = r.edges.find((x) => x.name === name);
+  if (!e) return null;
+  const p = e.centre;
+  let i = 0;
+  while (i < p.s.length - 1 && p.s[i] < p.length / 2) i++;
+  return { x: p.dir[i * 3], y: p.dir[i * 3 + 1], z: p.dir[i * 3 + 2] };
+}
+/** The middle of the bridge on road `name`. */
+function bridgeMid(r: RegionData, name: string): Dir | null {
+  const b = r.bridges.find((x) => r.edges[x.edge].name === name);
+  if (!b) return null;
+  const p = r.edges[b.edge].centre;
+  let i = 0;
+  while (i < p.s.length - 1 && p.s[i] < (b.s0 + b.s1) / 2) i++;
+  return { x: p.dir[i * 3], y: p.dir[i * 3 + 1], z: p.dir[i * 3 + 2] };
+}
+/** Over the middle of the bridge on road `name`, 30 m up, looking along it. */
+function bridgeView(ctx: LBContext, name: string): ViewSpec {
+  const r = ctx.world.region;
+  const b = r.bridges.find((x) => r.edges[x.edge].name === name) ?? r.bridges[0];
+  if (!b) return regionView(ctx, () => null, 60);
+  const p = r.edges[b.edge].centre;
+  let i = 0;
+  while (i < p.s.length - 1 && p.s[i] < (b.s0 + b.s1) / 2) i++;
+  const j = Math.min(p.s.length - 1, i + 3);
+  const d = { x: p.dir[i * 3], y: p.dir[i * 3 + 1], z: p.dir[i * 3 + 2] };
+  const e = { x: p.dir[j * 3], y: p.dir[j * 3 + 1], z: p.dir[j * 3 + 2] };
+  const ll = latLonFromDir(d);
+  const le = latLonFromDir(e);
+  const cos = Math.cos((ll.lat * Math.PI) / 180);
+  const fN = le.lat - ll.lat;
+  const fE = (le.lon - ll.lon) * cos;
+  const heading = Math.atan2(fE, fN) * DEG;
+  // R1: from the side, 26 m off its middle and 14 m up, so the water under the span shows
+  const k = 26 / Math.max(0.1, p.s[j] - p.s[i]);
+  return { lat: ll.lat + fE * k, lon: ll.lon - (fN * k) / cos, alt: 14, heading: heading + 90, pitch: -Math.atan(14 / 26) * DEG };
+}
+/** At eye level on the capital's gate avenue just inside its turnaround, looking out through the plaza. */
+function gateStreetView(ctx: LBContext): ViewSpec {
+  const g = ctx.world.region.gates[0];
+  if (!g) return regionView(ctx, () => null, 60);
+  const back = 9;
+  const r = Math.hypot(g.cityX, g.cityZ) || 1;
+  const x = g.cityX - (g.cityX / r) * back;
+  const z = g.cityZ - (g.cityZ / r) * back;
+  const ll = latLonFromDir(planToDir(x, z));
+  const heading = planHeadingToWorld(x, z, Math.atan2(g.cityX / r, -g.cityZ / r)) * DEG;
+  return { lat: ll.lat, lon: ll.lon, alt: 6, heading, pitch: -12 };
+}
 
 const divePaths = new WeakMap<object, DivePath>();
 const _pose: DivePose = { x: 0, z: 0, alt: 0, heading: 0, pitch: 0, togo: 0 };
@@ -129,3 +245,63 @@ export function diveAt(ctx: LBContext, u: number): ViewSpec {
 }
 
 export { DIVE_SECONDS };
+
+// ── v2 (S1): the space layer's shots ──
+// Poses come through the track service (no space/ import: the debug chunk takes engine modules only
+// through the kit), evaluated at the shot's time with a shallow copy of ctx.
+type V3 = { x: number; y: number; z: number };
+
+/** The trackable's pose at sim time t, or null. */
+function poseAt(ctx: LBContext, id: string, t: number) {
+  const tr = ctx.services.track.get(id);
+  const V = ctx.camera.position.constructor as new () => typeof ctx.camera.position;
+  const out = { pos: new V(), fwd: new V(), up: new V(), speed: 0 };
+  if (!tr || !tr.pose({ ...ctx, time: { ...ctx.time, render: t } }, out)) return null;
+  return { ...out, radius: tr.radius };
+}
+
+/** Heading / pitch (deg) and lat / lon of a camera at world `c` looking at `t`. */
+function aim(c: V3, t: V3) {
+  const r = Math.hypot(c.x, c.y, c.z);
+  const ux = c.x / r;
+  const uy = c.y / r;
+  const uz = c.z / r;
+  const dl = Math.hypot(t.x - c.x, t.y - c.y, t.z - c.z) || 1;
+  const dx = (t.x - c.x) / dl;
+  const dy = (t.y - c.y) / dl;
+  const dz = (t.z - c.z) / dl;
+  const lat = Math.asin(uy);
+  const lon = Math.atan2(ux, uz);
+  const ex = Math.cos(lon);
+  const ez = -Math.sin(lon);
+  const nx = -Math.sin(lat) * Math.sin(lon);
+  const ny = Math.cos(lat);
+  const nz = -Math.sin(lat) * Math.cos(lon);
+  return { lat: lat * DEG, lon: lon * DEG, heading: Math.atan2(dx * ex + dz * ez, dx * nx + dy * ny + dz * nz) * DEG, pitch: Math.asin(dx * ux + dy * uy + dz * uz) * DEG, r, up: { x: ux, y: uy, z: uz } };
+}
+
+/** A trackable at sim time t, seen from k bounding radii away (az from its flight, el above its horizontal). */
+function spaceView(ctx: LBContext, id: string, t: number, k: number, azDeg: number, elDeg: number): ViewSpec {
+  const p = poseAt(ctx, id, t);
+  if (!p) return { lat: CITY_LAT, lon: CITY_LON, alt: 380 };
+  const right = p.fwd.clone().cross(p.up);
+  const a = azDeg / DEG;
+  const e = elDeg / DEG;
+  const c = p.pos
+    .clone()
+    .addScaledVector(p.fwd, Math.cos(e) * Math.cos(a) * k * p.radius)
+    .addScaledVector(right, Math.cos(e) * Math.sin(a) * k * p.radius)
+    .addScaledVector(p.up, Math.sin(e) * k * p.radius);
+  const v = aim(c, p.pos);
+  return { lat: v.lat, lon: v.lon, alt: v.r - (CITY_SURFACE_R - PLATEAU_HEIGHT) - ctx.world.planet.surfaceAt(v.up), heading: v.heading, pitch: v.pitch };
+}
+
+/** From the plateau-edge viewpoint at 6 m, looking up at a trackable at sim time t (skyline kept in). */
+function skyView(ctx: LBContext, id: string, t: number): ViewSpec {
+  const vp = ctx.world.city.viewpoints.horizon;
+  const dir = planToDir(vp.x, vp.z);
+  const p = poseAt(ctx, id, t);
+  const rc = CITY_SURFACE_R + 6;
+  const v = aim({ x: dir.x * rc, y: dir.y * rc, z: dir.z * rc }, p ? p.pos : { x: 0, y: 0, z: 0 });
+  return { lat: v.lat, lon: v.lon, alt: 6, heading: v.heading, pitch: Math.min(70, v.pitch - 12) };
+}

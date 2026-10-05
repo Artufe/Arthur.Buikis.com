@@ -12,6 +12,17 @@
 // edge of the draw radius, which reaches past the planet's horizon (nobody pops in view). Under
 // reduced motion both are a dither fade instead. Someone at the player's eye dithers out over a
 // short, coarse band and is skipped below it (no dot screen in the frame).
+//
+// v2 (L1): every walker is a Trackable ('person:<i>', view 'eyes'; people/track.ts). The one being
+// ridden (ctx.view.ride) is simulated and drawn at any altitude, never dithered at the eye, never
+// sent home at night; while the camera is inside it (setRidden) its head is hidden in the colour
+// pass only (its shadow keeps its head), and its dog trots on. The sim keeps everyone a camera's
+// berth from it (people/sim.ts `rider`, wider round a kid's low eye), holds it on zebras, keeps it
+// on the far side of the pavement from the cars and well back from a kerb, and has it skip long
+// kerb waits, so no face, back or turning car fills the lens. Walkers waiting at a kerb glance at
+// the traffic (left, right, left), and so does the eyes ride, at 60 %. Outside 'explore' the camera
+// is no pedestrian: walkers neither dodge it nor clear its lens; after a ride the walker just
+// ridden walks on out of the camera (PeopleSim.free).
 
 import {
   BufferAttribute,
@@ -28,17 +39,19 @@ import {
   UnsignedByteType,
   Vector3,
 } from 'three';
-import { LAYER_NO_INK, type LBContext, type System } from '../core/contracts';
+import { LAYER_NO_INK, type LBContext, type System, type TrackPose } from '../core/contracts';
 import { PALETTE } from '../render/palette';
 import { CITY_SURFACE_R, SEED } from '../world/config';
-import { CITY_CHART as CC, planFrame, toSphere } from '../world/city/frame';
+import { CITY_CHART as CC, planFrame, planHeadingToWorld, toSphere } from '../world/city/frame';
 import { hash3, Rng } from '../world/rng';
 import { v3 } from '../world/sphere';
 import { CITY_DIR, nightFactor, sunDirection } from '../world/sun';
 import { dogGeometry, J, personGeometry, POSE_LEASH, posedHand } from './figure';
 import { makeIdlers } from './idlers';
 import { peoplePatch } from './shader';
-import { LensWatch, LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look } from './sim';
+import { LensWatch, LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look, type WalkerTraits } from './sim';
+import { eyeToWorld, HeightFollower, kerbGlance, kerbWait, walkerCards, walkerEye, walkPlace, YawFollower, type PlanPose } from './track';
+import { compass, kmh } from '../traffic/names';
 
 /** Altitude band (m, ViewState.altTerrain): everyone is in below POP_LO, nobody above POP_HI. */
 const POP_LO = 27;
@@ -56,6 +69,14 @@ const FAR_R = 21;
 /** Share of walkers / idlers gone home at full night. */
 const THIN_WALK = 0.4;
 const THIN_IDLE = 0.55;
+/** pickFeatured: distances (m) past this all count the same. */
+const FEAT_FAR = 40;
+/** Share of the kerb glance the eyes ride turns the view by. */
+const GLANCE_CAM = 0.6;
+/** The berth's scale riding a kid's eyes (people/sim.ts riderK). */
+const KID_BERTH = 1.3;
+/** Seconds after a ride in which the camera does not hold up the walker just ridden. */
+const FREE_S = 4;
 
 const DOG_FUR = [0xc98b4f, 0xf2e6d0, 0x3a3030, 0xe0b46a, 0x8a5a3a, 0xffffff, 0x9a8f87];
 const DOG_PATCH = [0xffffff, 0x8a5a3a, 0x3a3030, 0xf2e6d0, 0xc98b4f];
@@ -108,6 +129,38 @@ export function createPeopleSystem(): System {
   let ready = false;
   const lastEye = new Vector3(1e9, 0, 0);
   const lens = new LensWatch();
+  // v2 (L1): trackables and the ride
+  let traits: WalkerTraits[] = [];
+  const untrack: Array<() => void> = [];
+  /** Per walker: how much it is waiting at a kerb (smoothed), its glance phase. */
+  let gw = new Float32Array(0);
+  let gph = new Float32Array(0);
+  /** The walker the camera rides (-1: none), parsed from ctx.view.ride once per change. */
+  let rid = -1;
+  let rideStr: string | null = null;
+  /** setRidden: the camera is inside walker `inside`'s head (-1: none). */
+  let inside = -1;
+  /**
+   * The walker nearest the view's focus (with hysteresis): rideable even while the crowd is not
+   * drawn (pose() true), so the dock's people mode works from orbit, flying down into their eyes.
+   * Only one, so a click on the city from up there never lands on someone invisible elsewhere.
+   */
+  let featured = -1;
+  /** Per walker: walkers within 8 m (pickFeatured), and when that was counted. */
+  let crowd = new Uint8Array(0);
+  /** Per walker: a face in front of it (pickFeatured), counted with the crowd. */
+  let facing = new Uint8Array(0);
+  let crowdT = -Infinity;
+  const uRide = { value: -1 };
+  const follow = new YawFollower();
+  const lift = new HeightFollower();
+  let followFor = -1;
+  let followFrame = -1;
+  /** The walker last ridden, and how long it still walks through the camera after the ride. */
+  let lastRid = -1;
+  let freeT = 0;
+  const pe: PlanPose = { x: 0, z: 0, h: 0, fx: 0, fz: 0, speed: 0 };
+  const placeCache = new Map<number, string>();
 
   // scratch
   const fr = { up: v3(), ax: v3(), az: v3() };
@@ -203,12 +256,153 @@ export function createPeopleSystem(): System {
   /** A cut to street level: nobody in the lens (sim.clearAround, in the camera's plan frame). */
   function clearView(ctx: LBContext): void {
     const v = ctx.view;
-    if (!sim || v.altTerrain > 3 || v.cityDist > ctx.world.city.radius) return;
+    if (!sim || v.mode !== 'explore' || v.altTerrain > 3 || v.cityDist > ctx.world.city.radius) return;
     planFrame(v.cityX, v.cityZ, fr);
     const fx = v.forward.x * fr.ax.x + v.forward.y * fr.ax.y + v.forward.z * fr.ax.z;
     const fz = v.forward.x * fr.az.x + v.forward.y * fr.az.y + v.forward.z * fr.az.z;
     const l = Math.sqrt(fx * fx + fz * fz) || 1;
     sim.clearAround(v.cityX, v.cityZ, fx / l, fz / l);
+  }
+
+  /** ctx.view.ride → the ridden walker's index (-1 if none or not a person). */
+  function rideOf(ctx: LBContext): number {
+    const r = ctx.view.ride;
+    if (r !== rideStr) {
+      rideStr = r;
+      rid = r !== null && r.startsWith('person:') ? Number(r.slice(7)) : -1;
+      if (!(rid >= 0 && rid < (sim?.n ?? 0))) rid = -1;
+    }
+    return rid;
+  }
+
+  /** The 'eyes' pose of walker i at render time (people/track.ts); the ridden one looks along its smoothed yaw. */
+  function walkerPose(ctx: LBContext, i: number, out: TrackPose): boolean {
+    if (!sim || !ready) return false;
+    const ridden = rideOf(ctx) === i;
+    if (!ridden && (!sim.on[i] || (slot[i] < 0 && i !== featured))) return false;
+    walkerEye(sim, looks[i], i, ctx.time.alpha, ctx.reducedMotion, pe);
+    let fx = pe.fx;
+    let fz = pe.fz;
+    if (ridden) {
+      // (the camera takes 60 % of the head's kerb glance: the look round without the whip pan)
+      const target = Math.atan2(fz, fx) + GLANCE_CAM * gw[i] * kerbGlance(ctx.time.render + gph[i]);
+      // the ground under the feet (kerbs), eased; the eye's own height and bob stay on top
+      const ground = sim.ph[i] + (sim.h[i] - sim.ph[i]) * ctx.time.alpha;
+      if (followFor !== i) {
+        follow.reset(target);
+        lift.reset(ground);
+        followFor = i;
+        followFrame = ctx.time.frame;
+      } else if (followFrame !== ctx.time.frame) {
+        follow.step(target, ctx.time.dt);
+        lift.step(ground, ctx.time.dt);
+        followFrame = ctx.time.frame;
+      }
+      fx = Math.cos(follow.yaw);
+      fz = Math.sin(follow.yaw);
+      pe.h += lift.h - ground;
+    }
+    eyeToWorld(pe, fx, fz, out);
+    out.speed = pe.speed;
+    return true;
+  }
+
+  /**
+   * `featured`: a walker worth landing in, near plan (fx, fz). Distance counts up to FEAT_FAR (from
+   * orbit, or off the city's edge, everyone is equally far and liveliness decides); liveliness is
+   * walking briskly rather than standing about, company within 8 m (refreshed twice a second) and
+   * the plaza or the park; someone walking at them within 4 m (a ride would open on a face) counts
+   * against. 5 points of hysteresis, so it rarely changes under a hovering camera.
+   */
+  function pickFeatured(fx: number, fz: number, now: number): void {
+    if (!sim) return;
+    const s = sim;
+    if (now - crowdT > 0.5 || now < crowdT) {
+      crowdT = now;
+      crowd.fill(0);
+      facing.fill(0);
+      for (let i = 0; i < s.n; i++) {
+        if (!s.on[i]) continue;
+        for (let j = i + 1; j < s.n; j++) {
+          if (!s.on[j]) continue;
+          const dx = s.x[i] - s.x[j];
+          const dz = s.z[i] - s.z[j];
+          const d2 = dx * dx + dz * dz;
+          if (d2 < 64) {
+            if (crowd[i] < 255) crowd[i]++;
+            if (crowd[j] < 255) crowd[j]++;
+          }
+          if (d2 < 16) {
+            // someone in front within 4 m walking at them, or right in front: a ride landing in
+            // their eyes would open on a face
+            const d = Math.sqrt(d2) || 1e-6;
+            const ij = -(s.hx[i] * dx + s.hz[i] * dz) / d; // j in front of i
+            const ji = (s.hx[j] * dx + s.hz[j] * dz) / d; // i in front of j
+            if (ij > 0.7 && (ji > 0.6 || d < 1.8)) facing[i] = 1;
+            if (ji > 0.7 && (ij > 0.6 || d < 1.8)) facing[j] = 1;
+          }
+        }
+      }
+    }
+    let best = -1;
+    let bs = Infinity;
+    let cur = Infinity;
+    for (let i = 0; i < s.n; i++) {
+      const f = s.info[s.edge[i]];
+      if (!s.on[i] || f.crossing) continue;
+      const d = Math.sqrt((s.x[i] - fx) * (s.x[i] - fx) + (s.z[i] - fz) * (s.z[i] - fz));
+      const sp = Math.sqrt(s.vx[i] * s.vx[i] + s.vz[i] * s.vz[i]);
+      const k = f.e.kind;
+      const score = Math.min(d, FEAT_FAR) - 3.5 * Math.min(crowd[i], 6) - (sp > 1 ? 8 : sp > 0.6 ? 3 : 0) - (k === 'plaza' || k === 'park' ? 6 : 0) + 12 * facing[i];
+      if (i === featured) cur = score;
+      if (score < bs) {
+        bs = score;
+        best = i;
+      }
+    }
+    if (best >= 0 && (featured < 0 || !(cur < Infinity) || cur > bs + 5)) featured = best;
+  }
+
+  /** The card's live line: speed, where, and what they are up to. */
+  function walkerDetail(ctx: LBContext, i: number): string {
+    if (!sim) return '';
+    const plan = ctx.world.city;
+    const f = sim.info[sim.edge[i]];
+    const here = walkPlace(plan, sim.edge[i], placeCache);
+    const sp = Math.hypot(sim.vx[i], sim.vz[i]);
+    if (f.crossing && !sim.commit[i] && sp < 0.3) return `waiting to cross ${here}`;
+    if (f.crossing && sim.commit[i]) return `${kmh(sp)} · crossing ${here}`;
+    const at = `${here === 'the park' ? 'in' : 'on'} ${here}`;
+    if (sp < 0.15) return `standing about ${at}`;
+    const r = Math.hypot(sim.x[i], sim.z[i]);
+    const home = traits[i].home;
+    const heading = planHeadingToWorld(sim.x[i], sim.z[i], Math.atan2(sim.hx[i], -sim.hz[i]));
+    const goal = r > home + 12 ? 'heading in toward the plaza' : r < home - 12 ? 'heading out to the houses' : `strolling ${compass(heading)}`;
+    return `${kmh(sp)} · ${at} · ${goal}`;
+  }
+
+  function registerWalkers(ctx: LBContext, nW: number): void {
+    const cards = walkerCards(looks, traits, nW, SEED);
+    for (let i = 0; i < nW; i++) {
+      const card = cards[i];
+      const id = `person:${i}`;
+      untrack.push(
+        ctx.services.track.register({
+          id,
+          kind: 'person',
+          label: card.label,
+          sub: card.sub,
+          view: 'eyes',
+          radius: Math.round(85 * looks[i].scale) / 100,
+          pose: (c, out) => walkerPose(c, i, out),
+          detail: (c) => walkerDetail(c, i),
+          setRidden(on) {
+            if (on) inside = i;
+            else if (inside === i) inside = -1;
+          },
+        }),
+      );
+    }
   }
 
   return {
@@ -241,7 +435,8 @@ export function createPeopleSystem(): System {
         }
       }
       await ctx.yield();
-      sim = new PeopleSim(plan, index, SEED, makeTraits(SEED, looks, nW), idlers, own);
+      traits = makeTraits(SEED, looks, nW);
+      sim = new PeopleSim(plan, index, SEED, traits, idlers, own);
       idleOn = new Uint8Array(idlers.length).fill(1);
       planFrame(0, 0, fr);
       AX0.x = fr.ax.x;
@@ -251,7 +446,11 @@ export function createPeopleSystem(): System {
       const nD = own.length;
       // pop altitudes skewed low: the crowd thickens as the streets get readable
       popAt = Float32Array.from({ length: nP + nD }, (_, i) => POP_LO + (POP_HI - POP_LO) * Math.pow(hash3(i, 93, SEED), 1.4));
-      slot = new Int32Array(nW);
+      slot = new Int32Array(nW).fill(-1);
+      gw = new Float32Array(nW);
+      crowd = new Uint8Array(nW);
+      facing = new Uint8Array(nW);
+      gph = Float32Array.from({ length: nW }, (_, i) => hash3(i, 95, SEED) * 6.2);
       gs = new Float32Array(nW);
       gv = new Float32Array(nW);
       const lp: number[] = [];
@@ -284,7 +483,7 @@ export function createPeopleSystem(): System {
       tex.minFilter = tex.magFilter = NearestFilter;
       tex.needsUpdate = true;
 
-      const mat = ctx.toon.material({ name: 'people', vertexColors: true, reveal: 'object', revealDuration: 0.6, rim: 0.45, patch: peoplePatch(tex) });
+      const mat = ctx.toon.material({ name: 'people', vertexColors: true, reveal: 'object', revealDuration: 0.6, rim: 0.45, patch: peoplePatch(tex, uRide) });
       mat.defines = { ...mat.defines, PP_COLOR: '' };
       const geos = [personGeometry(0), personGeometry(1), personGeometry(2), dogGeometry()];
       meshes = geos.map((g, m) => {
@@ -318,18 +517,34 @@ export function createPeopleSystem(): System {
       }
 
       ctx.scene.add(...meshes, leash);
+      // review scripts (shot mode only) read the crowd through the scene graph
+      if (ctx.shotMode) meshes[0].userData.peopleSim = sim;
       for (const m of meshes) m.count = 1; // warm the program with something drawn
       await ctx.compile();
       for (const m of meshes) m.count = 0;
       mat.userData.lbUniforms.lbRevealDelay.value = ctx.reveal.slot(0.6);
       ready = true;
+      registerWalkers(ctx, nW);
     },
 
     fixedUpdate(ctx) {
       if (!sim || !ready) return;
       const v = ctx.view;
       const cr = ctx.services.crossings;
-      lens.update(ctx.time.fixedDt, v.cityX, v.cityZ, v.altTerrain, v.cityDist < ctx.world.city.radius);
+      // the camera is a pedestrian only while exploring (riding someone's eyes, it IS that walker)
+      lens.update(ctx.time.fixedDt, v.cityX, v.cityZ, v.altTerrain, v.mode === 'explore' && v.cityDist < ctx.world.city.radius);
+      const r = rideOf(ctx);
+      if (r >= 0) sim.on[r] = 1;
+      // the ridden walker keeps a camera's berth from everyone (people/sim.ts RIDER_GAP), wider
+      // in front of a kid's low eye
+      sim.rider = r;
+      sim.riderK = r >= 0 && looks[r].flags & LookFlag.Kid ? KID_BERTH : 1;
+      // the walker just ridden walks on out of the camera, which is no obstacle to it a while
+      if (r >= 0) {
+        lastRid = r;
+        freeT = FREE_S;
+      } else if (freeT > 0) freeT -= ctx.time.fixedDt;
+      sim.free = freeT > 0 ? lastRid : -1;
       sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, lens.x, lens.z, lens.on, lens.r, lens.lens);
     },
 
@@ -338,6 +553,9 @@ export function createPeopleSystem(): System {
       const late = nightAt(ctx.time.t);
       thinAll(late);
       sim.placeAt(ctx.time.t, ctx.services.crossings.busy, ctx.services.crossings.blocked, late * THIN_WALK);
+      const r = rideOf(ctx);
+      if (r >= 0) sim.on[r] = 1;
+      followFor = -1; // the walker was re-placed: the ride's yaw starts over
       clearView(ctx);
     },
 
@@ -352,14 +570,26 @@ export function createPeopleSystem(): System {
       const jz = eye.z - lastEye.z;
       lastEye.copy(eye);
       if (jx * jx + jy * jy + jz * jz > 16) clearView(ctx);
-      const show = alt < POP_HI && v.cityDist < ctx.world.city.radius + 60 + alt;
+      // the ridden walker (and its dog) is drawn at any altitude, the crowd only near the city
+      const ri = rideOf(ctx);
+      if (followFor >= 0 && ri !== followFor) followFor = -1;
+      const crowd = alt < POP_HI && v.cityDist < ctx.world.city.radius + 60 + alt;
+      const show = crowd || ri >= 0;
       for (const m of meshes) m.visible = show;
       meshes[2].castShadow = meshes[3].castShadow = alt < SHADOW_ALT;
-      leash.visible = show && alt < POP_LO + 0.5;
+      leash.visible = show && (alt < POP_LO + 0.5 || ri >= 0);
       const nightNow = ctx.uniforms.lbNight.value;
       const nightT = nightAt(ctx.time.t);
+      const dtS = ctx.time.dt;
+      const kG = Math.min(1, dtS * 4);
+      if (!crowd) thinAll(nightT); // nobody is in view: the crowd follows the hour at once
+      if (ri >= 0) sim.on[ri] = 1;
+      pickFeatured(v.cityX, v.cityZ, ctx.time.render);
+      uRide.value = -1;
       if (!show) {
-        thinAll(nightT); // nobody is in view: the crowd follows the hour at once
+        // nobody drawn: nobody rideable but the featured walker (pose() reads slot)
+        slot.fill(-1);
+        for (let i = 0; i < sim.n; i++) gw[i] = kerbWait(sim, i);
         return;
       }
       const a = ctx.time.alpha;
@@ -372,7 +602,10 @@ export function createPeopleSystem(): System {
       const lodK = Math.tan((v.fov * Math.PI) / 360) / Math.tan((35 * Math.PI) / 180);
       // near-eye fade: a short band ending at nearR (further when looking down: a head poking up
       // into the bottom of the frame)
-      const nearR = 1.0 + 0.5 * smooth(-0.15, -0.35, v.pitch);
+      // (riding someone's eyes, the sim keeps everyone a berth away, people/sim.ts RIDER_GAP: the
+      // band moves in so nobody standing at that berth is dithered)
+      const riding = inside >= 0 || ri >= 0;
+      const nearR = (riding ? 0.62 : 1.0) + (riding ? 0.25 : 0.5) * smooth(-0.15, -0.35, v.pitch);
       // plan-space pre-cull (no world mapping for people far off or well behind the camera): the
       // camera's plan position and level forward
       const pcx = v.cityX;
@@ -399,8 +632,14 @@ export function createPeopleSystem(): System {
         let fz: number;
         let phase = 0;
         let amp = 0;
+        const ridden = i === ri;
+        if (!crowd && !ridden) {
+          if (walker) slot[i] = -1;
+          continue;
+        }
         if (walker) {
           slot[i] = -1;
+          gw[i] += (kerbWait(s, i) - gw[i]) * kG;
           x = s.px[i] + (s.x[i] - s.px[i]) * a;
           z = s.pz[i] + (s.z[i] - s.pz[i]) * a;
           h = s.ph[i] + (s.h[i] - s.ph[i]) * a;
@@ -422,7 +661,7 @@ export function createPeopleSystem(): System {
         const qx0 = x - pcx;
         const qz0 = z - pcz;
         const dp2 = qx0 * qx0 + qz0 * qz0;
-        if (dp2 > preR2 || (cone && qx0 * pfx + qz0 * pfz < 0.3 * Math.sqrt(dp2) - 6)) {
+        if (!ridden && (dp2 > preR2 || (cone && qx0 * pfx + qz0 * pfz < 0.3 * Math.sqrt(dp2) - 6))) {
           if (onArr[oi] !== want) onArr[oi] = want; // out of view: the crowd follows the hour
           continue;
         }
@@ -447,12 +686,12 @@ export function createPeopleSystem(): System {
         const dist = Math.sqrt(d2);
         const along = ex * fwd.x + ey * fwd.y + ez * fwd.z;
         // in view: inside the draw radius and a generous cone (room for bodies and shadows at its edges)
-        const inView = dist < visR && along > 0.3 * dist - 2.5;
+        const inView = ridden || (dist < visR && along > 0.3 * dist - 2.5);
         // the crowd follows the hour, but only where nobody is looking
         if (onArr[oi] !== want && !inView) onArr[oi] = want;
         if (!inView || !onArr[oi]) continue;
         // in by altitude (each at their own) and out at the edge of the draw radius
-        const fade = Math.min(1, Math.max(0, popAt[i] - alt)) * Math.min(1, Math.max(0, (visR - dist) / 6));
+        const fade = ridden ? 1 : Math.min(1, Math.max(0, popAt[i] - alt)) * Math.min(1, Math.max(0, (visR - dist) / 6));
         const grow = rm ? 1 : ctx.reveal.spring(fade);
         if (grow < 0.01 || fade <= 0) continue;
         const sc = l.scale * grow;
@@ -463,8 +702,18 @@ export function createPeopleSystem(): System {
         const qx = ex + (pos.x / pl) * up;
         const qy = ey + (pos.y / pl) * up;
         const qz = ez + (pos.z / pl) * up;
-        const ps = Math.min(1, Math.max(0, (Math.sqrt(qx * qx + qy * qy + qz * qz) - nearR + 0.2) / 0.2));
+        // (the ridden walker never: the camera is in its head, which the shader hides below)
+        const ps = ridden ? 1 : Math.min(1, Math.max(0, (Math.sqrt(qx * qx + qy * qy + qz * qz) - nearR + 0.2) / 0.2));
         if (ps < 0.15) continue;
+        if (ridden) {
+          // the camera at (or flying into) the head: hide it from the colour pass (setRidden, or
+          // the eye already inside it)
+          const hx = ex + (pos.x / pl) * 1.47 * sc;
+          const hy = ey + (pos.y / pl) * 1.47 * sc;
+          const hz = ez + (pos.z / pl) * 1.47 * sc;
+          const hd2 = hx * hx + hy * hy + hz * hz;
+          if ((inside === i && hd2 < 1.2 * 1.2) || hd2 < 0.35 * 0.35) uRide.value = i;
+        }
         // the first visible step is a coarse one (a 1/16 dot screen never lingers)
         const vis = (ps < 1 ? 0.35 + (0.65 * (ps - 0.15)) / 0.85 : 1) * (rm ? fade : 1);
         if (vis < 0.03) continue;
@@ -481,8 +730,12 @@ export function createPeopleSystem(): System {
           const o = k * 16;
           const A = arr[m];
           const ang = Math.atan2(-(A[o] * ex + A[o + 1] * ey + A[o + 2] * ez), -(A[o + 8] * ex + A[o + 9] * ey + A[o + 10] * ez));
-          look = Math.max(-1.1, Math.min(1.1, ang)) * smooth(7.5, 3.5, dist) * smooth(2.0, 1.3, Math.abs(ang));
+          // (riding someone's eyes, passers-by close to the lens look where they are going: a
+          // stare into the camera at arm's length is a face filling the frame)
+          look = Math.max(-1.1, Math.min(1.1, ang)) * smooth(7.5, 3.5, dist) * smooth(2.0, 1.3, Math.abs(ang)) * (riding ? smooth(1.8, 3, dist) : 1);
         }
+        // a walker waiting at a kerb checks the traffic (shader yaw: + = turn left)
+        if (walker && gw[i] > 0.01) look = Math.max(-1.1, Math.min(1.1, look - gw[i] * kerbGlance(ctx.time.render + gph[i])));
         const lit = nightNow > 0.02 ? Math.round(31 * nightNow * lampLight(x, z)) : 0;
         const A4 = anim[m];
         A4[k * 4] = i + 0.9 * (1 - vis);
@@ -557,6 +810,8 @@ export function createPeopleSystem(): System {
     },
 
     dispose() {
+      for (const off of untrack) off();
+      untrack.length = 0;
       for (const m of meshes) {
         m.geometry.dispose();
         m.dispose();

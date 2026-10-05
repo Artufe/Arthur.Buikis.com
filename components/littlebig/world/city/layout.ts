@@ -1,14 +1,20 @@
 // The city's street sketch (pure, seeded): a hand-drawn pentagonal plaza loop, five avenues
 // swirling out from its corners (each with its own curve and length), an oval ring road a little
-// off-centre that they meet at right angles, and short cul-de-sacs off the ring into the houses
-// where the residential band is deep. graph.ts turns the sketch into lanes, connectors, patches and
-// the walk graph; plan.ts fills the blocks.
+// off-centre that they meet at right angles, and the gate avenues: cul-de-sacs off the ring through
+// the houses where the residential band is deep, out to the plateau rim. graph.ts turns the sketch
+// into lanes, connectors, patches and the walk graph; plan.ts fills the blocks.
+//
+// v2 (R1): the cul-de-sacs are the capital's GATES. Each runs from the ring out to the rim, where its
+// turning circle (the capital's own turnaround: city traffic U-turns there, never leaves the plan)
+// touches the rim; the region network (world/region) meets it from outside at a gate plaza with a
+// roundabout, paved continuously. Kind 'lane' and width are unchanged from v1, so the tuned traffic
+// and people sims, the viewpoints and the dive treat them exactly as before.
 //
 // Plan space: +x east, +z south (types.ts). Plan angles increase clockwise seen from above.
 
 import { CITY_PLAN_RADIUS } from '../config';
 import { Rng } from '../rng';
-import type { SketchEdge, SketchNode } from './graph';
+import { turningRadius, type SketchEdge, type SketchNode } from './graph';
 
 export interface Layout {
   nodes: SketchNode[];
@@ -18,7 +24,10 @@ export interface Layout {
   /** Node ids: the plaza loop's corners (increasing angle) and the avenue ring junctions. */
   corners: number[];
   ringNodes: number[];
-  /** Cul-de-sacs: their ring junction and their dead-end node. */
+  /**
+   * Cul-de-sacs, which are the capital's gate avenues (v2): their ring junction and their dead-end
+   * node, whose turning circle touches the plateau rim (GATE_RIM_GAP inside it).
+   */
   culs: Array<{ ring: number; end: number }>;
   /** Plan angles (about the plan origin) of the park and stadium arcs in the outer band. */
   parkPhi: number;
@@ -36,6 +45,13 @@ const ARMS = 5;
 /** Cul-de-sac turning circle: carriageway radius (m) and its sidewalk. */
 export const CUL_WIDTH = 5.5;
 export const CUL_SIDEWALK = 1.6;
+/**
+ * v2 (R1): gap (m) between a gate avenue's turning circle (its sidewalk's outer edge) and the plateau
+ * rim. The region's gate plaza starts at the rim, so the two are paved continuously.
+ */
+export const GATE_RIM_GAP = 0.05;
+/** Outer radius (m) of a gate avenue's turning circle round its end node: carriageway ρ + sidewalk. */
+export const GATE_CIRCLE_R = turningRadius(CUL_WIDTH / 2) + CUL_SIDEWALK;
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -165,12 +181,16 @@ export function buildLayout(seed: number): Layout {
     const id = nodes.length;
     nodes.push({ x: p.x, z: p.z, control: 'yield' });
     culStart.set(phi, id);
-    // Out along the normal, bending a little to one side, ending well inside the rim.
+    // Out along the normal, bending a little to one side, to the rim: the end node sits where the
+    // turning circle's outer edge is GATE_RIM_GAP inside it (|p + u·L| = that radius, solved for L).
     const bend = rng.range(-0.25, 0.25);
-    const room = CITY_PLAN_RADIUS - Math.hypot(p.x, p.z);
-    const L = Math.min(24, room - 8.6);
-    const ex = p.x + (n.x * Math.cos(bend) - n.z * Math.sin(bend)) * L;
-    const ez = p.z + (n.z * Math.cos(bend) + n.x * Math.sin(bend)) * L;
+    const ux = n.x * Math.cos(bend) - n.z * Math.sin(bend);
+    const uz = n.z * Math.cos(bend) + n.x * Math.sin(bend);
+    const T = CITY_PLAN_RADIUS - GATE_CIRCLE_R - GATE_RIM_GAP;
+    const pu = p.x * ux + p.z * uz;
+    const L = -pu + Math.sqrt(Math.max(0, pu * pu - (p.x * p.x + p.z * p.z) + T * T));
+    const ex = p.x + ux * L;
+    const ez = p.z + uz * L;
     const end = nodes.length;
     nodes.push({ x: ex, z: ez });
     edges.push({ a: id, b: end, points: cubic(p.x, p.z, p.x + n.x * L * 0.45, p.z + n.z * L * 0.45, ex - (ex - p.x) * 0.25, ez - (ez - p.z) * 0.25, ex, ez), kind: 'lane', width: CUL_WIDTH, sidewalk: CUL_SIDEWALK, speed: 5 });

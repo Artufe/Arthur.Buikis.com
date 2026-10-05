@@ -281,7 +281,7 @@ export interface WalkSpot {
 export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[], planR: number, roomy: (x: number, z: number) => boolean): Viewpoint | null {
   const sun = { x: 0, z: 0 };
   const mass = { left: 0, right: 0 };
-  const ranked: Array<{ s: WalkSpot; score: number; sx: number; sz: number }> = [];
+  const ranked: Array<{ s: WalkSpot; score: number; sx: number; sz: number; both: number }> = [];
   for (const s of spots) {
     duskSunDir(s.x, s.z, sun);
     // quick reject: a building or crown within 40 m on the sun's own line (horizonClear's limit)
@@ -299,10 +299,16 @@ export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[],
     const street = s.straight && align > 0.7;
     // back from a turning circle, so its asphalt disc doesn't fill the foreground
     const back = Math.max(0, Math.min(1, ((s.endDist ?? 99) - 7) / 7)) * 3;
-    ranked.push({ s, score: (street ? 4 : 0) + (lamp ? 1.5 : 0) + back + align * 2 + frame + Math.min(2, sky.postClearance(s.x, s.z, 4, 1)) * 0.15, sx: sun.x, sz: sun.z });
+    ranked.push({ s, score: (street ? 4 : 0) + (lamp ? 1.5 : 0) + back + align * 2 + frame + Math.min(2, sky.postClearance(s.x, s.z, 4, 1)) * 0.15, sx: sun.x, sz: sun.z, both: Math.min(mass.left, mass.right) });
   }
   ranked.sort((a, b) => b.score - a.score);
-  for (const r of ranked) {
+  // v2 (R1): a street between buildings on both sides first (the gate avenues opened the plan's edge:
+  // a sidewalk by the park lawn, with the countryside's rocks and the park's walls in the foreground,
+  // started winning); anything else only if no such street sees the sun set
+  // (and on a straight sidewalk along it, as v1 preferred)
+  for (const pass of [0, 1]) for (const r of ranked) {
+    const first = r.both >= 0.2 && r.s.straight;
+    if ((pass === 0) !== first) continue;
     const { s, sx, sz } = r;
     if (!roomy(s.x, s.z)) continue;
     if (!horizonClear(sky, planet, s.x, s.z, sx, sz, 1.5, planR)) continue;
@@ -318,6 +324,9 @@ export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[],
     const vz = sx * sn + sz * c;
     // nothing standing in the middle of the view close by (a lamp pole a metre ahead splits it)
     if (sky.coneClearance(s.x, s.z, vx, vz, 14, 8, 1.5) < 8) continue;
+    // v2 (R1): and nothing solid in the lower frame close by (planters, hedges, low walls a few metres
+    // ahead fill a third of the picture as dark blocks against the sunset)
+    if (sky.coneClearance(s.x, s.z, vx, vz, 36, 7, 0.3) < 6) continue;
     return { x: s.x, z: s.z, heading: Math.atan2(vx, -vz) };
   }
   return null;
@@ -413,13 +422,27 @@ export function solveShotViewpoint(name: ShotViewName, inp: ShotViewInputs): Vie
     // Dusk: a sidewalk spot whose view toward the setting sun (at the shot's own time there) shows an
     // unbroken horizon within ±1.5° of the disc (views.ts pickDusk); falls back to the most westward
     // open view.
+    // v2 (R1): the dead ends are the gate avenues' turning circles, run out to the plateau rim: an open
+    // view with no street in it, so spots within 20 m of them are skipped. The 'back from a turning
+    // circle' preference still measures from where v1's cul-de-sacs ended (the same line, v1's length:
+    // layout.ts), so the shot keeps v1's choice: the corner with the bus and the car into the sunset.
+    const v1Ends: Array<{ x: number; z: number }> = layout.culs.map((c) => {
+      const p0 = layout.nodes[c.ring];
+      const e = layout.nodes[c.end];
+      const l = Math.hypot(e.x - p0.x, e.z - p0.z) || 1;
+      const L = Math.min(24, CITY_PLAN_RADIUS - Math.hypot(p0.x, p0.z) - 8.6);
+      return { x: p0.x + ((e.x - p0.x) / l) * L, z: p0.z + ((e.z - p0.z) / l) * L };
+    });
     const spots: WalkSpot[] = [];
     for (const w of walkEdges) {
       if (w.kind !== 'sidewalk' && w.kind !== 'corner') continue;
       for (let si = 0.5; si < w.path.length; si += 1) {
         sampleAt(w.path, si, sp);
+        let gateDist = Infinity;
+        for (const n of g.nodes) if (n.kind === 'end') gateDist = Math.min(gateDist, Math.hypot(sp.x - n.x, sp.z - n.z));
+        if (gateDist < 20) continue;
         let endDist = Infinity;
-        for (const n of g.nodes) if (n.kind === 'end') endDist = Math.min(endDist, Math.hypot(sp.x - n.x, sp.z - n.z));
+        for (const n of v1Ends) endDist = Math.min(endDist, Math.hypot(sp.x - n.x, sp.z - n.z));
         spots.push({ x: sp.x, z: sp.z, tx: sp.tx, tz: sp.tz, straight: w.kind === 'sidewalk', endDist });
       }
     }

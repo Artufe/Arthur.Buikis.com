@@ -12,7 +12,7 @@
 //
 // camera/index.ts drives this from input; specs cover the curves and the pose.
 
-import { R, TALLEST } from '../world/config';
+import { R, SPACE_MAX } from '../world/config';
 import { copy3, cross3, dot3, headingOf, horizonDistance, normalize3, orthonormalizeTangent, rotateAxis, set3, v3, type Vec3 } from '../world/sphere';
 
 const DEG = Math.PI / 180;
@@ -144,10 +144,16 @@ export function lookBlend(alt: number): number {
   return 1 - smooth(u);
 }
 
-/** Adaptive clip planes for the eye at `alt` above the surface and `altSea` above sea level. */
+/**
+ * Adaptive clip planes for the eye at `alt` above the surface and `altSea` above sea level. The far
+ * plane reaches the farthest thing that can still show over the horizon: v2's space layer (a
+ * satellite at SPACE_MAX on the far side of the eye's horizon), so the station and satellites are
+ * never clipped from the street, a ride or orbit. (Depth precision is set by the near plane; the far
+ * one costs nothing measurable.)
+ */
 export function clipPlanes(alt: number, altSea: number, out: { near: number; far: number }): { near: number; far: number } {
   out.near = Math.min(30, Math.max(0.05, alt * 0.03));
-  out.far = horizonDistance(R, Math.max(0, altSea)) + horizonDistance(R, TALLEST) + 40;
+  out.far = horizonDistance(R, Math.max(0, altSea)) + horizonDistance(R, SPACE_MAX) + 40;
   return out;
 }
 

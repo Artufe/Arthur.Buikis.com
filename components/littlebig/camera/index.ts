@@ -23,6 +23,11 @@
 //   - The lens: FOV by altitude fitted to the canvas aspect, plus a vertical lens shift at rooftop
 //     heights (verticals stay upright: a model, not a fisheye).
 //   - Pointer lock (page variant): a mouse click at street level takes it; lifting off releases it.
+//
+// v2 (D1): camera/director.ts layers the modes on top — rides (chase / eyes / alongside a
+// Trackable), the bird, click-to-follow and hover picking, and the transitions between them. In
+// explore it only watches; everything above runs exactly as in v1. Leaving a mode hands this model a
+// placement that matches the camera (handoff), so explore carries on from wherever it is.
 
 import { Matrix4, Vector3 } from 'three';
 import type { LBContext, System, ViewSpec } from '../core/contracts';
@@ -47,7 +52,8 @@ import {
 } from '../world/sphere';
 import { buildingDistance, glideMargin, solidsIn, LandingFinder, type Landing } from './landing';
 import { CameraInput } from './input';
-import { approach, clipPlanes, computePose, createCamState, createPose, lensFov, lensShift, orbitFitFov, liftRamp, lookBlend, moveSpeed, springStep, timeToBox } from './model';
+import { approach, clipPlanes, computePose, createCamState, createPose, lensFov, lensShift, orbitFitFov, liftRamp, lookBlend, moveSpeed, pitchForAlt, springStep, timeToBox } from './model';
+import { createDirector } from './director';
 import { hyp, hyp3 } from '../world/hyp';
 
 const DEG = Math.PI / 180;
@@ -216,6 +222,16 @@ export function createCameraSystem(): System {
   /** Land directions for the sea steer (unit xyz; meadow-height land on a ~10 m lattice), built on first use. */
   let landDirs: Float32Array | null = null;
   const stickView = { visible: false, active: false, x: 0, y: 0, ox: 0, oy: 0, touch: false };
+  /** Seconds since a mode handed the camera back with a held pitch (it then eases to the curve), or −1. */
+  let exitRelease = -1;
+  const director = createDirector({
+    handoff: (ctx, pos, fwd, camUp) => handoff(ctx, pos, fwd, camUp),
+    invalidate: () => {
+      lastNear = lastFar = lastFov = lastShift = lastAspect = -1;
+    },
+    groundAt: (ctx, dir) => groundAt(ctx, dir),
+    solids: () => finder?.solids ?? null,
+  });
 
   /**
    * The altitude reference (m above sea level) under unit dir: terrain or water, and inside the city
@@ -380,6 +396,8 @@ export function createCameraSystem(): System {
   }
 
   function setView(ctx: LBContext, v: ViewSpec, glide?: number) {
+    director.reset();
+    exitRelease = -1;
     dirFromLatLon(v.lat, v.lon, s.focus);
     headingVector(s.focus, (v.heading ?? 0) * DEG, s.fwd);
     const alt = Math.min(ALT_MAX, Math.max(EYE_HEIGHT, v.alt));
@@ -414,6 +432,82 @@ export function createCameraSystem(): System {
       snap(ctx);
     }
     apply(ctx);
+  }
+
+  /**
+   * v2: hand the explore model over to a camera at `pos` looking along unit `fwd` (camera up
+   * `camUp`), so explore carries on from there without a jump (the director blends the roll and
+   * the lens across). Focus under the eye, zoom altitude = its height above the ground reference
+   * (less any roof lift, so the eye stays put), heading from the view, and the pitch held: at street
+   * level as the look offset, above it as a pitch override that eases back to the altitude curve
+   * once the hand-over has settled (exitRelease). Every explore spring and gesture is reset.
+   */
+  function handoff(ctx: LBContext, pos: { x: number; y: number; z: number }, fwd: { x: number; y: number; z: number }, camUp: { x: number; y: number; z: number }) {
+    const len = hyp3(pos.x, pos.y, pos.z);
+    if (!(len > 1e-6)) return;
+    s.focus.x = pos.x / len;
+    s.focus.y = pos.y / len;
+    s.focus.z = pos.z / len;
+    const sinP = Math.max(-1, Math.min(1, dot3(fwd as Vec3, s.focus)));
+    tA.x = fwd.x - s.focus.x * sinP;
+    tA.y = fwd.y - s.focus.y * sinP;
+    tA.z = fwd.z - s.focus.z * sinP;
+    if (tA.x * tA.x + tA.y * tA.y + tA.z * tA.z < 1e-4) {
+      // Looking straight down: the camera's up is the heading.
+      const u = dot3(camUp as Vec3, s.focus);
+      tA.x = camUp.x - s.focus.x * u;
+      tA.y = camUp.y - s.focus.y * u;
+      tA.z = camUp.z - s.focus.z * u;
+    }
+    copy3(s.fwd, tA);
+    orthonormalizeTangent(s.fwd, s.focus);
+    const pitch = Math.asin(sinP);
+    const altSea = len - R;
+    s.ground = groundAt(ctx, s.focus);
+    s.groundVel = 0;
+    s.lift = 0;
+    s.liftVel = 0;
+    const lo = overSea(ctx, s.focus) ? SEA_FLOOR_ALT : EYE_HEIGHT;
+    let alt = Math.min(ALT_MAX, Math.max(lo, altSea - s.ground));
+    // A roof under the eye: the lift carries part of the height (twice, it depends on alt).
+    for (let i = 0; i < 2; i++) {
+      s.lift = liftTargetAt(ctx, alt);
+      alt = Math.min(ALT_MAX, Math.max(lo, altSea - s.ground - s.lift));
+    }
+    s.logAlt = s.logAltTarget = lastLogAlt = Math.log(alt);
+    s.logAltVel = 0;
+    s.jump = 0;
+    s.jumpVel = 0;
+    s.lookYaw = 0;
+    const w = lookBlend(alt);
+    if (w > 0.95) {
+      s.lookPitch = Math.max(-80 * DEG, Math.min(75 * DEG, (pitch - pitchForAlt(alt)) / w));
+      s.pitchOverride = NaN;
+      s.overrideWeight = 0;
+      exitRelease = -1;
+    } else {
+      s.lookPitch = 0;
+      s.pitchOverride = Math.max(-Math.PI / 2, Math.min(80 * DEG, pitch));
+      s.overrideWeight = 1;
+      exitRelease = 0;
+    }
+    flyT = -1;
+    inertiaRate = 0;
+    anchorOn = false;
+    aimOn = false;
+    hasGrab = false;
+    interacted = false;
+    velF = velR = yawVel = 0;
+    landOn = false;
+    landDone = false;
+    landNone = false;
+    pendingLand = null;
+    flyTurn = false;
+    steer = false;
+    steerDone = false;
+    prevPX = NaN;
+    pvx = pvz = 0;
+    floors(ctx, alt);
   }
 
   /** Smoothed plan-space velocity of the focus (the lift's look-ahead). */
@@ -1261,115 +1355,164 @@ export function createCameraSystem(): System {
     rotateState(axis, arc(s.focus, tB, axis));
   }
 
+  /** The v1 explore update (BRIEF §4), unchanged: input, fly-to, springs, landing, walls, apply. */
+  function exploreUpdate(ctx: LBContext, dt: number, locked: boolean) {
+    if (input && !locked) {
+      handleInput(ctx, dt);
+      seaSteer(ctx);
+    }
+    if (flyT < 0) steer = false;
+
+    // Fly-to: slerp the focus with an ease, arc the altitude up and back down.
+    if (flyT >= 0) {
+      flyT = Math.min(1, flyT + dt / (ctx.reducedMotion ? flyDur * 1.4 : flyDur));
+      const e = flyT * flyT * (3 - 2 * flyT);
+      const ang = angleBetween(flyFrom, flyTo);
+      slerpDir(tA, flyFrom, flyTo, e);
+      // Move the state (carrying fwd) to the slerped point.
+      const a = arc(s.focus, tA, axis);
+      rotateState(axis, a);
+      // Down in the street the flight slides round lamp posts and trunks like a walk would.
+      if (s.logAlt < Math.log(3)) {
+        fromSphere(s.focus, plan);
+        if (plan.x * plan.x + plan.z * plan.z < (CITY_PLAN_RADIUS + 5) ** 2 && ctx.world.cityIndex.collide(plan.x, plan.z, BODY_R, planOut)) moveFocusToPlan(planOut.x, planOut.z);
+      }
+      const hop = Math.min(1.2, ang * 1.5) * Math.sin(Math.PI * flyT);
+      s.logAltTarget = Math.min(LOG_MAX, flyLogFrom + (flyLogTo - flyLogFrom) * e + hop);
+      if (flyTurn) {
+        let d = flyHeadTo - flyHeadFrom;
+        d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+        setPlanHeading(flyHeadFrom + d * e);
+      }
+      if (flyT >= 1) {
+        flyT = -1;
+        flyTurn = false;
+        s.logAltTarget = flyLogTo;
+      }
+    }
+    // Never down to eye height over open water.
+    const lo = minLog(ctx);
+    if (s.logAltTarget < lo) s.logAltTarget = lo;
+
+    // Altitude spring (critically damped, in log space).
+    const omega = ctx.reducedMotion ? 4 : 6.5;
+    springStep(s.logAlt, s.logAltVel, s.logAltTarget, omega, dt, spring);
+    s.logAlt = Math.min(LOG_MAX, Math.max(LOG_MIN, spring[0]));
+    s.logAltVel = spring[1];
+    frameDLog = s.logAlt - lastLogAlt;
+    lastLogAlt = s.logAlt;
+    // Zoom toward the cursor: hold the anchor under it (map-style).
+    if (anchorOn && !landOn && input && !ctx.debug.cameraLocked) holdAnchor(ctx, dt);
+    if (anchorOn && Math.abs(s.logAltTarget - s.logAlt) < 1e-3) anchorOn = false;
+    if (!anchorOn) anchorK = 0;
+    let alt = Math.exp(s.logAlt);
+    if (!ctx.debug.cameraLocked) {
+      resolveLanding(ctx, alt, dt);
+      alt = Math.exp(s.logAlt); // the glide's speed cap may hold the descent back
+      keepOffWalls(ctx, alt, dt);
+      keepOffTrees(ctx, alt, dt);
+    }
+
+    // Pitch override (setView) blends back to the altitude curve once the user interacts.
+    if (interacted && s.overrideWeight > 0) {
+      s.overrideWeight = Math.max(0, s.overrideWeight - dt * 2);
+    }
+    // A mode's hand-back holds its pitch a moment, then eases it onto the curve (v2).
+    if (exitRelease >= 0) {
+      exitRelease += dt;
+      const k = 1 - smooth01((exitRelease - 0.5) / (ctx.reducedMotion ? 2.4 : 1.7));
+      s.overrideWeight = Math.min(s.overrideWeight, k);
+      if (k <= 0) exitRelease = -1;
+    }
+    // Look offsets relax when climbing away from the ground.
+    const w = lookBlend(alt);
+    if (w < 0.02) {
+      s.lookPitch *= Math.exp(-dt * 2);
+      s.lookYaw *= Math.exp(-dt * 2);
+    }
+
+    // Ground reference (terrain / city ground) and the roof-clearing lift.
+    trackPlanVelocity(dt);
+    stepReference(ctx, alt, dt);
+
+    // FPV jump.
+    if (s.jumpVel !== 0 || s.jump > 0) {
+      s.jumpVel -= GRAVITY * dt;
+      s.jump += s.jumpVel * dt;
+      if (s.jump <= 0) {
+        s.jump = 0;
+        s.jumpVel = 0;
+      }
+    }
+    apply(ctx);
+  }
+
   return {
     name: 'camera',
     stage: 1,
     init(ctx) {
       input = new CameraInput(ctx.canvas, ctx.variant);
       finder = new LandingFinder(ctx.world.city, ctx.world.cityIndex);
+      input.escapeWanted = () => director.mode !== 'explore' && !ctx.debug.cameraLocked;
+      const modeOut = { mode: 'explore' as LBContext['view']['mode'], ride: null as string | null, blend: 1 };
       ctx.services.camera = {
         setView: (v, o) => setView(ctx, v, o?.glide),
         getView: () => {
+          if (director.mode !== 'explore' || director.blending) {
+            const v = ctx.view;
+            return { lat: v.lat, lon: v.lon, alt: Math.max(EYE_HEIGHT, v.alt), heading: v.heading / DEG, pitch: v.pitch / DEG };
+          }
           latLonFromDir(s.focus, ll);
           return { lat: ll.lat, lon: ll.lon, alt: Math.exp(s.logAlt), heading: pose.heading / DEG, pitch: pose.pitch / DEG };
         },
-        flyTo: (dir, alt) => startFly(ctx, dir, alt ?? Math.exp(s.logAlt)),
+        flyTo: (dir, alt) => {
+          if (director.mode !== 'explore') director.exitMode(ctx);
+          startFly(ctx, dir, alt ?? Math.exp(s.logAlt));
+        },
         releaseLock: () => input?.releaseLock(),
         lastInputAt: () => input?.lastInput ?? 0,
         stick: () => stickView,
+        mode: () => {
+          modeOut.mode = director.mode;
+          modeOut.ride = director.rideId;
+          modeOut.blend = director.blend;
+          return modeOut;
+        },
+        ride: (id) => {
+          input?.releaseLock();
+          return director.ride(ctx, id);
+        },
+        cycle: (d) => director.cycle(ctx, d),
+        fly: () => {
+          input?.releaseLock();
+          director.fly(ctx);
+        },
+        exitMode: () => director.exitMode(ctx),
+        hover: () => director.hoverId,
+        subject: (out) => director.subject(out),
       };
-      // Dev introspection for player tests (not part of the contract).
-      (ctx.services.camera as unknown as { debug: () => object }).debug = () => ({ landOn, landDone, landX, landZ, landHeading, fromX, fromZ, lift: s.lift, anchorOn, aimOn, landInfo, target: Math.exp(s.logAltTarget), input: input?.debugState() });
+      // Dev introspection for player tests and the review hooks (not part of the contract).
+      Object.assign(ctx.services.camera, {
+        debug: () => ({ landOn, landDone, landX, landZ, landHeading, fromX, fromZ, lift: s.lift, anchorOn, aimOn, landInfo, target: Math.exp(s.logAltTarget), input: input?.debugState(), override: s.overrideWeight, pitchOverride: s.pitchOverride, exitRelease, posePitch: pose.pitch, poseAlt: pose.alt, mode: director.mode, ride: director.rideId, blend: director.blend, birdOn: director.birdOn, bird: { alt: director.bird.alt, speed: director.bird.speed, bank: director.bird.bank, gamma: director.bird.gamma, hardHits: director.bird.hardHits } }),
+        director,
+      });
       setView(ctx, { lat: 20, lon: 10, alt: 380, heading: 0 });
     },
     update(ctx) {
       const dt = ctx.time.realDt;
+      const locked = ctx.debug.cameraLocked;
       if (input) {
-        // The stick is offered only on touch, only at street level.
-        input.stick.enabled = input.touchSeen && lookBlend(Math.exp(s.logAlt)) > 0.95 && !ctx.debug.cameraLocked;
+        // The stick is offered only on touch: at street level, and to steer the bird.
+        input.stick.enabled = input.touchSeen && !locked && (director.mode === 'bird' || (director.mode === 'explore' && lookBlend(Math.exp(s.logAlt)) > 0.95));
         input.poll();
-        if (!ctx.debug.cameraLocked) {
-          handleInput(ctx, dt);
-          seaSteer(ctx);
-        }
       }
-      if (flyT < 0) steer = false;
-
-      // Fly-to: slerp the focus with an ease, arc the altitude up and back down.
-      if (flyT >= 0) {
-        flyT = Math.min(1, flyT + dt / (ctx.reducedMotion ? flyDur * 1.4 : flyDur));
-        const e = flyT * flyT * (3 - 2 * flyT);
-        const ang = angleBetween(flyFrom, flyTo);
-        slerpDir(tA, flyFrom, flyTo, e);
-        // Move the state (carrying fwd) to the slerped point.
-        const a = arc(s.focus, tA, axis);
-        rotateState(axis, a);
-        // Down in the street the flight slides round lamp posts and trunks like a walk would.
-        if (s.logAlt < Math.log(3)) {
-          fromSphere(s.focus, plan);
-          if (plan.x * plan.x + plan.z * plan.z < (CITY_PLAN_RADIUS + 5) ** 2 && ctx.world.cityIndex.collide(plan.x, plan.z, BODY_R, planOut)) moveFocusToPlan(planOut.x, planOut.z);
-        }
-        const hop = Math.min(1.2, ang * 1.5) * Math.sin(Math.PI * flyT);
-        s.logAltTarget = Math.min(LOG_MAX, flyLogFrom + (flyLogTo - flyLogFrom) * e + hop);
-        if (flyTurn) {
-          let d = flyHeadTo - flyHeadFrom;
-          d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
-          setPlanHeading(flyHeadFrom + d * e);
-        }
-        if (flyT >= 1) {
-          flyT = -1;
-          flyTurn = false;
-          s.logAltTarget = flyLogTo;
-        }
-      }
-      // Never down to eye height over open water.
-      const lo = minLog(ctx);
-      if (s.logAltTarget < lo) s.logAltTarget = lo;
-
-      // Altitude spring (critically damped, in log space).
-      const omega = ctx.reducedMotion ? 4 : 6.5;
-      springStep(s.logAlt, s.logAltVel, s.logAltTarget, omega, dt, spring);
-      s.logAlt = Math.min(LOG_MAX, Math.max(LOG_MIN, spring[0]));
-      s.logAltVel = spring[1];
-      frameDLog = s.logAlt - lastLogAlt;
-      lastLogAlt = s.logAlt;
-      // Zoom toward the cursor: hold the anchor under it (map-style).
-      if (anchorOn && !landOn && input && !ctx.debug.cameraLocked) holdAnchor(ctx, dt);
-      if (anchorOn && Math.abs(s.logAltTarget - s.logAlt) < 1e-3) anchorOn = false;
-      if (!anchorOn) anchorK = 0;
-      let alt = Math.exp(s.logAlt);
-      if (!ctx.debug.cameraLocked) {
-        resolveLanding(ctx, alt, dt);
-        alt = Math.exp(s.logAlt); // the glide's speed cap may hold the descent back
-        keepOffWalls(ctx, alt, dt);
-        keepOffTrees(ctx, alt, dt);
-      }
-
-      // Pitch override (setView) blends back to the altitude curve once the user interacts.
-      if (interacted && s.overrideWeight > 0) {
-        s.overrideWeight = Math.max(0, s.overrideWeight - dt * 2);
-      }
-      // Look offsets relax when climbing away from the ground.
-      const w = lookBlend(alt);
-      if (w < 0.02) {
-        s.lookPitch *= Math.exp(-dt * 2);
-        s.lookYaw *= Math.exp(-dt * 2);
-      }
-
-      // Ground reference (terrain / city ground) and the roof-clearing lift.
-      trackPlanVelocity(dt);
-      stepReference(ctx, alt, dt);
-
-      // FPV jump.
-      if (s.jumpVel !== 0 || s.jump > 0) {
-        s.jumpVel -= GRAVITY * dt;
-        s.jump += s.jumpVel * dt;
-        if (s.jump <= 0) {
-          s.jump = 0;
-          s.jumpVel = 0;
-        }
-      }
-      apply(ctx);
+      // v2: modes, picking and transitions (camera/director.ts). Explore runs only while it is the mode.
+      // With time frozen (?shot=1) the camera moves only with the sim (step / advance / dive frames),
+      // so review frames are deterministic whatever the rAF loop does in between (a hand-back's
+      // pitch release, a ride, the bird). v1's shots snap every spring, so they are unchanged.
+      const ddt = ctx.time.frozen ? ctx.time.dt : dt;
+      if (director.frameStart(ctx, input, ddt, locked)) exploreUpdate(ctx, ddt, locked);
+      director.frameEnd(ctx, ddt, ctx.camera.near);
       if (input) {
         const st = input.stick;
         stickView.visible = st.enabled;
@@ -1382,7 +1525,8 @@ export function createCameraSystem(): System {
         input.endFrame();
       }
     },
-    dispose() {
+    dispose(ctx) {
+      director.dispose(ctx);
       input?.dispose();
       input = null;
     },

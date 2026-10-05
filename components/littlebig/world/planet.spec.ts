@@ -54,14 +54,16 @@ describe('planet', () => {
     // Across the blend ring, along 64 rays: no land slope steeper than ~35° (a bay may reach into
     // the outer ring: its seabed is under the opaque ocean); past it (out to 60 m) no cliff near
     // the waterline and no seam anywhere (steep slopes belong to hills and mountains).
+    // v2 (R1): this is the plateau's own shape (baseHeightAt); the region carved into it (gate
+    // plazas, roads, pads) keeps its banks under its own limits, spec'd in region/region.spec.ts.
     const step = 0.5;
     const r0 = PLATEAU_RADIUS * (R + PLATEAU_HEIGHT);
     const r1 = (PLATEAU_RADIUS + PLATEAU_BLEND) * (R + PLATEAU_HEIGHT);
     for (let k = 0; k < 64; k++) {
       const a = (k / 64) * Math.PI * 2;
-      let prev = planet.heightAt(chartToDir(chart, Math.cos(a) * r0, Math.sin(a) * r0));
+      let prev = planet.baseHeightAt(chartToDir(chart, Math.cos(a) * r0, Math.sin(a) * r0));
       for (let r = r0 + step; r <= r1 + 60; r += step) {
-        const h = planet.heightAt(chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r));
+        const h = planet.baseHeightAt(chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r));
         const slope = Math.abs(h - prev) / step;
         if (r <= r1 && h >= 0 && prev >= 0) expect(slope).toBeLessThan(0.7);
         else if (Math.abs(h) < 1.5) expect(slope).toBeLessThan(2.5);
@@ -71,6 +73,30 @@ describe('planet', () => {
     }
     expect(planet.biomeAt(planet.cityDir)).toBe(Biome.City);
     expect(planet.plateauWeight(planet.cityDir)).toBe(1);
+    // and the final terrain (with the region carved in) has no seam across the ring either
+    for (let k = 0; k < 64; k++) {
+      const a = (k / 64) * Math.PI * 2;
+      let prev = planet.heightAt(chartToDir(chart, Math.cos(a) * r0, Math.sin(a) * r0));
+      for (let r = r0 + step; r <= r1 + 60; r += step) {
+        const h = planet.heightAt(chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r));
+        expect(Math.abs(h - prev) / step).toBeLessThan(6);
+        prev = h;
+      }
+    }
+  });
+
+  it('carves the region in without touching the plateau (v2, R1)', () => {
+    // heightAt = baseHeightAt everywhere on the plateau and far from every settlement and road
+    const chart = createChart(CITY_LAT, CITY_LON, R + PLATEAU_HEIGHT);
+    for (let i = 0; i < 300; i++) {
+      const a = i * 2.399;
+      const r = Math.sqrt(i / 300) * PLATEAU_RADIUS * (R + PLATEAU_HEIGHT) * 0.999;
+      const d = chartToDir(chart, Math.cos(a) * r, Math.sin(a) * r);
+      expect(planet.heightAt(d)).toBe(planet.baseHeightAt(d));
+    }
+    const far = dirFromLatLon(-70, 100); // open ocean, nowhere near the network
+    expect(planet.heightAt(far)).toBe(planet.baseHeightAt(far));
+    expect(createPlanet(planet.seed, { region: false }).heightAt(far)).toBe(planet.baseHeightAt(far));
   });
 
   it('has the sea within sight of the plateau edge', () => {

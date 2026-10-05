@@ -10,6 +10,9 @@
 //   - Nothing ever flies through the camera: a plane near the eye slides past sideways to its
 //     flight, a balloon is pushed smoothly away (routes.ts dodgeAcross / dodge; the contrail's head
 //     follows).
+//   - v2 (L1): every plane ('plane:<i>') and balloon ('balloon:<i>') is a Trackable (view 'chase';
+//     air/track.ts). The one being ridden (ctx.view.ride) never dodges: its chase camera sits inside
+//     the dodge radius on purpose, and the plane must stay where the camera expects it.
 
 import {
   AdditiveBlending,
@@ -38,6 +41,7 @@ import { BALLOON_BELLY, BALLOONS, balloonAt, dodge, dodgeAcross, newBalloon, new
 import { BEACON, BURNER_Y, balloonGeometry, planeGeometry, TAIL_TIP, WING_TIP } from './geometry';
 import { AIR_PATCH, contrailFrag, contrailVert, lightsFrag, lightsVert, NP } from './shaders';
 import { airSpace, skyDipSin } from '../sky/rig';
+import { BALLOON_CARDS, balloonDetail, PLANE_CARDS, planeDetail } from './track';
 import { R } from '../world/config';
 
 /** Plane liveries: cheatline + fin (A), engines (B). */
@@ -89,6 +93,18 @@ export function createAirSystem(): System {
   const Z = v3();
   const U = v3();
   const viewSize = new Vector2();
+  const untrack: Array<() => void> = [];
+  const planeIds = ROUTES.map((_, i) => `plane:${i}`);
+  const balloonIds = BALLOONS.map((_, i) => `balloon:${i}`);
+  // the trackables' own scratch (pose() may run before or after place() in a frame)
+  const tPose = newPose();
+  const tBal = newBalloon();
+  const tOff = v3();
+  const tFrame = { up: v3(), ax: v3(), az: v3() };
+  const tX = v3();
+  const tU = v3();
+  const tZ = v3();
+  const tP = v3();
   const thetaU = Array.from({ length: NP }, () => new Vector4());
   const dodgeU = Array.from({ length: NP }, () => new Vector3());
   const viewH = { value: 800 };
@@ -114,18 +130,83 @@ export function createAirSystem(): System {
     a[k * 3 + 2] = p.z + (pose.left.z * lx + pose.up.z * ly + pose.fwd.z * lz) * s;
   }
 
+  /** Plane i at time t into `p`, pushed clear of the eye unless it is the one being ridden; the push into `o`. */
+  function planeAt(i: number, t: number, eye: Vec3, ridden: boolean, p: typeof pose, o: Vec3) {
+    const r = ROUTES[i];
+    planePose(r, t, p);
+    if (ridden) o.x = o.y = o.z = 0;
+    else dodgeAcross(p.pos, p.fwd, eye, PLANE_DODGE[0] * r.scale, PLANE_DODGE[1] * r.scale, o);
+    p.pos.x += o.x;
+    p.pos.y += o.y;
+    p.pos.z += o.z;
+  }
+
+  /**
+   * Balloon i at time t: its basket origin into p and its basis (X across, U up the swaying
+   * envelope, Z = X × U), pushed clear of the eye (never downward) unless it is the one ridden.
+   */
+  function balloonPlace(i: number, t: number, eye: Vec3, ridden: boolean, st: typeof bal, fr: typeof frame, p: Vec3, x: Vec3, u: Vec3, z: Vec3, o: Vec3) {
+    const b = BALLOONS[i];
+    balloonAt(b, t, st);
+    toSphere(st.x, st.z, st.h, p);
+    planFrame(st.x, st.z, fr);
+    // Yaw about the local up, then a slow pendulum sway about the envelope's belly.
+    const cy = Math.cos(st.yaw);
+    const sy = Math.sin(st.yaw);
+    x.x = fr.ax.x * cy + fr.az.x * sy;
+    x.y = fr.ax.y * cy + fr.az.y * sy;
+    x.z = fr.ax.z * cy + fr.az.z * sy;
+    cross3(z, x, fr.up);
+    const cs = Math.cos(st.sway);
+    const ss = Math.sin(st.sway);
+    u.x = fr.up.x * cs + z.x * ss;
+    u.y = fr.up.y * cs + z.y * ss;
+    u.z = fr.up.z * cs + z.z * ss;
+    cross3(z, x, u);
+    const belly = BALLOON_BELLY * b.scale;
+    p.x += (fr.up.x - u.x) * belly;
+    p.y += (fr.up.y - u.y) * belly;
+    p.z += (fr.up.z - u.z) * belly;
+    if (ridden) {
+      o.x = o.y = o.z = 0;
+      return;
+    }
+    tmp.x = p.x + u.x * belly;
+    tmp.y = p.y + u.y * belly;
+    tmp.z = p.z + u.z * belly;
+    dodge(tmp, eye, BALLOON_DODGE[0] * b.scale, BALLOON_DODGE[1] * b.scale, o);
+    // A balloon never sinks to dodge (it would sink into the roofs it clears by ~4 m): the downward
+    // part of the push turns sideways, away from the eye (or along the envelope's own x).
+    const up = fr.up;
+    const down = o.x * up.x + o.y * up.y + o.z * up.z;
+    if (down < 0) {
+      let hx = tmp.x - eye.x;
+      let hy = tmp.y - eye.y;
+      let hz = tmp.z - eye.z;
+      const hu = hx * up.x + hy * up.y + hz * up.z;
+      hx -= up.x * hu;
+      hy -= up.y * hu;
+      hz -= up.z * hu;
+      const hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+      const k = hl > 0.5 ? -down / hl : 0;
+      o.x += -up.x * down + (k ? hx * k : -x.x * down);
+      o.y += -up.y * down + (k ? hy * k : -x.y * down);
+      o.z += -up.z * down + (k ? hz * k : -x.z * down);
+    }
+    p.x += o.x;
+    p.y += o.y;
+    p.z += o.z;
+  }
+
   function place(ctx: LBContext) {
     if (!planes || !balloons || !lightPos) return;
     const t = ctx.time.render;
     const eye = ctx.view.eye;
+    const ride = ctx.view.ride;
     const pm = planes.instanceMatrix.array as Float32Array;
     for (let i = 0; i < nP; i++) {
       const r = ROUTES[i];
-      planePose(r, t, pose);
-      dodgeAcross(pose.pos, pose.fwd, eye, PLANE_DODGE[0] * r.scale, PLANE_DODGE[1] * r.scale, off);
-      pose.pos.x += off.x;
-      pose.pos.y += off.y;
-      pose.pos.z += off.z;
+      planeAt(i, t, eye, ride === planeIds[i], pose, off);
       writeMatrix(pm, i, pose.left, pose.up, pose.fwd, pose.pos, r.scale);
       thetaU[i].x = routeTheta(r, t);
       dodgeU[i].set(off.x, off.y, off.z);
@@ -144,51 +225,8 @@ export function createAirSystem(): System {
     const la = lightPos.array as Float32Array;
     for (let i = 0; i < nB; i++) {
       const b = BALLOONS[i];
-      balloonAt(b, t, bal);
-      toSphere(bal.x, bal.z, bal.h, pose.pos);
-      planFrame(bal.x, bal.z, frame);
-      // Yaw about the local up, then a slow pendulum sway about the envelope's belly.
-      const cy = Math.cos(bal.yaw);
-      const sy = Math.sin(bal.yaw);
-      X.x = frame.ax.x * cy + frame.az.x * sy;
-      X.y = frame.ax.y * cy + frame.az.y * sy;
-      X.z = frame.ax.z * cy + frame.az.z * sy;
-      cross3(Z, X, frame.up);
-      const cs = Math.cos(bal.sway);
-      const ss = Math.sin(bal.sway);
-      U.x = frame.up.x * cs + Z.x * ss;
-      U.y = frame.up.y * cs + Z.y * ss;
-      U.z = frame.up.z * cs + Z.z * ss;
-      cross3(Z, X, U);
-      const belly = BALLOON_BELLY * b.scale;
       const p = pose.pos;
-      p.x += (frame.up.x - U.x) * belly;
-      p.y += (frame.up.y - U.y) * belly;
-      p.z += (frame.up.z - U.z) * belly;
-      tmp.x = p.x + U.x * belly;
-      tmp.y = p.y + U.y * belly;
-      tmp.z = p.z + U.z * belly;
-      dodge(tmp, eye, BALLOON_DODGE[0] * b.scale, BALLOON_DODGE[1] * b.scale, off);
-      // A balloon never sinks to dodge (it would sink into the roofs it clears by ~4 m): the downward
-      // part of the push turns sideways, away from the eye (or along the envelope's own x).
-      const down = off.x * frame.up.x + off.y * frame.up.y + off.z * frame.up.z;
-      if (down < 0) {
-        let hx = tmp.x - eye.x;
-        let hy = tmp.y - eye.y;
-        let hz = tmp.z - eye.z;
-        const hu = hx * frame.up.x + hy * frame.up.y + hz * frame.up.z;
-        hx -= frame.up.x * hu;
-        hy -= frame.up.y * hu;
-        hz -= frame.up.z * hu;
-        const hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
-        const k = hl > 0.5 ? -down / hl : 0;
-        off.x += -frame.up.x * down + (k ? hx * k : -X.x * down);
-        off.y += -frame.up.y * down + (k ? hy * k : -X.y * down);
-        off.z += -frame.up.z * down + (k ? hz * k : -X.z * down);
-      }
-      p.x += off.x;
-      p.y += off.y;
-      p.z += off.z;
+      balloonPlace(i, t, eye, ride === balloonIds[i], bal, frame, p, X, U, Z, off);
       writeMatrix(bm, i, X, U, Z, p, b.scale);
       const k = (nP * LIGHTS_PER_PLANE + i) * 3;
       const fy = (BURNER_Y + 0.42) * b.scale; // above the can, toward the mouth
@@ -343,6 +381,70 @@ export function createAirSystem(): System {
       planeReveal.needsUpdate = true;
       balloonReveal.needsUpdate = true;
       ready = true;
+
+      // v2 (L1): planes and balloons as Trackables (chase)
+      for (let i = 0; i < nP; i++) {
+        const r = ROUTES[i];
+        const card = PLANE_CARDS[i % PLANE_CARDS.length];
+        untrack.push(
+          ctx.services.track.register({
+            id: planeIds[i],
+            kind: 'plane',
+            label: card.label,
+            sub: card.sub,
+            view: 'chase',
+            radius: Math.round(460 * r.scale) / 100,
+            pose(c, out) {
+              planeAt(i, c.time.render, c.view.eye, c.view.ride === planeIds[i], tPose, tOff);
+              out.pos.set(tPose.pos.x, tPose.pos.y, tPose.pos.z);
+              out.fwd.set(tPose.fwd.x, tPose.fwd.y, tPose.fwd.z);
+              out.up.set(tPose.up.x, tPose.up.y, tPose.up.z);
+              out.speed = r.omega * Math.sqrt(tPose.pos.x * tPose.pos.x + tPose.pos.y * tPose.pos.y + tPose.pos.z * tPose.pos.z);
+              return true;
+            },
+            detail: (c) => planeDetail(c, i),
+          }),
+        );
+      }
+      for (let i = 0; i < nB; i++) {
+        const b = BALLOONS[i];
+        const card = BALLOON_CARDS[i % BALLOON_CARDS.length];
+        untrack.push(
+          ctx.services.track.register({
+            id: balloonIds[i],
+            kind: 'balloon',
+            label: card.label,
+            sub: card.sub,
+            view: 'chase',
+            radius: Math.round(500 * b.scale) / 100,
+            pose(c, out) {
+              const t = c.time.render;
+              balloonPlace(i, t, c.view.eye, c.view.ride === balloonIds[i], tBal, tFrame, tP, tX, tU, tZ, tOff);
+              // anchored at the envelope's belly; forward along its drift (the envelope's own yaw spins slowly)
+              const belly = BALLOON_BELLY * b.scale;
+              out.pos.set(tP.x + tU.x * belly, tP.y + tU.y * belly, tP.z + tU.z * belly);
+              const up = tFrame.up;
+              out.up.set(up.x, up.y, up.z);
+              balloonAt(b, t + 0.5, tBal);
+              toSphere(tBal.x, tBal.z, tBal.h, tX);
+              balloonAt(b, t - 0.5, tBal);
+              toSphere(tBal.x, tBal.z, tBal.h, tZ);
+              let fx = tX.x - tZ.x;
+              let fy = tX.y - tZ.y;
+              let fz = tX.z - tZ.z;
+              out.speed = Math.sqrt(fx * fx + fy * fy + fz * fz);
+              const fu = fx * up.x + fy * up.y + fz * up.z;
+              fx -= up.x * fu;
+              fy -= up.y * fu;
+              fz -= up.z * fu;
+              const fl = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
+              out.fwd.set(fx / fl, fy / fl, fz / fl);
+              return true;
+            },
+            detail: (c) => balloonDetail(c, i),
+          }),
+        );
+      }
     },
 
     update(ctx: LBContext) {
@@ -358,6 +460,8 @@ export function createAirSystem(): System {
     },
 
     dispose(ctx: LBContext) {
+      for (const off of untrack) off();
+      untrack.length = 0;
       for (const o of [planes, balloons, trails, lights]) o?.removeFromParent();
       planes?.dispose();
       balloons?.dispose();

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Engine } from './core/engine';
 import { provideHandoff, takeHandoff } from './handoff';
+import { Hud } from './ui/hud';
 
 type Phase = 'loading' | 'running' | 'nogl' | 'error';
 
@@ -11,17 +12,6 @@ type Phase = 'loading' | 'running' | 'nogl' | 'error';
 let bootChain: Promise<void> = Promise.resolve();
 
 const SPACE = '#070B1A';
-const HINT_ORBIT = 'drag to spin · scroll to dive · double-click to fly';
-const HINT_STREET = 'wasd walk · drag to look · space jump · scroll out to fly';
-const HINT_STREET_PAGE = 'wasd walk · click to look · space jump · scroll out to fly';
-const HINT_ORBIT_TOUCH = 'drag to spin · pinch to dive · double-tap to fly';
-const HINT_STREET_TOUCH = 'left thumb walks · drag to look · pinch out to fly';
-// Hovering low over open water (the zoom's floor there): how to get back to land.
-const HINT_SEA = 'scroll out to fly · double-click land to fly there';
-const HINT_SEA_TOUCH = 'pinch out to fly · double-tap land to fly there';
-/** Idle before the hint first shows, or shows a new line (ms); idle before it repeats one already seen. */
-const HINT_IDLE = 2000;
-const HINT_REPEAT_IDLE = 9000;
 /** Virtual stick geometry (CSS px): travel radius (camera/input.ts STICK_RADIUS) and the resting spot. */
 const STICK_R = 46;
 const STICK_REST_X = 70; // = camera/input.ts STICK_REST_X / STICK_REST_BOTTOM (the stick zone is anchored on it)
@@ -33,11 +23,15 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   const engineRef = useRef<Engine | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [slow, setSlow] = useState(false);
-  const [hint, setHint] = useState<{ text: string; on: boolean }>({ text: HINT_ORBIT, on: false });
+  // The running engine, for the HUD (set once it is up).
+  const [engine, setEngine] = useState<Engine | null>(null);
   const [debug, setDebug] = useState<string | null>(null);
   // Touch input seen (or a coarse pointer): mounts the virtual stick overlay.
   const [touchUi, setTouchUi] = useState(false);
   const [shotMode] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('shot'));
+  // ?shot=1 hides the HUD for clean review frames; ?hud=1 brings it back (scripts/littlebig-shot.mjs --hud).
+  const [hudInShots] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('hud'));
+  const showHud = !shotMode || hudInShots;
   // Bumped when the browser restores a lost WebGL context: remounts the canvas (fresh context) and
   // reboots the engine (~150 ms warm).
   const [generation, setGeneration] = useState(0);
@@ -101,6 +95,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
         ro.observe(wrap);
         engine.start();
         if (variant === 'window') offHandoff = provideHandoff(() => ({ view: engine.ctx.services.camera.getView(), t: engine.ctx.time.t }));
+        setEngine(engine);
         setPhase('running');
       } catch (e) {
         console.error('[littlebig]', e);
@@ -119,51 +114,24 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       offHandoff();
       engineRef.current?.dispose();
       engineRef.current = null;
+      setEngine(null);
     };
   }, [variant, generation]);
 
-  // Hint row: fades in after 2 s without input (from the first frame), fades out on interaction.
-  // A line already shown comes back only after a longer idle, so it never nags.
+  // Touch seen (or a coarse pointer): mounts the virtual stick overlay. (The hint row lives in the HUD.)
   useEffect(() => {
-    if (shotMode || phase !== 'running') return;
-    const since = performance.now();
-    let lastShown = '';
-    let showing = false;
+    if (shotMode || phase !== 'running' || touchUi) return;
     const id = window.setInterval(() => {
-      const e = engineRef.current;
-      if (!e) return;
-      const cam = e.ctx.services.camera;
-      const touch = cam.stick?.().touch ?? false;
-      if (touch) setTouchUi(true);
-      const v = e.ctx.view;
-      const street = v.street;
-      const sea = !street && v.alt < 14 && e.ctx.world.planet.heightAt(v.focus) < -0.3;
-      const text = street
-        ? touch
-          ? HINT_STREET_TOUCH
-          : variant === 'page'
-            ? HINT_STREET_PAGE
-            : HINT_STREET
-        : sea
-          ? touch
-            ? HINT_SEA_TOUCH
-            : HINT_SEA
-          : touch
-            ? HINT_ORBIT_TOUCH
-            : HINT_ORBIT;
-      const idle = performance.now() - Math.max(since, cam.lastInputAt());
-      const on = idle > (text === lastShown && !showing ? HINT_REPEAT_IDLE : HINT_IDLE);
-      if (on) lastShown = text;
-      showing = on;
-      setHint((h) => (h.on === on && h.text === text ? h : { text, on }));
+      if (engineRef.current?.ctx.services.camera.stick?.().touch) setTouchUi(true);
     }, 250);
     return () => window.clearInterval(id);
-  }, [phase, shotMode, variant]);
+  }, [phase, shotMode, touchUi]);
 
   // Touch UI: the left-thumb stick, shown only on touch and only at street level. Driven straight
   // from the camera's live stick state each frame (no React renders).
   const stickRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
+  const ringRef = useRef<SVGCircleElement>(null);
   useEffect(() => {
     if (shotMode || phase !== 'running' || !touchUi) return;
     let raf = 0;
@@ -193,7 +161,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       last[3] = ky;
       lastActive = st.active;
       base.style.transform = `translate(${cx - STICK_R}px, ${cy - STICK_R}px)`;
-      base.style.borderColor = st.active ? 'rgba(255,184,77,0.75)' : 'rgba(240,244,255,0.32)';
+      ringRef.current?.setAttribute('stroke', st.active ? '#FFB84D' : 'rgba(255,248,232,0.6)');
       knob.style.transform = `translate(${kx}px, ${ky}px)`;
     };
     raf = requestAnimationFrame(tick);
@@ -254,47 +222,31 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
           The planet failed to load. Reload to try again.
         </div>
       )}
-      {phase === 'running' && !shotMode && (
-        <div
-          className="pointer-events-none absolute inset-x-0 bottom-3 px-4 text-center font-mono text-[11px] tracking-[0.12em]"
-          style={{ opacity: hint.on ? 1 : 0, transition: 'opacity 600ms ease' }}
-        >
-          {/* A faint backing keeps the line legible over pale pavement and sky alike. */}
-          <span className="inline-block px-2.5 py-1 whitespace-nowrap max-[460px]:px-1.5 max-[460px]:text-[10px] max-[460px]:tracking-[0.02em]" style={{ color: 'rgba(240,244,255,0.86)', background: 'rgba(7,11,26,0.34)', textShadow: '0 1px 4px rgba(7,11,26,0.7)' }}>
-            {hint.text}
-          </span>
-        </div>
-      )}
+      {phase === 'running' && showHud && engine && <Hud engine={engine} variant={variant} shotHud={shotMode} />}
       {phase === 'running' && !shotMode && touchUi && (
+        // The left-thumb stick (POP: ink ring, paper knob with a hard shadow). SVG circles: the site's
+        // global square corners apply to every box.
         <div
           ref={stickRef}
           aria-hidden
           className="pointer-events-none absolute top-0 left-0"
-          style={{
-            width: STICK_R * 2,
-            height: STICK_R * 2,
-            border: '1.5px solid rgba(240,244,255,0.32)',
-            background: 'rgba(7,11,26,0.18)',
-            opacity: 0,
-            transition: 'opacity 400ms ease, border-color 200ms ease',
-          }}
+          style={{ width: STICK_R * 2, height: STICK_R * 2, opacity: 0, transition: 'opacity 400ms ease', zIndex: 4 }}
         >
-          <div
-            ref={knobRef}
-            className="absolute"
-            style={{
-              left: STICK_R - 20,
-              top: STICK_R - 20,
-              width: 40,
-              height: 40,
-              background: 'rgba(240,244,255,0.55)',
-              boxShadow: '0 1px 6px rgba(7,11,26,0.5)',
-            }}
-          />
+          <svg width={STICK_R * 2} height={STICK_R * 2} viewBox={`0 0 ${STICK_R * 2} ${STICK_R * 2}`} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+            <circle cx={STICK_R} cy={STICK_R} r={STICK_R - 2} fill="rgba(27,21,48,0.28)" stroke="#1B1530" strokeWidth="3" />
+            <circle ref={ringRef} cx={STICK_R} cy={STICK_R} r={STICK_R - 5.5} fill="none" stroke="rgba(255,248,232,0.6)" strokeWidth="2" strokeDasharray="5 6" />
+          </svg>
+          <div ref={knobRef} className="absolute" style={{ left: STICK_R - 21, top: STICK_R - 21, width: 42, height: 42 }}>
+            <svg width="42" height="42" viewBox="0 0 42 42" style={{ overflow: 'visible' }}>
+              <circle cx="23.5" cy="23.5" r="18" fill="#1B1530" />
+              <circle cx="21" cy="21" r="18" fill="#FFF8E8" stroke="#1B1530" strokeWidth="3" />
+              <circle cx="21" cy="21" r="7" fill="#FFB84D" stroke="#1B1530" strokeWidth="2" />
+            </svg>
+          </div>
         </div>
       )}
       {debug && (
-        <div className="pointer-events-none absolute top-2 right-2 font-mono text-[10px]" style={{ color: '#ffb84d', textShadow: '0 1px 4px #000' }}>
+        <div className="pointer-events-none absolute right-3 font-mono text-[10px]" style={{ top: 68, zIndex: 5, color: '#ffb84d', textShadow: '0 1px 4px #000' }}>
           {debug}
         </div>
       )}

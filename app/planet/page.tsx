@@ -34,7 +34,9 @@ export default function PlanetPage() {
   const [shot, setShot] = useState(true);
 
   useEffect(() => {
-    setShot(new URLSearchParams(window.location.search).has('shot'));
+    const q = new URLSearchParams(window.location.search);
+    // Shot mode hides the chrome, unless the HUD is asked for (?hud=1, the shot tool's --hud).
+    setShot(q.has('shot') && !q.has('hud'));
     const onLock = () => setLocked(!!document.pointerLockElement);
     document.addEventListener('pointerlockchange', onLock);
     return () => document.removeEventListener('pointerlockchange', onLock);
@@ -43,7 +45,7 @@ export default function PlanetPage() {
   return (
     // Full-bleed above the site chrome: the planet owns the whole viewport.
     <div className="fixed inset-0 z-[80]" style={{ background: '#070B1A' }}>
-      <LittlebigCanvas variant="page" />
+      {/* First in the DOM, so it is first in the tab order too (the HUD and its world labels follow). */}
       {!shot && !locked && (
         <Link
           href="/"
@@ -52,12 +54,26 @@ export default function PlanetPage() {
             e.preventDefault();
             router.back();
           }}
-          className="absolute top-3 left-4 z-10 font-mono text-[11px] tracking-[0.2em]"
-          style={{ color: 'rgba(225,232,255,0.65)' }}
+          className="lb-back absolute z-10"
         >
-          ← back to site
+          <span aria-hidden>←</span> back to site
         </Link>
       )}
+      <LittlebigCanvas variant="page" />
+      {/* The back link in the game's POP style (the HUD's look, components/littlebig/ui/styles.ts).
+          Its own rule: it shows before the game's chunk arrives. The radius beats the site's global
+          square corners by specificity. */}
+      <style>{`
+        .lb-back{top:12px;left:12px;display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 15px 1px 12px;font-family:ui-rounded,'SF Pro Rounded','Arial Rounded MT Bold','Nunito','Trebuchet MS',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.01em;
+          color:#1B1530;background:#FFF8E8;border:2px solid #1B1530;box-shadow:3px 3px 0 #1B1530;transition:transform .16s cubic-bezier(.3,1.65,.5,1),box-shadow .16s}
+        a.lb-back{border-radius:99px !important}
+        .lb-back span{font-weight:900;font-size:14px}
+        .lb-back:hover{transform:translateY(-1.5px);box-shadow:3px 4.5px 0 #1B1530}
+        .lb-back:active{transform:translateY(2px);box-shadow:1px 1px 0 #1B1530}
+        .lb-back:focus-visible{outline:3px solid #FFB84D;outline-offset:2px}
+        @media (pointer:coarse){.lb-back{height:40px}}
+        @media (prefers-reduced-motion:reduce){.lb-back{transition:none}}
+      `}</style>
     </div>
   );
 }

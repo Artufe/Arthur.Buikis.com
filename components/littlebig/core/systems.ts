@@ -32,11 +32,13 @@
 
 import { createAirSystem } from '../air';
 import { createCameraSystem } from '../camera';
+import { createBirdSystem } from '../camera/bird';
 import { createCitySystem } from '../city';
 import { createCloudsSystem } from '../clouds';
 import { createNatureSystem } from '../nature';
 import { createOceanSystem } from '../ocean';
 import { createPeopleSystem } from '../people';
+import { createRegionSystem } from '../region';
 import { createSkySystem } from '../sky';
 import { createSpaceSystem } from '../space';
 import { createTerrainSystem } from '../terrain';
@@ -58,5 +60,7 @@ export function createSystems(): System[] {
     createAirSystem(), // stage 2 (air/, B3)
     // v2 (docs/littlebig/V2.md). Pre-registered slots: agents replace their own index.ts.
     createSpaceSystem(), // stage 2 (space/, S1)
+    createBirdSystem(), // stage 2 (camera/bird/, D1): the bird the camera flies in bird mode
+    createRegionSystem(), // stage 2 (region/, R1): settlement labels; the network debug overlay (?p.region.debug=1)
   ];
 }

@@ -1,12 +1,12 @@
 import '../core/kit-fill'; // before the review tooling (core/kit.ts)
 import { describe, expect, it } from 'vitest';
 import type { LBContext } from '../core/contracts';
-import { diveAt } from '../core/shots';
+import { DIVE_SECONDS, DIVE_T0, diveAt } from '../core/shots';
 import { getCityIndex, getCityPlan } from '../world/city';
 import { SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { addScaled3, dirFromLatLon, dot3, normalize3, v3 } from '../world/sphere';
-import { DIVE_CROSSINGS } from './dive-anchors';
+import { DIVE_CROSS_T, DIVE_CROSSINGS } from './dive-anchors';
 
 describe('precomputed dive crossings', () => {
   const ctx = { world: { city: getCityPlan(), cityIndex: getCityIndex(), planet: getPlanet(SEED) } } as unknown as LBContext;
@@ -34,6 +34,30 @@ describe('precomputed dive crossings', () => {
     }
     return null;
   };
+
+  it('the clip crosses 43 m at DIVE_CROSS_T (sim time)', () => {
+    const planet = ctx.world.planet;
+    const h = (u: number) => {
+      const v = diveAt(ctx, u);
+      return v.alt + planet.surfaceAt(dirFromLatLon(v.lat, v.lon));
+    };
+    let lo = 0;
+    let hi = 1;
+    for (let i = 1; i <= 400; i++) {
+      if (h(i / 400) < 43) {
+        lo = (i - 1) / 400;
+        hi = i / 400;
+        break;
+      }
+    }
+    for (let k = 0; k < 40; k++) {
+      const m = (lo + hi) / 2;
+      if (h(m) >= 43) lo = m;
+      else hi = m;
+    }
+    const t = DIVE_T0 + lo * DIVE_SECONDS;
+    expect(Math.abs(t - DIVE_CROSS_T), `fresh DIVE_CROSS_T: ${t.toFixed(3)}`).toBeLessThan(0.01);
+  });
 
   it('match the live dive (re-paste the printed table into dive-anchors.ts if the dive moved)', () => {
     const fresh: Record<string, number[] | null> = {};

@@ -17,6 +17,14 @@ export const DIVE_CROSSINGS: Record<string, readonly number[]> = {
   '44.4': [-0.2572690875986395, 0.517386024880983, 0.8161643938717361, 0.7579503023513863, -0.4158755122937479, 0.5025523827819889],
 };
 
+/**
+ * Sim time (s) at which the /play clip (sim from DIVE_T0, core/shots.ts) crosses 43 m: the cloudlet
+ * is placed where the DRIFTING clouds will be then (the drift turns the layer about the city's axis,
+ * and 26° off it ~4° of drift moved the cloudlet 6 m off the track, so the clip flew past it).
+ * Checked by dive-anchors.spec.ts.
+ */
+export const DIVE_CROSS_T = 15.471;
+
 /** The dive's crossing of `altSea` (one of the table's altitudes), or null. */
 export function diveCrossing(altSea: number): { at: Vec3; travel: Vec3 } | null {
   const c = DIVE_CROSSINGS[String(altSea)];

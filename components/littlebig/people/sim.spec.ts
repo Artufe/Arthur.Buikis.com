@@ -86,7 +86,9 @@ describe('people sim', () => {
 
   it('never steps onto a crossing a car is committed to, under bursty traffic', { timeout: 30000 }, () => {
     const { plan, index, sim, busy, blocked } = build();
-    sim.placeAt(0, null, null);
+    // (the placement's settle writes the zebras' starting state into busy: someone it left out on a
+    // crossing is on it already at t = 0, not stepping onto it under a car)
+    sim.placeAt(0, busy, blocked);
     const n = plan.walkEdges.length;
     // fake traffic: each crossing blocked ~60 % of the time, in bursts of a few seconds
     const period = Float64Array.from(plan.walkEdges, (e) => 4 + (e.id % 6));

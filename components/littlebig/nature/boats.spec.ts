@@ -3,7 +3,7 @@ import { getPlanet } from '../world/planet';
 import { terrainData } from '../terrain/data';
 import { R } from '../world/config';
 import { findLandmarks } from './landmarks';
-import { findBoatLoops } from './boats';
+import { boatCard, boatPose, findBoatLoops } from './boats';
 
 describe('boat loops', () => {
   const planet = getPlanet();
@@ -36,6 +36,37 @@ describe('boat loops', () => {
         if (o === l) continue;
         const sep = Math.acos(Math.min(1, o.c.x * l.c.x + o.c.y * l.c.y + o.c.z * l.c.z)) * R;
         expect(sep).toBeGreaterThan(o.a + l.a + 2);
+      }
+    }
+  });
+
+  it('makes every boat a trackable: the same ids and names every visit, a finite pose on the water', { timeout: 30000 }, () => {
+    const again = findBoatLoops(planet, [
+      { dir: planet.cityDir, dists: [96, 104, 112, 122, 134, 148], count: 3 },
+      { dir: lh.dir, dists: [16, 22, 30, 40, 52], count: 2, fish: true },
+    ]);
+    expect(again).toEqual(loops);
+    const cards = loops.map((_, i) => boatCard(loops, i));
+    expect(new Set(cards.map((c) => c.label)).size).toBe(loops.length);
+    expect(cards.find((c) => c.label === 'the salty pickle')).toBeTruthy();
+    const v = () => ({ x: 0, y: 0, z: 0 });
+    const out = { pos: v(), fwd: v(), up: v(), speed: 0 };
+    const prev = v();
+    const eye = { x: 0, y: 0, z: 0 };
+    for (const l of loops) {
+      for (let t = 0; t < 3600; t += 0.5) {
+        boatPose(l, t, 0.22, eye, out);
+        const r = Math.hypot(out.pos.x, out.pos.y, out.pos.z) - R;
+        expect(r).toBeGreaterThan(0.3);
+        expect(r).toBeLessThan(0.9);
+        expect(Math.hypot(out.fwd.x, out.fwd.y, out.fwd.z)).toBeCloseTo(1, 6);
+        expect(Math.abs(out.fwd.x * out.up.x + out.fwd.y * out.up.y + out.fwd.z * out.up.z)).toBeLessThan(1e-6);
+        expect(out.speed).toBeGreaterThan(0.3);
+        expect(out.speed).toBeLessThan(4);
+        if (t > 0) expect(Math.hypot(out.pos.x - prev.x, out.pos.y - prev.y, out.pos.z - prev.z)).toBeLessThan(out.speed * 0.5 * 1.3 + 0.05);
+        prev.x = out.pos.x;
+        prev.y = out.pos.y;
+        prev.z = out.pos.z;
       }
     }
   });

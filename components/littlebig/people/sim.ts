@@ -54,6 +54,44 @@ const CROSS_CYCLE = 13;
 const CROSS_OPEN = 4.5;
 /** Kerb waiters stand this far back from the kerb line (m). */
 const WAIT_BACK = 0.5;
+/**
+ * v2 (L1): the ridden walker (`rider`, the camera in its head) keeps this far from people, centre
+ * to centre, both ways (it plans round them, they plan round it), stops this far short of someone
+ * in its way (RIDER_STOP) and follows someone walking its way at RIDER_FOLLOW, so no face or back
+ * ever fills the lens; at a kerb it waits RIDER_WAIT_BACK back (stepping back to it), clear of the
+ * cars' swept paths.
+ */
+const RIDER_GAP = 1.0;
+const RIDER_STOP = 1.25;
+const RIDER_FOLLOW = 1.8;
+const RIDER_WAIT_BACK = 1.25;
+/**
+ * …and the pass it prefers (a soft gap: taken whenever the paving has room, else RIDER_GAP), seen
+ * RIDER_SEE ahead, so an oncoming walker veers off early instead of walking up to the lens.
+ */
+const RIDER_SOFT = 1.2;
+const RIDER_SEE = 5;
+/**
+ * …and brakes for anyone within RIDER_BRAKE whose line it would cross (closer than RIDER_GAP to
+ * its line of travel; stopping RIDER_STOP − 0.2 short); anyone walking at the rider stops
+ * RIDER_MEET short of it, or with no way round, turns back while still RIDER_TURN away.
+ */
+const RIDER_BRAKE = 2.2;
+const RIDER_MEET = 1.5;
+const RIDER_TURN = 4;
+/** The berth's last resort: closer than RIDER_SEP (RIDER_SEP_FRONT within ±55° of where the rider faces), the other is pushed off at RIDER_PUSH (m/s). */
+const RIDER_SEP = 0.9;
+const RIDER_SEP_FRONT = 1.3;
+const RIDER_PUSH = 0.9;
+/** The rider's extra clearance from props (lamp posts, trunks, benches) where the paving has room (m). */
+const RIDER_PROP = 0.3;
+/** On the carriageway the rider never slows below this for the berth (it follows, it does not stop on the road). */
+const RIDER_ROAD_V = 0.5;
+/** The rider gives up on a kerb after this long (s) unless the walk window is about to open, and skips a crossing it would wait at this long. */
+const RIDER_KERB_S = 5.5;
+const RIDER_SKIP_S = 4;
+/** Interval scratch: the rider plans round everyone within RIDER_SEE (others keep v1's 48). */
+const IV_MAX = 112;
 /** Seconds held up on a crossing before squeezing past standing people and idlers. */
 const JAM_S = 2.5;
 /** Speed limit of push-outs (people, props) on top of a walker's own step (m/s). */
@@ -205,6 +243,8 @@ interface EdgeInfo {
   landA: boolean;
   landB: boolean;
   kindW: number;
+  /** Pavements: +1 the carriageway is right of a→b, −1 left, 0 neither (the rider keeps to the far side). */
+  roadSide: number;
 }
 
 const KIND_W: Record<string, number> = { sidewalk: 1, corner: 1, crossing: 0.75, plaza: 1.5, park: 1.15, footpath: 1.3 };
@@ -252,6 +292,34 @@ const SM0 = new Sample();
 class XZ {
   x = 0;
   z = 0;
+}
+/** The walker being stepped, for berthPair (in), and what the rider's berth makes of it (out). */
+class Berth {
+  xi = 0;
+  zi = 0;
+  tx = 0;
+  tz = 0;
+  nx = 0;
+  nz = 0;
+  latCur = 0;
+  e = 0;
+  d = 0;
+  /** Flags (0 / 1): waiting at a kerb, out on a crossing, on its carriageway, squeezing past. */
+  waiting = 0;
+  out = 0;
+  carriageway = 0;
+  squeeze = 0;
+  /** Out: the speed cap, held up by the rider (turns round sooner), giving the landing, the rider's hard interval and how far ahead it is. */
+  cap = Infinity;
+  block = 0;
+  yieldTo = 0;
+  riderQ = -1;
+  rAlong = 0;
+  /** Out: the walker the rider is following (−1: none). */
+  lead = -1;
+  /** Out: a kerb waiter with the rider right behind it does not step back to give the landing; one the rider comes off the crossing at steps aside. */
+  noBack = 0;
+  aside = 0;
 }
 
 /** Nearest point on a polyline from sample index lo while s ≤ sMax: arc length and signed lateral offset (right of a→b). */
@@ -383,6 +451,21 @@ export class PeopleSim {
   readonly decisions: Int32Array;
   /** 1 = out and about; 0 = gone home for the night (frozen, not drawn). */
   readonly on: Uint8Array;
+  /** v2 (L1): the walker whose eyes the camera rides (-1: none); see RIDER_GAP. */
+  rider = -1;
+  /**
+   * v2 (L1): the rider's berth scale: a kid's eye is low, so a grown-up's back at an adult's
+   * berth fills its view (people/index.ts sets 1.3 for a kid). Scales every distance in front.
+   */
+  riderK = 1;
+  /** v2 (L1): a walker the camera does not hold up (the one just ridden, walking on out of the camera after the ride). */
+  free = -1;
+  /** The rider: the edge whose crossing it has looked ahead to, and how long it has stood at its kerb. */
+  private riderSeen = -1;
+  private riderWait = 0;
+  /** The rider: how long it has followed someone, and the edge at whose end it last went another way than them. */
+  private riderFollowT = 0;
+  private riderSplit = -1;
   // traits
   readonly vPref: Float32Array;
   readonly pref: Float32Array;
@@ -409,10 +492,15 @@ export class PeopleSim {
   private readonly gridN: number;
   private readonly gridR: number;
   private readonly crossPhase: Float32Array;
-  private readonly ivLo = F(48);
-  private readonly ivHi = F(48);
-  private readonly ivAlong = F(48);
+  private readonly ivLo = F(IV_MAX);
+  private readonly ivHi = F(IV_MAX);
+  private readonly ivAlong = F(IV_MAX);
+  /** 1: a soft interval (the rider's preferred pass): kept clear only when there is room. */
+  private readonly ivSoft = new Uint8Array(IV_MAX);
   private nIv = 0;
+  /** Interval capacity for the walker being stepped (IV_MAX for the rider, 48 for everyone else, as in v1). */
+  private ivCap = 48;
+  private readonly bc = new Berth();
   private readonly smp = new Sample();
   private readonly col = new XZ();
   /** The CityIndex's zero-allocation query inputs (CityIndex.q; classifyQ / collideQ). */
@@ -545,10 +633,19 @@ export class PeopleSim {
       };
       const landA = crossing && land(0, kerbA - 0.3);
       const landB = crossing && land(len - kerbB + 0.3, len);
+      // which side the carriageway is (v2, L1: the rider walks on the other side, clear of turning buses)
+      let roadSide = 0;
+      for (let s = len * 0.2; !crossing && (e.kind === 'sidewalk' || e.kind === 'corner') && s <= len * 0.81; s += len * 0.3) {
+        samplePath(pl, s, ps);
+        const k = index.classify(ps.x - ps.tz * (e.width / 2 + 0.6), ps.z + ps.tx * (e.width / 2 + 0.6));
+        const kl = index.classify(ps.x + ps.tz * (e.width / 2 + 0.6), ps.z - ps.tx * (e.width / 2 + 0.6));
+        roadSide += (k === 'road' || k === 'intersection' ? 1 : 0) - (kl === 'road' || kl === 'intersection' ? 1 : 0);
+      }
+      roadSide = Math.sign(roadSide);
       samplePath(pl, len / 2, ps);
       const hMid = index.groundH(ps.x, ps.z);
       return {
-        e, len, crossing, kerbA, kerbB, landA, landB,
+        e, len, crossing, kerbA, kerbB, landA, landB, roadSide,
         hiR: Math.max(0, hiR), hiL: Math.max(0, hiL),
         hEdge: crossing ? index.groundH(pl.pts[0], pl.pts[1]) : hMid, hRoad: hMid,
         oS: Float64Array.from(oS), oL: Float64Array.from(oL), oR: Float64Array.from(oR), oI: Int32Array.from(oI),
@@ -740,15 +837,162 @@ export class PeopleSim {
     this.next[i] = this.chooseNext(i);
   }
 
-  /** Pick the next edge at the end of i's current edge (seeded per decision). */
-  private chooseNext(i: number): number {
+  /**
+   * Pick the next edge at the end of i's current edge (seeded per decision). `dry` (the rider):
+   * anything but a crossing, if there is another way on; `avoid`: anything but that edge, if there
+   * is another (else the edge it had chosen).
+   */
+  private chooseNext(i: number, dry = false, avoid = -1): number {
     const cur = this.edge[i];
     const node = this.plan.walkNodes[this.endNode(i)];
     let total = 0;
-    for (const id of node.edges) if (id !== cur) total += this.edgeWeight(id, node.id, i);
+    for (const id of node.edges) if (id !== cur && id !== avoid && !(dry && this.info[id].crossing)) total += this.edgeWeight(id, node.id, i);
+    if ((dry || avoid >= 0) && !(total > 0)) return avoid >= 0 ? this.next[i] : this.chooseNext(i);
     let r = hash3(i, this.decisions[i]++, this.seed) * total;
-    for (const id of node.edges) if (id !== cur && (r -= this.edgeWeight(id, node.id, i)) <= 0) return id;
+    for (const id of node.edges) if (id !== cur && id !== avoid && !(dry && this.info[id].crossing) && (r -= this.edgeWeight(id, node.id, i)) <= 0) return id;
     return cur; // dead end: turn back on the same edge
+  }
+
+  /**
+   * The rider's berth between walker i (being stepped, its frame in this.bc) and walker j, one of
+   * them the rider: written into bc (speed cap, held up, giving the landing, the rider's interval)
+   * and the interval scratch. Integer arguments only (see the header).
+   *   - Brakes: the rider for anyone its line of travel would pass closer than RIDER_GAP, stopping
+   *     RIDER_STOP short; anyone for a rider across its own line, stopping RIDER_MEET short. The
+   *     line is the velocity (or, standing, the path), so a pass at the berth never brakes.
+   *   - Follows: the rider RIDER_FOLLOW behind someone walking its way, overtaking a slower one
+   *     with RIDER_GAP to spare where the paving has room (a soft interval); anyone else
+   *     RIDER_FOLLOW behind the rider.
+   *   - Passes: oncoming, crossing or standing, from RIDER_SEE ahead at RIDER_SOFT if there is
+   *     room (soft), at RIDER_GAP if not (hard: no way round stops short; the other turns back).
+   *   - On a carriageway nobody stops for it: the usual gap, and the rider follows at
+   *     RIDER_ROAD_V or more (it waited at the kerb for its berth on the zebra: zebraClear).
+   * In front of the rider every distance scales with riderK (a kid's eye).
+   */
+  private berthPair(i: number, j: number): void {
+    const b = this.bc;
+    const me = i === this.rider;
+    const k = me ? this.riderK : 1;
+    const kj = this.riderK;
+    /** The berth's lateral gap (wider round a kid's eye, both ways). */
+    const gap = RIDER_GAP * kj;
+    const rx = this.px[j] - b.xi;
+    const rz = this.pz[j] - b.zi;
+    const d2 = rx * rx + rz * rz;
+    if (d2 > 64) return;
+    const dd = Math.sqrt(d2);
+    const along = rx * b.tx + rz * b.tz;
+    const side = rx * b.nx + rz * b.nz;
+    const fj = this.info[this.edge[j]];
+    const jOut = fj.crossing && this.commit[j] > 0 && this.u[j] > (this.dir[j] > 0 ? fj.kerbA : fj.kerbB) - 0.3;
+    // someone out on the carriageway: the usual gaps, nobody stops for the berth
+    const road = b.out > 0 || jOut;
+    // (out on a crossing only the rider brakes, for someone squarely in its way, and not below
+    // RIDER_ROAD_V on the carriageway itself)
+    if ((!b.out || me) && dd < RIDER_BRAKE * (me ? k : kj)) {
+      const sp2 = this.vx[i] * this.vx[i] + this.vz[i] * this.vz[i];
+      let fx = sp2 > 0.09 ? this.vx[i] : b.tx;
+      let fz = sp2 > 0.09 ? this.vz[i] : b.tz;
+      const fl = Math.sqrt(fx * fx + fz * fz) || 1;
+      fx /= fl;
+      fz /= fl;
+      if (rx * fx + rz * fz > 0 && Math.abs(rx * fz - rz * fx) < (b.out ? 0.5 : gap * 0.9)) {
+        // (the rider stops a little further short of someone standing: a kerb waiter may step back)
+        const still = this.vx[j] * this.vx[j] + this.vz[j] * this.vz[j] < 0.0625;
+        let cap = Math.max(0, (dd - (me ? RIDER_STOP * k - (still ? 0 : 0.2) : RIDER_MEET * kj)) * 1.8);
+        if (b.carriageway) cap = Math.max(cap, RIDER_ROAD_V);
+        if (cap < b.cap) b.cap = cap;
+        if (cap < 0.3) b.block = 1;
+      }
+    }
+    if (!me && b.waiting && along < 0 && dd < 2.5) b.noBack = 1;
+
+    if (along < -0.25 || along > RIDER_SEE * (me ? k : kj) || Math.abs(side) > 2.6) return;
+    const vxj = this.vx[j];
+    const vzj = this.vz[j];
+    const vj = Math.sqrt(vxj * vxj + vzj * vzj);
+    const vjAlong = vxj * b.tx + vzj * b.tz;
+    // a kerb waiter gives the landing to someone coming off the crossing at it (the rider: earlier)
+    // (one waiting for the rider steps aside instead: back is toward the corner the rider makes for)
+    if (b.waiting && this.edge[j] === b.e && this.dir[j] !== b.d && (this.commit[j] || !me) && d2 < (me ? 6.25 : 6.25 * kj * kj)) {
+      if (me) b.yieldTo = 1;
+      else b.aside = side < 0 ? 1 : -1; // to the side away from the rider
+    }
+    const ivLo = this.ivLo;
+    const ivHi = this.ivHi;
+    const cap0 = this.ivCap;
+    if (vj > 0.25 && vjAlong > 0.6 * vj) {
+      // walking our way: follow (never through them)
+      if (along > 0 && Math.abs(side) < (me || !road ? gap : PASS_GAP) - 0.04) {
+        // (the rider drops back the longer it follows the same back: from 2 s on, up to 1.6 m more)
+        const lag = me ? Math.min(1.6, Math.max(0, this.riderFollowT - 2) * 0.4) : 0;
+        let c = Math.max(0, vjAlong + (along - (me ? RIDER_FOLLOW * k + lag : road ? 0.62 : RIDER_FOLLOW)) * 1.6);
+        if (me && road) c = Math.max(c, Math.min(RIDER_ROAD_V, Math.max(0, vjAlong + (along - 0.62) * 1.6)));
+        if (c < b.cap) b.cap = c;
+        if (me && along < RIDER_FOLLOW * k + 2.5) b.lead = j;
+      }
+      // the rider overtakes someone slower where there is room
+      if (me && !road && along > 0 && along < 4 && vjAlong < this.vPref[i] - 0.15 && this.nIv < cap0) {
+        const q = this.nIv++;
+        ivLo[q] = b.latCur + side - gap;
+        ivHi[q] = b.latCur + side + gap;
+        this.ivSoft[q] = 1;
+        this.ivAlong[q] = along;
+      }
+    } else if (!b.squeeze) {
+      // oncoming, crossing our path, or standing: step round them, early and wide if there is room
+      // (on a carriageway the zebra's strip is 1.4 m of room: the berth there is soft and no wider)
+      const soft = road ? RIDER_GAP : RIDER_SOFT * (me ? k : kj);
+      if (along > 0 && this.nIv < cap0) {
+        const q = this.nIv++;
+        ivLo[q] = b.latCur + side - soft;
+        ivHi[q] = b.latCur + side + soft;
+        this.ivSoft[q] = 1;
+        this.ivAlong[q] = along;
+      }
+      if (along > 0 && along < 3 * (me ? k : kj) && this.nIv < cap0) {
+        const q = this.nIv++;
+        // (the rider squeezes past someone standing about, a kerb waiter, a little closer: they
+        // look away, and a hard berth round a knot of waiters at a corner would hold it there)
+        const g = road ? PASS_GAP : me && vj < 0.25 ? 0.8 * kj : gap;
+        ivLo[q] = b.latCur + side - g;
+        ivHi[q] = b.latCur + side + g;
+        this.ivSoft[q] = 0;
+        // (no way round: the rider stops RIDER_STOP short, the other RIDER_MEET short, or turns back)
+        this.ivAlong[q] = road ? along : along + 0.75 - (me ? RIDER_STOP * k : RIDER_MEET * kj);
+        if (!me && !road) {
+          b.riderQ = q;
+          b.rAlong = along;
+        }
+      }
+      if (vj > 0.25 && vjAlong > -0.5 * vj && j < i && along < 1.3 && Math.abs(side) < 0.7) b.cap = Math.min(b.cap, Math.max(0, (along - 0.55) * 1.8));
+    }
+    if (!b.squeeze && along > 0 && Math.abs(side) < 0.3 && d2 < 0.49) b.cap = Math.min(b.cap, Math.max(0, (dd - 0.5) * 2.5));
+  }
+
+  /** Seconds from sim time t until crossing e's walk window opens (0: open now). */
+  private toOpen(e: number, t: number): number {
+    const p = (t + this.crossPhase[e]) % CROSS_CYCLE;
+    return p < CROSS_OPEN ? 0 : CROSS_CYCLE - p;
+  }
+
+  /**
+   * The rider may step onto zebra e (it waits at the kerb otherwise): nobody on it going its way
+   * is within the rider's follow distance ahead, so the berth holds across the carriageway, where
+   * nobody stops for it.
+   */
+  private zebraClear(i: number, e: number): boolean {
+    return !this.aheadOn(i, e, this.dir[i], this.u[i], RIDER_FOLLOW * this.riderK + 0.3);
+  }
+
+  /** Is anyone on walk edge e going way d within `reach` ahead of progress u (or beside it)? */
+  private aheadOn(i: number, e: number, d: number, u: number, reach: number): boolean {
+    for (let j = 0; j < this.n; j++) {
+      if (j === i || !this.on[j] || this.edge[j] !== e || this.dir[j] !== d) continue;
+      const ahead = this.u[j] - u;
+      if (ahead > -0.2 && ahead < reach) return true;
+    }
+    return false;
   }
 
   private edgeWeight(id: number, from: number, i: number): number {
@@ -843,13 +1087,24 @@ export class PeopleSim {
     const u0 = next ? this.u[i] - cur.len : this.u[i];
     const upTo = next || !turns ? OBS_AHEAD : Math.min(OBS_AHEAD, cur.len - u0 + 0.05);
     let k = this.nIv;
-    for (let q = 0; q < f.oS.length && k < 48; q++) {
+    const me = i === this.rider;
+    for (let q = 0; q < f.oS.length && k < this.ivCap; q++) {
       if (props && f.oI[q] >= this.nProps) continue;
       const along = (d > 0 ? f.oS[q] : f.len - f.oS[q]) - u0;
       if (along <= -0.7 || along >= upTo) continue;
       this.ivLo[k] = f.oL[q] * d - f.oR[q];
       this.ivHi[k] = f.oL[q] * d + f.oR[q];
+      this.ivSoft[k] = 0;
       this.ivAlong[k++] = Math.max(0, along);
+      // (the rider gives a lamp post or a trunk a wider berth where there is room: a pole a
+      // hand's breadth from the lens fills the frame)
+      if (me && k < this.ivCap) {
+        this.ivLo[k] = this.ivLo[k - 1] - RIDER_PROP;
+        this.ivHi[k] = this.ivHi[k - 1] + RIDER_PROP;
+        this.ivSoft[k] = 1;
+        this.ivAlong[k] = this.ivAlong[k - 1];
+        k++;
+      }
     }
     this.nIv = k;
   }
@@ -868,8 +1123,10 @@ export class PeopleSim {
     const { x, z, px, pz, vx, vz, hx, hz, u, lat, edge, dir, commit, stuck, jam, info, gridHead, gridNext, gridR, smp, ivLo, ivHi, ivAlong, near, iq } = this;
     const N = this.gridN;
     const maxPush = PUSH_SPEED * dt;
+    const rider = this.rider >= 0 && this.rider < this.n && this.on[this.rider] ? this.rider : -1;
     for (let i = 0; i < this.n; i++) {
       if (!this.on[i]) continue;
+      const me = i === rider;
       this.project(i);
       let f = info[edge[i]];
       // Edge transitions (possibly several on very short edges).
@@ -889,22 +1146,47 @@ export class PeopleSim {
       let queue = false;
       let kerbOut = 0;
       let waitU = 0;
+      /** Committed and off its near kerb: keeps the usual gap from the rider and gets off the road. */
+      let crossingOut = false;
       const squeeze = commit[i] > 0 && jam[i] >= JAM_S;
+      /** The rider gives up on its kerb (turns back, below). */
+      let giveUp = false;
+      this.ivCap = me ? IV_MAX : 48;
+
+      // The rider looks ahead to the crossing it is walking to: if it would stand at the kerb for
+      // longer than RIDER_SKIP_S (the walk window shut when it gets there), it goes another way.
+      const nE = this.next[i];
+      if (me && this.riderSeen !== e && nE !== e && info[nE].crossing && f.len - ui < 4) {
+        this.riderSeen = e;
+        const g = info[nE];
+        const kIn = g.e.a === this.endNode(i) ? g.kerbA : g.kerbB;
+        const ta = t + (f.len - ui + Math.max(0, kIn - RIDER_WAIT_BACK)) / Math.max(0.6, this.vPref[i]);
+        const w = this.toOpen(nE, ta);
+        // (arriving in the window's last second counts as missing it; a short landing with people
+        // already waiting on it has no room for the rider's berth behind them)
+        const late = w === 0 && this.toOpen(nE, ta + 1.5) > 0;
+        const dn = g.e.a === this.endNode(i) ? 1 : -1;
+        const full = kIn < RIDER_WAIT_BACK + 0.6 && this.aheadOn(i, nE, dn, 0, kIn + 0.2);
+        if (w > RIDER_SKIP_S || late || full) this.next[i] = this.chooseNext(i, true);
+      }
 
       // Zebra crossings: wait at the kerb, commit when open, flag busy until past the far kerb.
       if (f.crossing) {
         const kerbIn = d > 0 ? f.kerbA : f.kerbB;
         kerbOut = f.len - (d > 0 ? f.kerbB : f.kerbA);
-        waitU = Math.max(0, kerbIn - WAIT_BACK);
+        waitU = Math.max(0, kerbIn - (me ? RIDER_WAIT_BACK : WAIT_BACK));
         // committed but still on the kerb, and a car will not stop: step back (past the far kerb
         // it is over: commit ends 0.15 m on and restarts only 0.2 m before it, so no flicker)
         // (and still on the kerb when the walk window closes: wait for the next one)
         const open = !blocked[e] && (t + this.crossPhase[e]) % CROSS_CYCLE < CROSS_OPEN;
-        if ((commit[i] && ui < kerbIn - 0.05 && !open) || ui > kerbOut + 0.15) commit[i] = 0;
+        // (the rider, waiting further back, steps off only with 1.5 s of the window left, and then
+        // only a car stops it: the walk window closing on its way to the kerb does not)
+        if ((commit[i] && ui < kerbIn - 0.05 && (me ? blocked[e] > 0 : !open)) || ui > kerbOut + 0.15) commit[i] = 0;
         if (!commit[i] && ui < kerbOut - 0.2) {
           // (the first: out on the road after a placement; not within 0.5 m of the far kerb, where
-          // someone who turned back at the kerb stands)
-          if ((ui > kerbIn + 0.3 && ui < kerbOut - 0.5) || (ui >= waitU - 0.15 && open)) commit[i] = 1;
+          // someone who turned back at the kerb stands; the rider also waits for its berth on the
+          // zebra, zebraClear)
+          if ((ui > kerbIn + 0.3 && ui < kerbOut - 0.5) || (ui >= waitU - 0.15 && open && (!me || (this.toOpen(e, t + 1.5) === 0 && this.zebraClear(i, e))))) commit[i] = 1;
           else {
             vDes = Math.min(vDes, Math.max(0, (waitU - ui) * 2.2));
             waiting = ui > waitU - 1.2;
@@ -914,8 +1196,22 @@ export class PeopleSim {
         if (commit[i]) {
           vDes *= 1.25;
           busy[e] = 1;
+          crossingOut = ui > kerbIn - 0.3;
         }
-      }
+        // (the rider coming off onto the far landing, where people wait at the corner it must get
+        // to: the usual gaps until it is off the crossing; they give it the landing, berthPair)
+        if (me && ui > kerbIn + 0.3) crossingOut = true;
+        if (me) {
+          // standing at the kerb too long (a car holding the zebra, a crowd ahead on it): unless the
+          // window is about to open, it turns back and goes another way
+          const standing = waiting && !commit[i] && vx[i] * vx[i] + vz[i] * vz[i] < 0.04;
+          this.riderWait = standing ? this.riderWait + dt : 0;
+          if (this.riderWait > RIDER_KERB_S && (blocked[e] || this.toOpen(e, t) > 1.5)) giveUp = true;
+          // (someone waiting right in front of it on a short landing: a back in the lens for the
+          // whole wait; it goes another way, unless the window is open)
+          if (this.riderWait > 1 && !open && kerbIn < RIDER_WAIT_BACK + 0.6 && this.aheadOn(i, e, d, ui, RIDER_SEP_FRONT * this.riderK)) giveUp = true;
+        }
+      } else if (me) this.riderWait = 0;
 
       // Travel frame at the agent.
       smp.s = ui;
@@ -933,9 +1229,12 @@ export class PeopleSim {
       let nIv = this.nIv;
       let followCap = Infinity;
       let yieldTo = false;
+      /** Held up by the rider's berth: gives up and turns round sooner (no long face-off in the lens). */
+      let riderBlock = false;
       const cx = Math.min(N - 1, Math.max(0, Math.floor((xi + gridR) / CELL)));
       const cz = Math.min(N - 1, Math.max(0, Math.floor((zi + gridR) / CELL)));
-      for (let gz = Math.max(0, cz - 1); gz <= Math.min(N - 1, cz + 1); gz++) {
+      // (the rider's own neighbours, and everyone's relation to the rider: berthPair, below)
+      for (let gz = Math.max(0, cz - 1); gz <= Math.min(N - 1, cz + 1) && !me; gz++) {
         for (let gx = Math.max(0, cx - 1); gx <= Math.min(N - 1, cx + 1); gx++) {
           for (let j = gridHead[gz * N + gx]; j >= 0; j = gridNext[j]) {
             const rx = px[j] - xi;
@@ -943,7 +1242,7 @@ export class PeopleSim {
             const d2 = rx * rx + rz * rz;
             const along = rx * tx + rz * tz;
             const side = rx * nx + rz * nz;
-            if (j === i || d2 > 9 || along < -0.25 || Math.abs(side) > 1.4) continue;
+            if (j === i || j === rider || d2 > 9 || along < -0.25 || Math.abs(side) > 1.4) continue;
             const vj = Math.sqrt(vx[j] * vx[j] + vz[j] * vz[j]);
             const vjAlong = vx[j] * tx + vz[j] * tz;
             // a kerb waiter gives the landing to someone coming off the crossing at it
@@ -956,6 +1255,7 @@ export class PeopleSim {
               if (along > 0 && along < 3 && nIv < 48) {
                 ivLo[nIv] = latCur + side - PASS_GAP;
                 ivHi[nIv] = latCur + side + PASS_GAP;
+                this.ivSoft[nIv] = 0;
                 ivAlong[nIv++] = along;
               }
               if (vj > 0.25 && vjAlong > -0.5 * vj && j < i && along < 1.3 && Math.abs(side) < 0.7) followCap = Math.min(followCap, Math.max(0, (along - 0.55) * 1.8));
@@ -964,50 +1264,125 @@ export class PeopleSim {
           }
         }
       }
+      let riderQ = -1;
+      let riderAlong = 0;
+      let noBack = false;
+      /** Braked by the berth (the rider, or someone in its way): it may still sidestep. */
+      let berthHeld = false;
+      /** ±1: step aside to the right / left edge (away from the rider coming off the crossing). */
+      let aside = 0;
+      /** The speed cap with the rider's berth in it (a step back to give the landing keeps it too). */
+      let riderCap = Infinity;
+      if (rider >= 0) {
+        // the camera's personal space (people/sim.ts RIDER_GAP)
+        const b = this.bc;
+        b.xi = xi;
+        b.zi = zi;
+        b.tx = tx;
+        b.tz = tz;
+        b.nx = nx;
+        b.nz = nz;
+        b.latCur = latCur;
+        b.e = e;
+        b.d = d;
+        b.waiting = waiting ? 1 : 0;
+        b.out = crossingOut ? 1 : 0;
+        b.carriageway = f.crossing && ui > (d > 0 ? f.kerbA : f.kerbB) && ui < kerbOut ? 1 : 0;
+        b.squeeze = squeeze ? 1 : 0;
+        b.cap = followCap;
+        b.block = 0;
+        b.yieldTo = yieldTo ? 1 : 0;
+        b.riderQ = -1;
+        b.noBack = 0;
+        b.aside = 0;
+        b.lead = -1;
+        this.nIv = nIv;
+        if (me) {
+          for (let j = 0; j < this.n; j++) if (j !== i && this.on[j]) this.berthPair(i, j);
+        } else this.berthPair(i, rider);
+        nIv = this.nIv;
+        followCap = b.cap;
+        riderBlock = b.block > 0 && !me;
+        berthHeld = b.block > 0;
+        yieldTo = b.yieldTo > 0;
+        riderQ = b.riderQ;
+        riderAlong = b.rAlong;
+        noBack = b.noBack > 0;
+        aside = b.aside;
+        riderCap = b.cap;
+        if (me) {
+          // following the same back for long: drop back (berthPair), and at the next join go
+          // another way than it does
+          const lead = b.lead;
+          this.riderFollowT = lead >= 0 ? this.riderFollowT + dt : Math.max(0, this.riderFollowT - 2 * dt);
+          if (lead >= 0 && this.riderFollowT > 4 && this.riderSplit !== e && f.len - ui < 3) {
+            this.riderSplit = e;
+            const theirs = edge[lead] === e ? this.next[lead] : edge[lead];
+            if (this.next[i] === theirs && theirs !== e) this.next[i] = this.chooseNext(i, true, theirs);
+          }
+        }
+      }
       let camQ = -1;
       let lensBack = false;
-      if (camOn) {
+      if (camOn && i !== this.free) {
         const rx = camX - xi;
         const rz = camZ - zi;
         const along = rx * tx + rz * tz;
         const side = rx * nx + rz * nz;
         // stop short a body length early: nobody walks up to the lens
-        if (along > -0.25 && along < (lens ? LENS_REACH : 3.5) + camR && Math.abs(side) < camR + 0.85 && nIv < 48) {
+        if (along > -0.25 && along < (lens ? LENS_REACH : 3.5) + camR && Math.abs(side) < camR + 0.85 && nIv < this.ivCap) {
           camQ = nIv;
           // heading at a filming camera, inside its berth: turn round now (below), not at its feet
           lensBack = lens && along > 0 && Math.abs(side) < camR && !(commit[i] && f.crossing);
           ivLo[nIv] = latCur + side - camR;
           ivHi[nIv] = latCur + side + camR;
+          this.ivSoft[nIv] = 0;
           ivAlong[nIv++] = Math.max(0, along - 0.8);
         }
       }
 
       // Lateral offset: nearest to the preference (with hysteresis) outside every interval. Waiting
-      // at a kerb: the right half, so people coming off the crossing pass on the left.
+      // at a kerb: the right half, so people coming off the crossing pass on the left. The rider's
+      // soft intervals (its preferred, wider pass) count only while there is a way round them all.
       const room = squeeze ? 0.6 : 0;
       const hi = (d > 0 ? f.hiR : f.hiL) + room;
       const lo = -(d > 0 ? f.hiL : f.hiR) - room;
-      const prefLat = (queue ? Math.max(this.pref[i], 0.8) : this.pref[i]) * (hi - room);
+      // (the rider on a pavement: the side away from the carriageway, clear of turning buses)
+      const prefLat = aside ? (aside > 0 ? hi : lo) : me && f.roadSide !== 0 ? (f.roadSide * d > 0 ? lo + 0.15 : hi - 0.15) : (queue ? Math.max(this.pref[i], 0.8) : this.pref[i]) * (hi - room);
+      const ivSoft = this.ivSoft;
+      let soft = false;
+      for (let q = 0; q < nIv && !soft; q++) soft = ivSoft[q] > 0;
       let bestLat = NaN;
-      let bestCost = Infinity;
-      for (let c = -4; c < 2 * nIv; c++) {
-        const v = c === -4 ? prefLat : c === -3 ? lat[i] : c === -2 ? hi : c === -1 ? lo : c & 1 ? ivHi[c >> 1] + 0.01 : ivLo[c >> 1] - 0.01;
-        if (v < lo - 1e-6 || v > hi + 1e-6) continue;
-        let free = true;
-        for (let q = 0; q < nIv && free; q++) free = !(v > ivLo[q] && v < ivHi[q]);
-        if (!free) continue;
-        const cost = Math.abs(v - prefLat) + 0.6 * Math.abs(v - lat[i]);
-        if (cost < bestCost) {
-          bestCost = cost;
-          bestLat = v;
+      let pass = soft ? 0 : 1;
+      for (; pass < 2 && Number.isNaN(bestLat); pass++) {
+        let bestCost = Infinity;
+        for (let c = -4; c < 2 * nIv; c++) {
+          if (c >= 0 && pass > 0 && ivSoft[c >> 1]) continue;
+          const v = c === -4 ? prefLat : c === -3 ? lat[i] : c === -2 ? hi : c === -1 ? lo : c & 1 ? ivHi[c >> 1] + 0.01 : ivLo[c >> 1] - 0.01;
+          if (v < lo - 1e-6 || v > hi + 1e-6) continue;
+          let free = true;
+          for (let q = 0; q < nIv && free; q++) free = (pass > 0 && ivSoft[q] > 0) || !(v > ivLo[q] && v < ivHi[q]);
+          if (!free) continue;
+          const cost = Math.abs(v - prefLat) + 0.6 * Math.abs(v - lat[i]);
+          if (cost < bestCost) {
+            bestCost = cost;
+            bestLat = v;
+          }
         }
       }
+      // (the pass that found a way, or the hard one)
+      const hard = pass > 1 || !soft;
       // the nearest conflict on our current line (along), if any
       const li = lat[i];
       let a = Infinity;
-      for (let q = 0; q < nIv; q++) if (li > ivLo[q] && li < ivHi[q] && ivAlong[q] < a) a = ivAlong[q];
+      for (let q = 0; q < nIv; q++) if (!(hard && ivSoft[q]) && li > ivLo[q] && li < ivHi[q] && ivAlong[q] < a) a = ivAlong[q];
       // (or no way round its berth)
       if (lens && camQ >= 0 && Number.isNaN(bestLat) && li > ivLo[camQ] && li < ivHi[camQ] && !(commit[i] && f.crossing)) lensBack = true;
+      // walking at the rider with no way round it: turn back while still well away (not at a kerb,
+      // where it gives the landing instead, nor on a crossing)
+      const riderBack = riderQ >= 0 && Number.isNaN(bestLat) && li > ivLo[riderQ] && li < ivHi[riderQ] && riderAlong < RIDER_TURN * this.riderK && !f.crossing;
+      // held by the berth with a way round it: sidestep there (braked, it has no walk to carry the shift)
+      const slide = berthHeld && !f.crossing && !Number.isNaN(bestLat) && Math.abs(bestLat - latCur) > 0.08;
       if (Number.isNaN(bestLat)) {
         // no room: hold the line and stop short of the nearest conflict
         bestLat = li;
@@ -1021,14 +1396,30 @@ export class PeopleSim {
       const wanted = vDes;
       vDes = Math.min(vDes, followCap);
 
-      // Steer at the target ahead (a waiter giving way: at a spot 0.6 m back from its wait line).
-      const back = yieldTo && ui > waitU - 0.7;
-      smp.s = back ? Math.max(0, waitU - 0.7) : ui + LOOK;
+      // Steer at the target ahead (a waiter giving way: at a spot 0.6 m back from its wait line;
+      // the rider at a kerb: back to its wait line, still facing the road).
+      const back = yieldTo && !noBack && ui > waitU - 0.7;
+      const backR = me && waiting && !back && ui > waitU + 0.08;
+      // (a waiter the rider comes off the crossing at sidesteps to the edge of the landing, where
+      // it stands: standing, it has no walk to carry a lateral shift)
+      const side = (aside !== 0 && waiting && !back) || (slide && !waiting && !back);
+      smp.s = back ? Math.max(0, waitU - 0.7) : backR ? waitU : ui + LOOK;
       this.sampleTravel(i);
-      let dx = smp.x - smp.tz * lat[i] - xi;
-      let dz = smp.z + smp.tx * lat[i] - zi;
+      let dx = side ? nx * (bestLat - latCur) : smp.x - smp.tz * lat[i] - xi;
+      let dz = side ? nz * (bestLat - latCur) : smp.z + smp.tx * lat[i] - zi;
+      if (me && !back && !backR && dx * dx + dz * dz < 0.09) {
+        // (an inside corner where this edge's offset line meets the next one's: the target lands
+        // on the rider, which then circles it on the spot; aim further on)
+        smp.s = ui + LOOK + 0.8;
+        this.sampleTravel(i);
+        dx = smp.x - smp.tz * lat[i] - xi;
+        dz = smp.z + smp.tx * lat[i] - zi;
+      }
       const dl = Math.sqrt(dx * dx + dz * dz) || 1;
-      if (back) vDes = Math.min(0.7, dl * 2);
+      // (a step back toward the rider keeps its berth; away from it, it is how the landing frees up)
+      if (back) vDes = Math.min(0.7, dl * 2, rider >= 0 && (px[rider] - xi) * dx + (pz[rider] - zi) * dz > 0 ? riderCap : Infinity);
+      else if (backR) vDes = Math.min(0.45, dl * 1.5);
+      else if (side) vDes = dl > 0.04 ? Math.min(0.6, dl * 2) : 0;
       dx /= dl;
       dz /= dl;
       const k = Math.min(1, dt * 5);
@@ -1078,6 +1469,24 @@ export class PeopleSim {
             nzp = pz[j] + (oz / l) * SEP;
           }
         }
+      }
+      // The rider's berth, whatever the paths did (someone stepping into a kerb queue in front of
+      // it, a corner, the rider coming off a crossing into the people waiting at its far kerb): the
+      // other is pushed off to RIDER_SEP. Never the rider itself (a shove of the camera), nor a
+      // committed crosser out on the road (it gets off it).
+      if (rider >= 0 && !me && !crossingOut && !squeeze) {
+        this.col.x = nxp;
+        this.col.z = nzp;
+        // (further in front of the rider's face: someone stopping there fills the lens)
+        const ox = px[rider];
+        const oz = pz[rider];
+        const ax = nxp - ox;
+        const az = nzp - oz;
+        const ad = Math.sqrt(ax * ax + az * az);
+        const front = ax * hx[rider] + az * hz[rider] > 0.57 * ad;
+        this.pushOff(ox, oz, RIDER_PUSH * dt, front ? RIDER_SEP_FRONT * this.riderK : RIDER_SEP);
+        nxp = this.col.x;
+        nzp = this.col.z;
       }
       // Last resort: never inside a prop or an idle person (their discs, current edge).
       for (let q = 0; q < f.oI.length; q++) {
@@ -1146,6 +1555,12 @@ export class PeopleSim {
       } else if (sp > 0.02) {
         fx = vx[i] / sp;
         fz = vz[i] / sp;
+        if (me && sp < 0.9) {
+          // the rider shuffling or sidestepping slowly keeps looking the way it is going
+          const w = Math.max(0, (sp - 0.4) / 0.5);
+          fx = tx + (fx - tx) * w;
+          fz = tz + (fz - tz) * w;
+        }
       }
       const hk = Math.min(1, dt * (sp > 0.2 ? 7 : 3));
       const hxn = hx[i] + (fx - hx[i]) * hk;
@@ -1162,20 +1577,35 @@ export class PeopleSim {
       const held = wanted > 0.3 && ex * tx + ez * tz < 0.12 * wanted * dt;
       if (commit[i]) jam[i] = held ? jam[i] + dt : Math.max(0, jam[i] - dt * 0.5);
       if (queue) stuck[i] += dt * 0.2;
-      else if (held && !(commit[i] && ui > kerbOut - 1.5)) stuck[i] += dt;
+      // (the rider past a near kerb never turns back: back onto the road it would cross again)
+      else if (held && !(commit[i] && ui > kerbOut - 1.5) && !(me && f.crossing && ui > waitU + 0.3)) stuck[i] += riderBlock ? dt * 2.5 : me ? dt * 2 : dt;
       else stuck[i] = Math.max(0, stuck[i] - dt * 2);
-      if (lensBack || stuck[i] > STUCK_S + (i % 7) * 0.3) {
+      if (lensBack || riderBack || giveUp || stuck[i] > STUCK_S + (i % 7) * 0.3) {
         stuck[i] = 0;
         dir[i] = -d as 1 | -1;
         u[i] = f.len - ui;
         // keeps a commitment it had (still out on the road); a waiter turning back never gains one
         commit[i] = f.crossing && commit[i] && this.onRoad(i) ? 1 : 0;
         jam[i] = 0;
-        this.next[i] = this.chooseNext(i);
+        // (the rider giving up on a kerb goes on along the pavement, not to the next kerb)
+        this.next[i] = this.chooseNext(i, me);
         lat[i] = -lat[i];
+        if (me) this.riderWait = 0;
       }
     }
     this.stepDogs(dt);
+  }
+
+  /** Move (col.x, col.z) up to `step` m away from (ox, oz) while closer than `sep`. */
+  private pushOff(ox: number, oz: number, step: number, sep: number): void {
+    const dx = this.col.x - ox;
+    const dz = this.col.z - oz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= sep * sep || d2 < 1e-10) return;
+    const d = Math.sqrt(d2);
+    const k = Math.min(step, sep - d) / d;
+    this.col.x += dx * k;
+    this.col.z += dz * k;
   }
 
   private stepDogs(dt: number): void {

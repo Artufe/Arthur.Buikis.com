@@ -106,6 +106,8 @@ export interface TrafficSim {
   /** Turn signal: +1 left, −1 right, 0 off. Brake light 0/1. */
   readonly signal: Int8Array;
   readonly brake: Uint8Array;
+  /** Read-only (L1, the follow card): the connector a vehicle on a lane will take at its end (on a connector: after the next lane). */
+  readonly next: Int32Array;
   readonly nLanes: number;
   /** Reset the fleet to its seeded starting layout. */
   reset(): void;
@@ -799,6 +801,7 @@ export function createTrafficSim(plan: CityPlan, seed: number, fleet: readonly n
     prz,
     signal,
     brake,
+    next,
     nLanes: nL,
     reset,
     step,

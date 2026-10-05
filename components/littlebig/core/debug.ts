@@ -2,7 +2,7 @@
 // deterministic screenshots, sequences, perf and boot timings. Installed in dev, and in
 // production only with ?shot=1.
 
-import type { BootEntry, LBContext, ViewSpec } from './contracts';
+import type { BootEntry, CameraMode, LBContext, RideView, TrackKind, ViewSpec } from './contracts';
 import { DIVE_SECONDS } from '../camera/dive';
 import { DIVE_T0, diveAt, SHOTS } from './shots';
 
@@ -72,6 +72,38 @@ export interface LittlebigHook {
   loop(on: boolean): void;
   /** renderer.info memory/programs plus scene counts (leak checks). */
   info(): { geometries: number; textures: number; programs: number; calls: number; triangles: number; objects: number };
+  // ── v2 (D1): rides and the bird, for deterministic review shots ──
+  /**
+   * Ride a Trackable. Settled at once (the transition skipped, every spring at rest) and rendered,
+   * unless live: then the transition runs as the frames advance (step / advance). False if unknown
+   * or not drawn.
+   */
+  ride(id: string, opts?: { live?: boolean }): boolean;
+  /** Bird flight from the current pose (settled unless live). */
+  fly(opts?: { live?: boolean }): void;
+  /** Back to explore: instantly (live: the real blended hand-back). */
+  exitMode(opts?: { live?: boolean }): void;
+  mode(): { mode: CameraMode; ride: string | null; blend: number };
+  /** Every registered Trackable, and whether it is drawn right now. */
+  trackables(kind?: TrackKind): Array<{ id: string; kind: TrackKind; label: string; sub?: string; view: RideView; radius: number; shown: boolean }>;
+  /** Hold a bird input (deterministic flights; the review tool's --steer), or null to let go. */
+  birdInput(i: { steer?: number; climb?: number; flap?: boolean; dive?: boolean } | null): void;
+  /**
+   * Advance `seconds` in frames of 1/fps (sim, camera, ride and bird all move), rendering only the
+   * last one: the live path, deterministic.
+   */
+  advance(seconds: number, fps?: number): void;
+}
+
+/** The camera system's dev-only extras (camera/index.ts), not part of the contract. */
+interface CameraDev {
+  director?: {
+    ride(ctx: LBContext, id: string, instant?: boolean): boolean;
+    fly(ctx: LBContext, instant?: boolean): void;
+    exitMode(ctx: LBContext, instant?: boolean): void;
+    settle(ctx: LBContext): void;
+    override: { steer: number; climb: number; flap: boolean; dive: boolean } | null;
+  };
 }
 
 declare global {
@@ -125,6 +157,13 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
       ctx.services.camera.setView(view);
       // One update so time-driven uniforms (sun, fog) match the new time, then render.
       deps.frameNow(0);
+      // v2 (D1): a ride or the bird on top of the view.
+      if (s.ride) hook.ride(s.ride);
+      if (s.bird) {
+        hook.birdInput({ steer: s.bird.steer, climb: s.bird.climb });
+        hook.fly();
+        hook.advance(s.bird.secs);
+      }
       return true;
     },
     dive(u, glide, dt) {
@@ -201,6 +240,8 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
         pitch: (v.pitch * 180) / Math.PI,
         fov: v.fov,
         street: v.street,
+        mode: v.mode,
+        ride: v.ride,
         city: { x: v.cityX, z: v.cityZ, dist: v.cityDist },
         near: ctx.camera.near,
         far: ctx.camera.far,
@@ -218,6 +259,47 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
     loop(on) {
       if (on) deps.resumeLoop();
       else deps.pauseLoop();
+    },
+    ride(id, opts) {
+      const dir = (ctx.services.camera as CameraDev).director;
+      if (!dir) return false;
+      ctx.debug.cameraLocked = true;
+      if (!dir.ride(ctx, id, !opts?.live)) return false;
+      if (!opts?.live) dir.settle(ctx);
+      deps.frameNow(0);
+      return true;
+    },
+    fly(opts) {
+      const dir = (ctx.services.camera as CameraDev).director;
+      if (!dir) return;
+      ctx.debug.cameraLocked = true;
+      dir.fly(ctx, !opts?.live);
+      if (!opts?.live) dir.settle(ctx);
+      deps.frameNow(0);
+    },
+    exitMode(opts) {
+      const dir = (ctx.services.camera as CameraDev).director;
+      if (!dir) return;
+      dir.exitMode(ctx, !opts?.live);
+      deps.frameNow(0);
+    },
+    mode: () => {
+      const m = ctx.services.camera.mode?.();
+      return m ? { mode: m.mode, ride: m.ride, blend: m.blend } : { mode: 'explore', ride: null, blend: 1 };
+    },
+    trackables(kind) {
+      const pose = { pos: ctx.view.eye.clone(), fwd: ctx.view.eye.clone(), up: ctx.view.eye.clone(), speed: 0 };
+      return ctx.services.track.list(kind).map((t) => ({ id: t.id, kind: t.kind, label: t.label, sub: t.sub, view: t.view, radius: t.radius, shown: t.pose(ctx, pose) }));
+    },
+    birdInput(i) {
+      const dir = (ctx.services.camera as CameraDev).director;
+      if (!dir) return;
+      dir.override = i ? { steer: i.steer ?? 0, climb: i.climb ?? 0, flap: i.flap ?? false, dive: i.dive ?? false } : null;
+    },
+    advance(seconds, fps = 60) {
+      const n = Math.max(1, Math.round(seconds * fps));
+      // frameNow renders each frame; the in-between ones cost a draw each, which is fine for review.
+      for (let i = 0; i < n; i++) deps.frameNow(1 / fps);
     },
     info() {
       const i = ctx.renderer.info;

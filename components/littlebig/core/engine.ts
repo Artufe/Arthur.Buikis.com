@@ -26,6 +26,7 @@ import {
 import { createPost } from '../render/post';
 import { createToonKit } from '../render/toon';
 import { getCityIndex, getCityPlan } from '../world/city';
+import { getRegion } from '../world/region';
 import { SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { type BootEntry, LAYER_NO_INK, type LBContext, type Quality, type Services, type System, type Variant, type ViewSpec, type ViewState } from './contracts';
@@ -78,6 +79,7 @@ const SHADOW_SIDE: Record<Side, Side> = { [FrontSide]: BackSide, [BackSide]: Fro
 const WORLD_CITY: PropertyDescriptorMap = {
   city: { get: getCityPlan, enumerable: true },
   cityIndex: { get: getCityIndex, enumerable: true },
+  region: { get: getRegion, enumerable: true }, // v2 (R1)
 };
 
 /**
@@ -166,6 +168,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const post = createPost(renderer, q.post, params, uniforms);
 
   const planet = getPlanet(SEED);
+  void planet.region; // v2 (R1): the region is carved into the terrain; build it inside this boot mark
   boot.mark('planet');
   // The city plan is built right after the sky has kicked off the shader warm-up (below), so its
   // cost overlaps the compile. Budget (A2): city plan + index ≤ 30 ms on the M3 — it is on the

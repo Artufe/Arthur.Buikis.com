@@ -17,13 +17,19 @@
 //   node scripts/littlebig-shot.mjs --dive 120 --perf 1 --size 1280x800              per-frame cost along the descent
 //   node scripts/littlebig-shot.mjs --boot                                            startup timeline per stage
 //   node scripts/littlebig-shot.mjs --list                                            named shots
+//   node scripts/littlebig-shot.mjs --tracks                                          registered trackables (ids to --ride)
+//   node scripts/littlebig-shot.mjs --shot city --ride plane:0 --out a.png            ride a trackable (settled at once), v2 D1
+//   node scripts/littlebig-shot.mjs --shot city --ride person:12 --seq 6 --interval 0.5 --out seq/   riding: frames advance live
+//   node scripts/littlebig-shot.mjs --shot orbit --ride plane:1 --live --seq 40 --interval 0.05 --out t/   the transition itself
+//   node scripts/littlebig-shot.mjs --shot rooftops --bird --steer 0.5,0.2 --pre 2 --out b.png   bird flight: hold a steer
+//                                                    (steer,climb[,flap,dive]: −1…1, 0/1) for --pre seconds, then shoot
 //   node scripts/littlebig-shot.mjs --leak 10 --close-at 300,ready                    window open/close leak check
 //   node scripts/littlebig-shot.mjs --bundle --url http://localhost:3099              production JS a /planet/ visit loads
 //                                                    (pnpm build, then serve out/: cd out && python3 -m http.server 3099)
 //
 // Flags: --size WxH (default 1600x1000) · --dpr N (device pixel ratio, default 1) · --q low|high (default high) · --p key=value (repeatable,
 // param overrides) · --cold (unique shader sources: first-visit compile cost) · --t <s> sim time · --warm N rAFs before each capture (default 6) · --jpg ·
-// --headed · --url. Console errors and warnings from the page are always printed.
+// --headed · --url · --hud (show the HUD; --coach adds the coach mark). Console errors and warnings from the page are always printed.
 // --leak N: opens and closes the floating window N times on the home page, alternating between
 // closing after each --close-at value (ms after open, or `ready` = once the world is built: the
 // close-mid-build case is the one that leaks if anything does), then checks for runaway timers,
@@ -55,6 +61,10 @@ const warm = Number(flags.warm ?? 6);
 const ext = flags.jpg ? 'jpg' : 'png';
 
 const search = new URLSearchParams({ shot: '1', q });
+// --hud: show the POP HUD (dock, labels, card, time button) in shot mode, which hides it otherwise (U1).
+// --coach additionally shows the one-time coach mark.
+if (flags.hud) search.set('hud', '1');
+if (flags.coach) search.set('coach', '1');
 if (flags.cold) search.set('cold', '1'); // defeat shader caches: first-visit compile timings
 // Timing runs measure the production path: three's shader error check (on in dev for readable GLSL
 // errors) costs synchronous GPU round trips at each program's first use. --p core.shaderChecks=true
@@ -173,7 +183,8 @@ async function leakCheck(n, closeAts) {
   });
   // ?shot=1 installs the debug hook in a production build too (the leak that matters there is a
   // minifier's: run this against a served out/ as well as the dev server).
-  await page.goto(`${base}/?shot=1`, { waitUntil: 'load', timeout: 180_000 });
+  // (--hud: with the HUD mounted in every window, so its listeners and rAF are checked too.)
+  await page.goto(`${base}/?shot=1${flags.hud ? '&hud=1' : ''}`, { waitUntil: 'load', timeout: 180_000 });
   await page.waitForTimeout(1500);
   const cdp = await page.context().newCDPSession(page);
   const listeners = async () => {
@@ -245,6 +256,11 @@ try {
     const list = await page.evaluate(() => window.__littlebig.shots());
     for (const s of list) console.log(`${s.name.padEnd(10)} ${s.about}`);
   }
+  if (flags.tracks) {
+    const list = await page.evaluate(() => window.__littlebig.trackables?.() ?? []);
+    for (const t of list) console.log(`${t.id.padEnd(14)} ${t.view.padEnd(9)} r ${String(t.radius).padEnd(5)} ${t.shown ? 'shown ' : 'hidden'} ${t.label}${t.sub ? ` · ${t.sub}` : ''}`);
+    if (!list.length) console.log('(no trackables registered)');
+  }
 
   // ── dive ──
   if (flags.dive) {
@@ -288,9 +304,28 @@ try {
   }
 
   // ── shots / custom view ──
-  const names = flags.shot ? String(flags.shot).split(',') : flags.view ? ['view'] : [];
+  // (--ride / --bird alone: from wherever the camera is, i.e. the boot view.)
+  const riding = !!(flags.ride || flags.bird);
+  const names = flags.shot ? String(flags.shot).split(',') : flags.view ? ['view'] : riding ? ['here'] : [];
+  // v2 (D1): ride a trackable / fly the bird after the view and time are set.
+  const rideOrFly = async () => {
+    if (!riding) return;
+    const live = !!flags.live;
+    if (flags.steer !== undefined) {
+      const [steer = 0, climb = 0, flap = 0, dive = 0] = String(flags.steer).split(',').map(Number);
+      await page.evaluate((i) => window.__littlebig.birdInput(i), { steer, climb, flap: !!flap, dive: !!dive });
+    }
+    if (flags.ride) {
+      const ok = await page.evaluate(({ id, live }) => window.__littlebig.ride(id, { live }), { id: String(flags.ride), live });
+      if (!ok) throw new Error(`cannot ride "${flags.ride}": unknown or not drawn here (try --tracks)`);
+    } else await page.evaluate((live) => window.__littlebig.fly({ live }), live);
+    if (flags.pre) await page.evaluate((sec) => window.__littlebig.advance(sec), Number(flags.pre));
+  };
+  const label = (name) => (flags.ride ? `${name}_${String(flags.ride).replace(/[^a-z0-9]+/gi, '-')}` : flags.bird ? `${name}_bird` : name);
   const apply = async (name) => {
-    if (name === 'view') {
+    if (name === 'here') {
+      // nothing to place
+    } else if (name === 'view') {
       const [lat, lon, alt, heading, pitch] = String(flags.view).split(',').map(Number);
       const v = { lat, lon, alt, heading: heading || 0 };
       if (Number.isFinite(pitch)) v.pitch = pitch;
@@ -300,6 +335,7 @@ try {
       if (!ok) throw new Error(`unknown shot "${name}" (try --list)`);
     }
     if (flags.t !== undefined) await page.evaluate((t) => window.__littlebig.setTime(t), Number(flags.t));
+    await rideOrFly();
   };
 
   // ── perf: best-of-N short runs, interleaved across shots (and --ab variants) ──
@@ -367,14 +403,16 @@ try {
       const n = Number(flags.seq);
       const interval = Number(flags.interval ?? 0.25);
       for (let i = 0; i < n; i++) {
-        if (i > 0) await page.evaluate((s) => window.__littlebig.step(1 / 60, Math.max(1, Math.round(s * 60))), interval);
+        // Riding: frame by frame at 60 Hz (the camera's springs and the transition run as they do live).
+        if (i > 0 && riding) await page.evaluate((s) => window.__littlebig.advance(s), interval);
+        else if (i > 0) await page.evaluate((s) => window.__littlebig.step(1 / 60, Math.max(1, Math.round(s * 60))), interval);
         await rafs(Math.max(2, warm));
-        await snap(outPath(`${name}_${String(i).padStart(3, '0')}`, true));
+        await snap(outPath(`${label(name)}_${String(i).padStart(3, '0')}`, true));
       }
       continue;
     }
     await rafs(warm);
-    await snap(outPath(name, names.length > 1));
+    await snap(outPath(label(name), names.length > 1));
   }
 } catch (e) {
   console.error('FAILED:', e.message);

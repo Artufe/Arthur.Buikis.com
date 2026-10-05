@@ -36,6 +36,7 @@ export const LAYER_NO_INK = 1;
 
 import type { DirectionalLight, Fog, Object3D, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
 import type { CityIndex, CityPlan } from '../world/city/types';
+import type { Region } from '../world/region/types';
 import type { Planet } from '../world/planet';
 import type { Vec3 } from '../world/sphere';
 import type { ToonKit } from '../render/toon';
@@ -138,6 +139,14 @@ export interface ViewState {
   mode: CameraMode;
   /** v2: the Trackable id being ridden while mode === 'ride' (else null). */
   ride: string | null;
+  /**
+   * v2 (D1): the Trackable ridden last, kept while `rideFade` > 0 (else null), and how much it is
+   * still "the ridden one": 1 while riding it, falling linearly to 0 over 1.5 s once the ride ends.
+   * An owner that suspends something for the ridden thing (a plane's dodge round the eye) eases it
+   * back in by (1 − rideFade) instead of snapping it on when `ride` clears.
+   */
+  lastRide?: string | null;
+  rideFade?: number;
 }
 
 /** A camera placement for setView (the shot tool and fly-to presets). Angles in DEGREES. */
@@ -165,6 +174,12 @@ export interface WorldData {
   planet: Planet;
   city: CityPlan;
   cityIndex: CityIndex;
+  /**
+   * v2 (R1): the world outside the plateau: settlements on carved pads, the capital's gate plazas,
+   * the road network (world-space lanes and connectors for V1), bridges, piers, the ferry, airports
+   * (world/region/types.ts). Built with the planet's first heightAt() (the terrain carve), read-only.
+   */
+  region: Region;
 }
 
 /**
@@ -226,6 +241,13 @@ export interface SkyService {
    * mist by it, so fogged buildings never stand as cut-outs against a clear sky.
    */
   mist?: number;
+  /**
+   * v2 (S1): 0..1, how much of the frame the clouds' falling-through-clouds overlay covers right now
+   * (its level: 1 while covered, easing out as the hole opens). Post may fade tilt-shift by it (the
+   * overlay's puffs are crisp cartoon shapes, not a scene to blur), but NOT the ink: the followed
+   * thing drawn over the overlay keeps its outline. Absent / 0 with no crossing.
+   */
+  cross?: number;
 }
 
 /** The camera controller (camera/ owns it). */
@@ -263,6 +285,20 @@ export interface CameraService {
   fly?(): void;
   /** Back to explore (orbit ↔ street) from wherever the camera is now, without a jump. */
   exitMode?(): void;
+  /**
+   * v2 (U1): the Trackable id under the cursor from the camera's own ≤ 10 Hz hover pick (the one
+   * that sets the pointer cursor), or null. The UI's "click to follow" tip reads it instead of
+   * picking a second time; without it the UI picks on its own (≤ 10 Hz).
+   */
+  hover?(): string | null;
+  /**
+   * v2 (S1): the thing the camera is following right now, if any: writes its world centre into
+   * `out` and returns its bounding radius (m), or 0 when there is none (explore). In bird mode it
+   * is the bird; in a ride it may be the ridden Trackable (the clouds fall back to
+   * ctx.services.track.get(ctx.view.ride).pose() when this is missing or returns 0). The clouds keep
+   * it visible over their falling-through-clouds overlay and clear of the white-out fog. Zero-alloc.
+   */
+  subject?(out: Vector3): number;
 }
 
 /**

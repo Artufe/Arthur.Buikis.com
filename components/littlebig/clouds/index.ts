@@ -1,6 +1,6 @@
-// Clouds (A3): puffy toon cumulus clusters on the cloud layer (36–48 m), drifting slowly around the
-// city's axis, with soft shadows on the ground (the toon kit's lbCloudShadow hook) and a brief
-// white-out when the camera passes through a puff.
+// Clouds (A3, v2 S1): puffy toon cumulus clusters on the cloud layer (36–48 m), drifting slowly
+// around the city's axis, with soft shadows on the ground (the toon kit's lbCloudShadow hook), and
+// the falling-through-the-clouds overlay whenever the eye crosses the layer or a puff.
 //
 //   - Instanced unit spheres in three LODs (puffs.ts: near / far / tiny), whole clusters culled by
 //     the horizon and the view frustum: puff centre + radius per instance, the drift as the meshes'
@@ -11,18 +11,29 @@
 //     over the city never changes with time.
 //   - Shadows: an equirectangular coverage map of the layout, looked up through the drift and a
 //     sun-direction offset at the focus; strength fades as the sun gets low.
-//   - White-out: per frame the eye is tested against the puffs. Inside a puff (≈ its lumpy
-//     surface) the veil overlay closes fast; near one (within ~9 m of its surface) the scene fog
-//     closes toward the mist colour, so the city fades by depth before the eye goes in and after it
-//     comes out, and puff surfaces right at the eye melt into the same mist (no hard sphere edge).
-//     Over the city, where no cloud floats, a player diving through the layer crosses a "mist
-//     slab" instead: the same veil by altitude alone, only while moving through it.
+//   - Mist: per frame the eye is tested against the puffs. Near one (within ~5 m of its surface)
+//     the scene fog closes toward the mist colour, so the city fades by depth before the eye goes
+//     in and after it comes out, and puff surfaces right at the eye melt into the same mist.
+//   - Falling through the clouds (v2): really crossing the layer (anywhere: zoom, dive, a ride, the
+//     bird; a zoom that stops inside it does not count) or flying into a puff (anticipated ~0.2 s
+//     ahead, so the overlay blooms out of the real cloud the eye is about to enter instead of
+//     replacing it in one frame) starts an episode (crossing.ts): inked cartoon puffs stream outward
+//     from the point the eye flies toward, fill the frame, hold (~0.3 s at least half covered) and
+//     part again from the middle, on screen wherever the eye flies (flying backward, the other way
+//     round: in from the corners, away into the focus) (shaders.ts: a scalloped body + one instanced
+//     sprite per puff). Inside a puff the same overlay holds as the white-out. It is ONE overlay
+//     (the v1 veil is gone), drawn last in the scene pass at the near plane, except in a window round
+//     the followed thing (camera subject / ridden Trackable) where it sits just behind it, so that
+//     thing stays on top, pixel-exact; the puffs in front of it dissolve and the white-out fog is
+//     pushed past it. Reduced motion: the body alone fades.
 
 import {
   BufferGeometry,
   Color,
   DataTexture,
   Float32BufferAttribute,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
   LinearFilter,
   Matrix3,
   Matrix4,
@@ -36,19 +47,24 @@ import {
   UnsignedByteType,
   Vector2,
   Vector3,
+  Vector4,
 } from 'three';
-import { LAYER_NO_INK, type LBContext, type System } from '../core/contracts';
+import { PALETTE } from '../render/palette';
+import { LAYER_NO_INK, type LBContext, type System, type TrackPose } from '../core/contracts';
 import { CLOUD_MAX, CLOUD_MIN, R } from '../world/config';
 import { addScaled3, cross3, dirFromLatLon, dot3, headingVector, normalize3, v3, type Vec3 } from '../world/sphere';
 import { moonDirection } from '../world/sun';
-import { cloudsShotView, diveCrossing } from './dive-anchors';
+import { cloudsShotView, DIVE_CROSS_T, diveCrossing } from './dive-anchors';
 import { CITY_AXIS, type CloudAnchor, coverageMapSteps, layoutClouds, SHELL_R } from './layout';
-import { airSpace, cloudLift, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, mistBlend, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
+import { airSpace, cloudLift, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, cloudPalette, mistBlend, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
 import { PuffLod } from './puffs';
-import { blockFrag, blockVert, puffFrag, puffVert, veilFrag, veilVert } from './shaders';
+import { crossBodyFrag, crossBodyVert, crossPuffFrag, crossPuffVert, puffFrag, puffVert } from './shaders';
+import { createCrossing, CROSS_TIMING, CROSS_TIMING_RM, forceCrossing, frontRange, resetCrossing, Stage, stepCrossing } from './crossing';
 import { hyp3 } from '../world/hyp';
 
 const DEG = Math.PI / 180;
+/** Default drift (deg/s) about the city's axis. */
+const CLOUD_DRIFT = 0.25;
 const SHADOW_W = 1024;
 const SHADOW_H = 512;
 /** Reveal: the whole layer pops in over this window (s), cluster by cluster. */
@@ -65,30 +81,81 @@ const BASE_MIST = 4;
  */
 const VEIL_VIS = 16;
 /**
- * The mist slab over the city (altitude above sea level, m): ramps in / full / ramps out. Thin: a
- * dive crosses it in ~0.25 s (at 31.5–49 m it was ~0.45 s of flat white, the clip's glitchy flash).
+ * The falling-through-the-clouds episode fires on a real CROSSING of the layer (altitude above sea
+ * level, m): the eye inside the band (or jumping over it in a frame), moving vertically faster than
+ * CROSS_VZ (m/s), and headed out of its FAR side: its altitude predicted CROSS_LEAD s ahead (in log
+ * space, which is how the zoom spring moves; CROSS_LEAD_FLY s, linear, for the bird and rides) lies
+ * beyond the band. A zoom that stops inside the layer
+ * to look at the clouds never fires it. Each direction re-arms once the eye is back on the side it
+ * started from (above the layer's middle and climbing, or out of the top; and the mirror image), so
+ * a bird porpoising in the layer fires at most once.
  */
-const SLAB = [36, 39.5, 42, 45.5];
-/** Plan radius (m) the mist slab covers (it fades out between these). */
-const SLAB_R0 = 72;
-const SLAB_R1 = 92;
+const CROSS_BAND = [CLOUD_MIN - 2, CLOUD_MAX + 2];
+const CROSS_MID = (CLOUD_MIN + CLOUD_MAX) / 2;
+const CROSS_VZ = 1.2;
+const CROSS_LEAD = 0.3;
+const CROSS_LEAD_FLY = 0.8;
+/** The eye this far (m) outside the band ends the hold early (a fast zoom shows the city rising). */
+const CROSS_CLEAR = 6;
 /**
- * Temporal release (s): leaving a cloud, the overlay thins over ~4 frames and the scene fog opens
- * over ~10 more (overlay first, fog last), so the city is revealed out of the mist, never cut to.
- * Entering is instant (the near plane must never slice a puff open).
+ * Riding something that is off-screen when the crossing fires (a ride transition still turning to
+ * it): the episode waits up to this long (s) for it to come into frame, so the thing you follow is
+ * on top of the clouds, not lost behind them; if it never shows, the crossing passes without one
+ * (contact with a real puff still whites out).
+ */
+const CROSS_WAIT = 0.4;
+/** During an episode the clouds keep streaming at least this fast (m/s): the hold never freezes. */
+const STREAM_MIN = 8;
+/** Reduced motion: the still fade's ceiling (the fogged city stays faintly visible). */
+const RM_CAP = 0.85;
+/** Contact (the eye inside a puff, 0..1) rising past this starts an episode too. */
+const CONTACT_TRIGGER = 0.3;
+/**
+ * Contact release (s): leaving a cloud the contact floor thins over ~4 frames and the scene fog
+ * opens over ~10 more (overlay first, fog last). Entering is instant (the near plane must never
+ * slice a puff open).
  */
 const VEIL_RELEASE = 0.12;
 const MIST_RELEASE = 0.4;
+/** Stream rates (ln-radius per metre flown): the near puffs rush past, the far ones lag (parallax). */
+const STREAM_NEAR = 1 / 7;
+const STREAM_FAR = 1 / 17;
+/** Overlay puff sprites: cell columns × row slots per layer (far, near); see shaders.ts. */
+const SPRITES = [
+  { cols: 11, rows: 11 },
+  { cols: 6, rows: 7 },
+];
+/** The overlay's depth outside the subject's window: this much beyond the near plane (× near). */
+const NEAR_K = 1.0002;
+/** Depth step between the overlay's layers (NDC): near puffs, far puffs, body. */
+const Z_EPS = 2e-6;
+/** The subject's window: its bounding circle × this, and the log-depth ramp round it (px, or × height). */
+const WIN_K = 1.08;
+const WIN_RAMP_PX = 40;
+const WIN_RAMP_H = 0.05;
+/** A window bigger than this share of the frame means the subject is close: one depth, no window. */
+const WIN_MAX = 0.3;
+/**
+ * Flying into a puff is seen coming this far ahead (× the fill time), at closing speeds above
+ * ANT_SPEED (m/s): the episode starts before contact, so the puffs bloom out of the cloud the eye is
+ * about to enter (it is ahead, at the focus of expansion) and the frame is covered as it goes in.
+ */
+const ANT_LEAD = 0.85;
+const ANT_SPEED = 2;
 /** The puffs' own fog far plane is floored at this while the white-out fog is closed (m). */
 const PUFF_FOG_MIN = 30;
 
 export function createCloudsSystem(): System {
   let lod: PuffLod | null = null;
-  let veil: Mesh | null = null;
-  let block: Mesh | null = null;
+  // The overlay's draws, each in two programs: plain (at the near plane) and LB_WINDOW (per-pixel
+  // depth with a window round the followed thing); one of each pair is visible.
+  let crossBody: Mesh | null = null;
+  let crossPuffs: Mesh | null = null;
+  let crossBodyW: Mesh | null = null;
+  let crossPuffsW: Mesh | null = null;
   let puffMat: ShaderMaterial | null = null;
-  let veilMat: ShaderMaterial | null = null;
-  let blockMat: ShaderMaterial | null = null;
+  let bodyMat: ShaderMaterial | null = null;
+  const crossMeshes: Mesh[] = [];
   let tex: DataTexture | null = null;
   let puffs: Float32Array | null = null;
   /** Per puff: its cluster's flat base altitude (the white-out test squashes like the shader). */
@@ -97,29 +164,62 @@ export function createCloudsSystem(): System {
   /** Per cluster: axis x, y, z (cloud frame, unit), base footprint radius, base altitude, top altitude. */
   let clusterInfo = new Float32Array(0);
   let clusterCount = 0;
-  let drift = { value: 0.25 }; // deg/s (param)
+  let drift = { value: CLOUD_DRIFT }; // deg/s (param)
   let shadowK = { value: 0.6 };
   let bump = { value: 0.2 };
   let mask = { value: 0 };
+  let tIn = { value: CROSS_TIMING.tIn };
+  let tHold = { value: CROSS_TIMING.hold };
+  let tOut = { value: CROSS_TIMING.tOut };
+  let force = { value: 0 };
+  let crossParts = { value: 3 };
+  const timing = { ...CROSS_TIMING };
   let ready = false;
-  let phase = 0;
   let hasPrev = false;
   let veilS = 0;
   let mistS = 0;
-  // The mist slab (interactive descents over the city).
-  let slabOn = false;
-  let slabIdle = 0;
-  let slabK = 0;
-  let wasInBand = false;
+  // The episode (crossing.ts) and what fires it.
+  const ep = createCrossing();
+  let armedDown = false;
+  let armedUp = false;
+  let wait = 0;
+  let waitDir = 0;
   let prevAltSea = 0;
+  let prevContact = 0;
+  let lastSign = 1;
+  const range = new Vector2(0, 1);
+  const win = new Vector4(0, 0, -1, WIN_RAMP_PX);
+  const lnW = new Vector2();
+  const nf = new Vector2(0.1, 1000);
+  const dbSize = new Vector2();
+  const step3 = new Vector3();
+  const ndc = new Vector3();
+  const phase = new Vector2();
+  let streak = 0;
   const prevEye = new Vector3();
   const vel = new Vector3();
-  const foe = new Vector2(0.5, 0.5);
-  const foeT = new Vector2();
+  const velV = new Vector3();
+  const foe = new Vector2(0.5, 0.35);
+  const foeT = new Vector2(0.5, 0.35);
+  /** The followed thing for the puffs' tunnel (world centre, radius; w = 0 off). */
+  const holeW = new Vector4();
+  const light = new Vector2(0, 1);
+  const light3 = new Vector3(0, 0.8, 0.55);
+  const bellyT = new Color();
+  const rimK = new Color();
+  const bodyC = new Color();
+  const kbs = new Vector2(0.62, 0.55);
+  const subj = new Vector3();
+  const subjV = new Vector3();
+  const subjPose: TrackPose = { pos: new Vector3(), fwd: new Vector3(), up: new Vector3(), speed: 0 };
   const moonDir = new Vector3();
   const drift3 = new Matrix3();
   const mist = new Color();
   const mistLit = new Color();
+  const palLit = new Color();
+  const palShade = new Color();
+  const palBelly = new Color();
+  const palRim = new Color();
   const q = new Quaternion();
   const qInv = new Quaternion();
   const eyeLocal = new Vector3();
@@ -131,16 +231,34 @@ export function createCloudsSystem(): System {
   const tmp = new Vector3();
   const fwdL = new Vector3();
 
+  /** The followed thing's centre into `subj`; returns its radius (0 = none). */
+  const subject = (ctx: LBContext): number => {
+    const cam = ctx.services.camera;
+    const r = cam.subject?.(subj) ?? 0;
+    if (r > 0) return r;
+    const id = ctx.view.ride;
+    if (!id) return 0;
+    const t = ctx.services.track.get(id);
+    if (!t || !t.pose(ctx, subjPose)) return 0;
+    subj.copy(subjPose.pos);
+    return t.radius;
+  };
+
   return {
     name: 'clouds',
     stage: 2,
     async init(ctx: LBContext) {
-      drift = ctx.params.number('clouds.drift', { label: 'cloud drift (deg/s)', min: 0, max: 3, value: 0.25 });
+      drift = ctx.params.number('clouds.drift', { label: 'cloud drift (deg/s)', min: 0, max: 3, value: CLOUD_DRIFT });
       shadowK = ctx.params.number('clouds.shadow', { label: 'cloud shadow strength', min: 0, max: 1, value: 0.6 });
       bump = ctx.params.number('clouds.bump', { label: 'cloud bump', min: 0, max: 1, value: 0.2 });
       mask = ctx.params.number('clouds.mask', { label: 'debug: clouds as flat magenta', min: 0, max: 1, value: 0 });
+      tIn = ctx.params.number('clouds.crossIn', { label: 'cloud crossing: ease in (s)', min: 0.02, max: 1, value: CROSS_TIMING.tIn });
+      tHold = ctx.params.number('clouds.crossHold', { label: 'cloud crossing: hold (s)', min: 0, max: 2, value: CROSS_TIMING.hold });
+      tOut = ctx.params.number('clouds.crossOut', { label: 'cloud crossing: ease out (s)', min: 0.05, max: 2, value: CROSS_TIMING.tOut });
+      force = ctx.params.number('clouds.force', { label: 'debug: hold a crossing at this cover (perf A/B)', min: 0, max: 1, value: 0 });
+      crossParts = ctx.params.number('clouds.crossParts', { label: 'debug: overlay parts drawn (1 body, 2 puffs, 3 both; perf A/B)', min: 0, max: 3, value: 3 });
 
-      const layout = layoutClouds({ seed: ctx.world.seed, clusters: 30, anchors: anchors() });
+      const layout = layoutClouds({ seed: ctx.world.seed, clusters: 30, anchors: anchors(drift.value) });
       puffs = layout.puffs;
       puffCount = layout.count;
       puffBase = new Float32Array(puffCount);
@@ -197,6 +315,7 @@ export function createCloudsSystem(): System {
             uMask: { value: 0 },
             uLift: { value: 1 },
             uFogMin: { value: 0 },
+            uHole: { value: holeW },
             uExact: { value: hi ? 110 : 60 },
             uPalE: { value: CLOUD_PAL_E },
             uPalLit: { value: CLOUD_PAL_LIT },
@@ -256,55 +375,85 @@ export function createCloudsSystem(): System {
       lod = new PuffLod([nearGeo, farGeo, tinyGeo], puffMat, layout.puffs, { aInfo: info, aCluster: clus }, { spheres, of: layout.cluster }, 64);
       ctx.scene.add(...lod.meshes);
 
-      // White-out veil (one full-screen triangle) and its opaque scene blocker.
+      // The falling-through-the-clouds overlay, drawn last in the scene pass at the followed thing's
+      // depth (shaders.ts): a full-screen body and one instanced sprite per cartoon puff.
+      const cu = {
+        uFill: { value: 0 },
+        uOpen: { value: 0 },
+        uContact: { value: 0 },
+        uRange: { value: range },
+        uFoe: { value: foe },
+        uAspect: { value: 1.6 },
+        uPhase: { value: phase },
+        uDir: { value: 1 },
+        uSubj: { value: win },
+        uLnW: { value: lnW },
+        uNF: { value: nf },
+        uZ: { value: -0.9999 },
+        uZEps: { value: Z_EPS },
+        uTone: { value: 1 },
+        uL3: { value: light3 },
+        uBellyT: { value: bellyT },
+        uRimK: { value: rimK },
+        uBodyC: { value: bodyC },
+        uKBS: { value: kbs },
+        uRes: { value: dbSize },
+        uInk: { value: new Color().copy(PALETTE.ink) },
+        uFade: { value: 1 },
+        uLight: { value: light },
+        uStreak: { value: 0 },
+        uLit: { value: palLit },
+        uShade: { value: palShade },
+        uBelly: { value: palBelly },
+        uRim: { value: palRim },
+      };
+      // (Reduced motion: a still opacity fade, so no depth write; post's veil fades the ink instead.)
+      const overlay = { transparent: true, depthTest: true, depthWrite: !ctx.reducedMotion, uniforms: cu };
+      const W = { defines: { LB_WINDOW: '' } };
+      bodyMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing', vertexShader: crossBodyVert, fragmentShader: crossBodyFrag, ...overlay }));
+      const bodyMatW = ctx.track(new ShaderMaterial({ name: 'cloud crossing (window)', vertexShader: crossBodyVert, fragmentShader: crossBodyFrag, ...overlay, ...W }));
+      const spriteMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing puffs', vertexShader: crossPuffVert, fragmentShader: crossPuffFrag, ...overlay }));
+      const spriteMatW = ctx.track(new ShaderMaterial({ name: 'cloud crossing puffs (window)', vertexShader: crossPuffVert, fragmentShader: crossPuffFrag, ...overlay, ...W }));
       const vgeo = ctx.track(new BufferGeometry());
       vgeo.setAttribute('position', new Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-      veilMat = ctx.track(
-        new ShaderMaterial({
-          name: 'cloud veil',
-          vertexShader: veilVert,
-          fragmentShader: veilFrag,
-          transparent: true,
-          depthTest: false,
-          depthWrite: false,
-          uniforms: {
-            uAmount: { value: 0 },
-            uWisp: { value: 0 },
-            uLit: { value: mistLit },
-            uShade: { value: mist },
-            uPhase: { value: 0 },
-            uFoe: { value: foe },
-            uAspect: { value: 1.6 },
-            uTime: ctx.uniforms.lbTime,
-          },
-        }),
-      );
-      veil = new Mesh(vgeo, veilMat);
-      veil.name = 'cloud veil';
-      veil.frustumCulled = false;
-      veil.renderOrder = 1000;
-      veil.layers.set(LAYER_NO_INK);
-      ctx.scene.add(veil);
-      blockMat = ctx.track(
-        new ShaderMaterial({
-          name: 'cloud block',
-          vertexShader: blockVert,
-          fragmentShader: blockFrag,
-          depthTest: false,
-          depthWrite: true,
-          uniforms: { uColor: { value: mist } },
-        }),
-      );
-      block = new Mesh(vgeo, blockMat);
-      block.name = 'cloud block';
-      block.frustumCulled = false;
-      block.renderOrder = -999.5; // right after the sky dome (-1000), before the stars and the world
-      block.layers.set(LAYER_NO_INK);
-      ctx.scene.add(block);
+      const sgeo = ctx.track(new InstancedBufferGeometry());
+      // Each sprite an octagon round the puff's three domes (they reach 1.48 of the base dome's radius;
+      // shaders.ts maps position × 1.5 to dome units): ~20 % fewer fragments than the square it was,
+      // the overlay's cost being its overdraw.
+      const oct: number[] = [];
+      for (let i = 0; i < 8; i++) {
+        const a = ((i + 0.5) / 8) * Math.PI * 2;
+        oct.push((Math.cos(a) * 1.49) / Math.cos(Math.PI / 8) / 1.5, (Math.sin(a) * 1.49) / Math.cos(Math.PI / 8) / 1.5, 0);
+      }
+      sgeo.setAttribute('position', new Float32BufferAttribute(oct, 3));
+      sgeo.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7]);
+      const cells: number[] = [];
+      // Front to back (shaders.ts: each row slot a depth step behind the last): the near layer, outer
+      // rows (big, nearest the eye) first, then the far layer likewise; the body behind them all.
+      for (const layer of [1, 0]) {
+        const L = SPRITES[layer];
+        for (let j = L.rows - 1; j >= 0; j--) for (let i = 0; i < L.cols; i++) cells.push(layer, i, j);
+      }
+      sgeo.setAttribute('aCell', new InstancedBufferAttribute(new Float32Array(cells), 3));
+      // Low tier (phones): the near layer only (it comes first), the body filling between: about half
+      // the overlay's overdraw, the cost it has.
+      sgeo.instanceCount = hi ? cells.length / 3 : SPRITES[1].cols * SPRITES[1].rows;
+      crossBody = new Mesh(vgeo, bodyMat);
+      crossBodyW = new Mesh(vgeo, bodyMatW);
+      crossPuffs = new Mesh(sgeo, spriteMat);
+      crossPuffsW = new Mesh(sgeo, spriteMatW);
+      crossMeshes.push(crossPuffs, crossBody, crossPuffsW, crossBodyW);
+      crossMeshes.forEach((m, k) => {
+        m.name = ['cloud crossing puffs', 'cloud crossing', 'cloud crossing puffs (window)', 'cloud crossing (window)'][k];
+        m.frustumCulled = false;
+        // Puffs, then the body behind them; the window's pair after (they draw disjoint pixels).
+        m.renderOrder = 1000 + k;
+        m.layers.set(LAYER_NO_INK);
+        ctx.scene.add(m);
+      });
 
       await ctx.compile();
-      veil.visible = false;
-      block.visible = false;
+      for (const m of crossMeshes) m.visible = false;
       // Reveal: clusters pop in one after another (nearest the city first), puffs within a cluster
       // in a quick ripple.
       const start = ctx.reveal.slot(REVEAL_SPAN + REVEAL_DUR);
@@ -318,7 +467,7 @@ export function createCloudsSystem(): System {
     },
 
     update(ctx: LBContext) {
-      if (!ready || !lod || !puffMat || !veilMat || !blockMat || !veil || !block || !puffs || !puffBase) return;
+      if (!ready || !lod || !puffMat || !bodyMat || !crossBody || !crossPuffs || !crossBodyW || !crossPuffsW || !puffs || !puffBase) return;
       const v = ctx.view;
       const u = ctx.uniforms;
       const pu = puffMat.uniforms;
@@ -407,15 +556,39 @@ export function createCloudsSystem(): System {
       }
       ctx.services.sky.cloudsInView = inView;
 
+      const base = ctx.reducedMotion ? CROSS_TIMING_RM : CROSS_TIMING;
+      timing.tIn = ctx.reducedMotion ? base.tIn : tIn.value;
+      timing.hold = ctx.reducedMotion ? base.hold : tHold.value;
+      timing.tOut = ctx.reducedMotion ? base.tOut : tOut.value;
+      // The overlay's clock: real time live; in shot mode sim time, so the review tool's warm frames
+      // (frozen sim, real rAFs) never age an episode and the /play clip shows it as a player sees it.
+      const dt = ctx.shotMode ? ctx.time.dt : ctx.time.realDt;
+      const jump = !hasPrev || tmp.copy(v.eye).sub(prevEye).lengthSq() > 25 * 25;
+      // This frame's motion (world), and whether it is forward or backward in view (the overlay's
+      // streams and fronts run outward from a focus of expansion, or inward to one of contraction).
+      const moved = !jump && dt > 0 ? vel.copy(v.eye).sub(prevEye).length() : 0;
+      if (moved > 1e-4) {
+        velV.copy(vel).multiplyScalar(1 / moved).transformDirection(ctx.camera.matrixWorldInverse);
+        lastSign = -velV.z >= -0.1 ? 1 : -1;
+      }
+      // Where the eye will be ANT_LEAD fill-times ahead (cloud frame), when moving fast enough.
+      const lead = timing.tIn * ANT_LEAD;
+      const antOn = !ctx.reducedMotion && moved / Math.max(dt, 1e-4) > ANT_SPEED;
+      if (antOn) step3.copy(vel).applyQuaternion(qInv).multiplyScalar(lead / dt);
+      else step3.set(0, 0, 0);
+      const segLen = step3.length();
+      let ahead = false;
+
       // White-out. inside: the eye within a puff's (lumpy) surface → the veil overlay. near: within
       // FOG_REACH of a surface, or just under a cluster's flat base → the scene fog closes in.
       let inside = 0;
       let near = 0;
       let under = 0;
       const altSea = v.altSea;
-      if (altSea > CLOUD_MIN - BASE_MIST - 2 && altSea < CLOUD_MAX + 14 + FOG_REACH) {
+      if (altSea > CLOUD_MIN - BASE_MIST - 2 - segLen && altSea < CLOUD_MAX + 14 + FOG_REACH + segLen) {
         const eyeH = eyeR - R;
         const nearPlane = ctx.camera.near * 1.3;
+        const reachX = Math.max(FOG_REACH, segLen + nearPlane + 1);
         for (let i = 0; i < puffCount; i++) {
           const cx = puffs[i * 4];
           const cy = puffs[i * 4 + 1];
@@ -425,6 +598,20 @@ export function createCloudsSystem(): System {
           const dy = eyeLocal.y - cy;
           const dz = eyeLocal.z - cz;
           const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > (r + reachX) * (r + reachX)) continue;
+          if (antOn && !ahead) {
+            // The nearest point of the path ahead to this puff: inside its contact ball (the same
+            // ball as `inside` below), above its flat base, and closer than the eye is now.
+            const tt = Math.min(1, Math.max(0, -(dx * step3.x + dy * step3.y + dz * step3.z) / (segLen * segLen)));
+            const qx = dx + step3.x * tt;
+            const qy = dy + step3.y * tt;
+            const qz = dz + step3.z * tt;
+            const qd = hyp3(qx, qy, qz);
+            if (tt > 0 && (qd - nearPlane) / r < 1.12 && qd * qd < d2) {
+              const qh = hyp3(cx + qx, cy + qy, cz + qz) - R;
+              if (qh >= puffBase[i]) ahead = true;
+            }
+          }
           if (d2 > (r + FOG_REACH) * (r + FOG_REACH)) continue;
           if (eyeH < puffBase[i]) continue; // under the flat cut: the base mist below handles it
           // The eye as a ball of the near plane's radius: the veil is closed before the near plane
@@ -451,82 +638,223 @@ export function createCloudsSystem(): System {
         }
       }
 
-      // The mist slab: over the city, while the eye moves through the layer (entered moving, not
-      // set there), fading away if it lingers. A teleport (setView, shots) never starts it.
-      const jump = !hasPrev || tmp.copy(v.eye).sub(prevEye).lengthSq() > 25 * 25;
-      const inBand = altSea > SLAB[0] && altSea < SLAB[3];
-      const dAlt = Math.abs(altSea - prevAltSea);
-      const dt = Math.max(1e-3, ctx.time.realDt);
-      if (jump || !inBand) {
-        slabOn = false;
-        slabIdle = 0;
-      } else {
-        if (!wasInBand && dAlt > 0.02) slabOn = true;
-        slabIdle = dAlt / dt > 1.5 ? 0 : slabIdle + dt;
-        if (slabIdle > 0.7) slabOn = false;
-      }
-      wasInBand = inBand && !jump;
-      prevAltSea = altSea;
-      const slabT = slabOn ? 1 : 0;
-      slabK = jump ? 0 : slabT > slabK ? Math.min(slabT, slabK + dt / 0.1) : Math.max(slabT, slabK - dt / 0.6);
-      const slab = slabK * (1 - smooth(SLAB_R0, SLAB_R1, v.cityDist)) * smooth(SLAB[0], SLAB[1], altSea) * (1 - smooth(SLAB[2], SLAB[3], altSea));
-
-      // Leaving through a flat base the veil thins over a few metres of mist (no cut to clear).
-      const amountNow = Math.max(inside, slab, under * 0.85);
-      const fogNow = Math.max(near, under, amountNow);
+      // Contact: inside a puff, or leaving through a flat base (thins over a few metres of mist).
+      const contactNow = Math.max(inside, under * 0.85);
+      const fogNow = Math.max(near, under, contactNow);
       // Temporal release: in at once, out over a few frames (overlay first, fog last). The sky dome
       // reads the same smoothed values at draw time, so silhouettes fade into the sky with the fog.
-      const rel = ctx.time.realDt;
-      veilS = jump ? amountNow : Math.max(amountNow, veilS * Math.exp(-rel / VEIL_RELEASE));
-      mistS = jump ? fogNow : Math.max(fogNow, veilS, mistS * Math.exp(-rel / MIST_RELEASE));
+      veilS = jump ? contactNow : Math.max(contactNow, veilS * Math.exp(-dt / VEIL_RELEASE));
+      mistS = jump ? fogNow : Math.max(fogNow, veilS, mistS * Math.exp(-dt / MIST_RELEASE));
       if (veilS < 1e-3) veilS = 0;
       if (mistS < 1e-3) mistS = 0;
-      const amount = veilS;
-      const fogAmt = mistS;
-      const vm = veilMat.uniforms;
-      vm.uAmount.value = amount;
-      veil.visible = amount > 0.002;
-      // (The opaque blocker stays off: the veil never closes fully any more, the fogged scene
-      // shows through it; see veilFrag.)
-      block.visible = false;
-      ctx.services.sky.veil = amount;
-      ctx.services.sky.mist = fogAmt;
 
-      // Travel: phase (distance flown) and the screen point the eye moves toward.
-      if (!jump) {
-        vel.copy(v.eye).sub(prevEye);
-        const dist = vel.length();
-        if (dist > 1e-3) {
-          phase += dist * 0.07;
-          vel.multiplyScalar(1 / dist);
-          if (vel.dot(v.forward) > 0.25) {
-            tmp.copy(v.eye).addScaledVector(vel, 10).project(ctx.camera);
-            foeT.set(Math.min(1.2, Math.max(-0.2, tmp.x * 0.5 + 0.5)), Math.min(1.2, Math.max(-0.2, tmp.y * 0.5 + 0.5)));
-          } else foeT.set(0.5, -0.2);
-          foe.lerp(foeT, 0.35);
+      // The followed thing (camera subject / ridden Trackable), first: the trigger waits for it to
+      // be in frame, and the overlay sits just behind it.
+      const sr = subject(ctx);
+      let subjDist = 0;
+      let subjOn = true;
+      if (sr > 0) {
+        subjDist = subj.distanceTo(v.eye);
+        ndc.copy(subj).project(ctx.camera);
+        subjV.copy(subj).applyMatrix4(ctx.camera.matrixWorldInverse);
+        subjOn = subjV.z < 0 && Math.abs(ndc.x) < 0.95 && Math.abs(ndc.y) < 0.95;
+      }
+
+      // Episode triggers: a real crossing of the layer (see CROSS_BAND), or entering a puff. A
+      // teleport ends any episode.
+      const rm = ctx.reducedMotion;
+      let trigger = false;
+      if (jump) {
+        resetCrossing(ep);
+        armedDown = altSea > CROSS_MID;
+        armedUp = altSea < CROSS_MID;
+        wait = 0;
+      } else if (dt > 0) {
+        const vz = (altSea - prevAltSea) / dt;
+        // Explore (the zoom spring, the dive) decelerates into its target: a short look-ahead in log
+        // space. The bird and rides keep their speed: a longer, linear one, so a dive through the layer
+        // fires as it enters, not as it leaves.
+        let pred: number;
+        if (v.mode === 'explore') {
+          const vlog = (Math.log(Math.max(1, altSea)) - Math.log(Math.max(1, prevAltSea))) / dt;
+          pred = altSea * Math.exp(Math.max(-3, Math.min(3, vlog * CROSS_LEAD)));
+        } else pred = altSea + vz * CROSS_LEAD_FLY;
+        const lo = CROSS_BAND[0];
+        const hi = CROSS_BAND[1];
+        let dir = 0;
+        // Down: in the band (or jumped clean through it this frame) and headed out of its bottom.
+        if (armedDown && vz < -CROSS_VZ && altSea < hi && (altSea > lo - CROSS_CLEAR || prevAltSea > hi) && Math.min(pred, altSea) < lo - 1) dir = -1;
+        if (armedUp && vz > CROSS_VZ && altSea > lo && (altSea < hi + CROSS_CLEAR || prevAltSea < lo) && Math.max(pred, altSea) > hi + 1) dir = 1;
+        if (dir !== 0) {
+          if (dir < 0) armedDown = false;
+          else armedUp = false;
+          // Riding something that is not in frame yet: wait for it (CROSS_WAIT).
+          if (subjOn) trigger = true;
+          else {
+            wait = CROSS_WAIT;
+            waitDir = dir;
+          }
         }
+        if (wait > 0) {
+          const inReach = altSea > lo - CROSS_CLEAR && altSea < hi + CROSS_CLEAR;
+          if (subjOn && inReach) {
+            trigger = true;
+            wait = 0;
+          } else wait = inReach && Math.sign(vz) === waitDir ? Math.max(0, wait - dt) : 0;
+        }
+        if (altSea > hi || (altSea > CROSS_MID && vz > 0)) armedDown = true;
+        if (altSea < lo || (altSea < CROSS_MID && vz < 0)) armedUp = true;
+        if (veilS > CONTACT_TRIGGER && prevContact <= CONTACT_TRIGGER) trigger = true;
+        if (ahead) trigger = true;
+      }
+      prevAltSea = altSea;
+      prevContact = veilS;
+      const clear = altSea < CROSS_BAND[0] - CROSS_CLEAR || altSea > CROSS_BAND[1] + CROSS_CLEAR;
+      if (dt > 0 || trigger || jump) stepCrossing(ep, dt, trigger, veilS, timing, clear, lastSign);
+      if (force.value > 0) forceCrossing(ep, force.value);
+
+      const cover = ep.cover;
+      if (process.env.NODE_ENV !== 'production') (ctx.debug as unknown as { clouds?: unknown }).clouds = ep;
+      const show = ep.stage !== Stage.Idle || veilS > 0.002;
+      const rmLevel = Math.min(RM_CAP, Math.max(cover, veilS));
+      ctx.services.sky.veil = rm ? rmLevel : veilS;
+      ctx.services.sky.mist = mistS;
+      ctx.services.sky.cross = rm ? rmLevel : Math.max(cover, smooth(0.15, 0.85, veilS)) * (ep.stage === Stage.Idle ? 1 : ep.fade);
+
+      // Travel: the stream phase (distance flown) and the screen point the eye moves toward.
+      if (!jump && dt > 0) {
+        const dist = moved;
+        if (dist > 1e-4) {
+          vel.multiplyScalar(1 / dist);
+          // The motion in view space (velV, above): forward (−z) streams outward from the focus of
+          // expansion, backward (climbing out while looking down) inward to the focus of contraction.
+          const fwd = -velV.z;
+          if (Math.abs(fwd) > 0.12) {
+            tmp.copy(v.eye).addScaledVector(vel, lastSign * 10).project(ctx.camera);
+            foeT.set(tmp.x * 0.5 + 0.5, tmp.y * 0.5 + 0.5);
+          } else {
+            // Sideways: the focus off the side the eye moves toward; the streams run across.
+            const l = Math.hypot(velV.x, velV.y) || 1;
+            foeT.set(0.5 + (velV.x / l) * 2.2, 0.5 + (velV.y / l) * 2.2);
+          }
+          // Kept near the frame: far off it, the log-polar puffs grew to giant arcs (and its fronts
+          // swept mostly off-screen). Just outside an edge, the streams fan in from that side.
+          foeT.set(Math.min(1.3, Math.max(-0.3, foeT.x)), Math.min(1.3, Math.max(-0.3, foeT.y)));
+          streak = Math.min(1, dist / dt / 25);
+        } else streak = 0;
+        // During an episode the streaming never stops (a slowing zoom froze it into a still wall).
+        const stream = !rm && (ep.stage !== Stage.Idle || veilS > 0.002) ? Math.max(dist, STREAM_MIN * dt) : rm ? 0 : dist;
+        phase.x += lastSign * stream * STREAM_NEAR;
+        phase.y += lastSign * stream * STREAM_FAR;
+        // Ease the focus (exponential, frame-rate independent): a turn swings the streams round.
+        foe.lerp(foeT, 1 - Math.exp(-dt / 0.06));
+      }
+      if (!rm && dt > 0) {
+        // A slow drift so the inside of a cloud still breathes while hovering.
+        phase.x += dt * 0.12;
+        phase.y += dt * 0.05;
       }
       prevEye.copy(v.eye);
       hasPrev = true;
 
-      if (amount > 0.002) {
-        vm.uPhase.value = phase;
-        vm.uAspect.value = ctx.camera.aspect;
-        // Wisps only well inside: gone the moment the eye is out (no streaks over a clear city).
-        // (Faint: at full strength they formed an X-shaped radial streak across the white.)
-        vm.uWisp.value = 0.3 * smooth(0.3, 0.75, amountNow) * smooth(0.5, 0.9, amount);
+      if (show) {
+        const cu = bodyMat.uniforms;
+        const aspect = ctx.camera.aspect;
+        if (rm) {
+          // A still fade: the body alone (no puffs, fronts, streaming or speed lines), opacity only,
+          // slow in and out and capped (the fogged city stays faintly visible).
+          cu.uFill.value = 10;
+          cu.uOpen.value = -10;
+          cu.uFade.value = rmLevel;
+          cu.uStreak.value = 0;
+          foe.set(0.5, 0.5);
+        } else {
+          cu.uFill.value = ep.fill;
+          cu.uOpen.value = ep.open;
+          cu.uFade.value = ep.stage === Stage.Idle ? 1 : ep.fade;
+          // Speed lines: with the motion, and a floor while covered so the hold keeps moving.
+          cu.uStreak.value = Math.max(streak, ep.stage !== Stage.Idle ? 0.45 : 0) * smooth(0.05, 0.4, Math.max(cover, veilS));
+        }
+        cu.uContact.value = smooth(0.15, 0.85, veilS);
+        cu.uDir.value = ep.dir;
+        cu.uAspect.value = aspect;
+        // The fronts' on-screen radius range (height units): nearest screen point → farthest corner.
+        frontRange(foe.x, foe.y, aspect, range);
+        cloudPalette(eyeSun, palLit, palShade, palBelly, palRim);
+        // Shading contrast: deeper as the lit colour darkens (dusk, night).
+        const tone = Math.min(1.9, Math.max(1, 0.82 / Math.max(0.05, palLit.r * 0.2126 + palLit.g * 0.7152 + palLit.b * 0.0722)));
+        cu.uTone.value = tone;
+        bellyT.copy(palBelly).multiplyScalar(1 - 0.1 * (tone - 1));
+        rimK.copy(palRim).multiplyScalar(0.18 * tone);
+        bodyC.copy(palShade).lerp(palLit, 0.62);
+        kbs.set(Math.min(0.95, 0.62 * tone), Math.min(0.9, 0.55 * tone));
+        // Light from the sky above: screen up, leaning toward the sun's side.
+        tmp.copy(u.lbSunDir.value).transformDirection(ctx.camera.matrixWorldInverse);
+        light.set(tmp.x * 0.5, 1).normalize();
+        light3.set(light.x * 0.8, light.y * 0.8, 0.55).normalize();
       }
-      pu.uFogMin.value = fogAmt > 0.002 ? PUFF_FOG_MIN : 0;
-      if (fogAmt > 0.002) {
+
+      // The followed thing: in a window round it the overlay sits just behind it (so it stays on top,
+      // pixel-exact; everywhere else the overlay is at the near plane and covers everything), the
+      // puffs in front of it dissolve, the white-out fog is pushed past it.
+      holeW.w = 0;
+      win.z = -1;
+      const cam = ctx.camera;
+      ctx.renderer.getDrawingBufferSize(dbSize);
+      nf.set(cam.near, cam.far);
+      lnW.y = -Math.log(cam.near * NEAR_K);
+      {
+        const pe = cam.projectionMatrix.elements;
+        const D = cam.near * NEAR_K;
+        bodyMat.uniforms.uZ.value = (pe[10] * -D + pe[14]) / D;
+      }
+      if (sr > 0) {
+        const sAlt = subj.length() - R;
+        if (sAlt > CLOUD_MIN - sr - 6 && sAlt < CLOUD_MAX + 16 + sr) holeW.set(subj.x, subj.y, subj.z, sr);
+        const D = -subjV.z + sr;
+        if (show && subjV.z < 0 && D > cam.near * 1.5) {
+          const tanHalf = Math.tan((cam.fov * DEG) / 2);
+          const rs = sr * WIN_K;
+          const rpx = subjDist > rs ? (Math.tan(Math.asin(rs / subjDist)) / tanHalf) * dbSize.y * 0.5 : 1e5;
+          const ramp = Math.max(WIN_RAMP_PX, WIN_RAMP_H * dbSize.y);
+          if (Math.PI * (rpx + ramp) * (rpx + ramp) < WIN_MAX * dbSize.x * dbSize.y) {
+            win.set((ndc.x * 0.5 + 0.5) * dbSize.x, (ndc.y * 0.5 + 0.5) * dbSize.y, rpx, ramp);
+            lnW.x = -Math.log(Math.min(D, cam.far * 0.999));
+          } else {
+            // Close (a chase or alongside view: nothing between the eye and it): the whole overlay
+            // just behind it, one depth, no window (it would cover the frame, every pixel paying for
+            // gl_FragDepth).
+            const pe = cam.projectionMatrix.elements;
+            bodyMat.uniforms.uZ.value = Math.min(0.9999, (pe[10] * -D + pe[14]) / D);
+          }
+        }
+      }
+      // The window's pair only while following something on screen (the plain pair skips its pixels).
+      // (Reduced motion: the still body alone fades; translucent puffs would stack like discs.)
+      const w = win.z >= 0;
+      const bodyOn = show && (Math.round(crossParts.value) & 1) !== 0;
+      const puffsOn = show && !rm && (Math.round(crossParts.value) & 2) !== 0;
+      crossBody.visible = bodyOn;
+      crossBodyW.visible = bodyOn && w;
+      crossPuffs.visible = puffsOn;
+      crossPuffsW.visible = puffsOn && w;
+
+      pu.uFogMin.value = mistS > 0.002 ? PUFF_FOG_MIN : 0;
+      if (mistS > 0.002) {
         // Fog the scene by depth toward the mist: visibility closes in log-space from the sky's
         // aerial fog to a few metres, so the city fades into the cloud instead of showing crisp
-        // through a flat overlay.
+        // through the overlay.
         const fog = ctx.services.sky.fog;
         if (fog) {
-          fog.color.lerp(mist, mistBlend(fogAmt));
-          const far = Math.exp(mix(Math.log(Math.max(VEIL_VIS + 1, fog.far)), Math.log(VEIL_VIS), Math.pow(fogAmt, 1.6)));
-          fog.near = Math.min(fog.near, far * mix(0.35, 0.05, smooth(0, 0.6, fogAmt)));
+          fog.color.lerp(mist, mistBlend(mistS));
+          const far = Math.exp(mix(Math.log(Math.max(VEIL_VIS + 1, fog.far)), Math.log(VEIL_VIS), Math.pow(mistS, 1.6)));
+          fog.near = Math.min(fog.near, far * mix(0.35, 0.05, smooth(0, 0.6, mistS)));
           fog.far = far;
+          if (sr > 0) {
+            // Clear air up to the followed thing: it never fades into the mist it flies through.
+            fog.near = Math.max(fog.near, subjDist + sr * 1.2);
+            fog.far = Math.max(fog.far, fog.near * 1.4 + 4);
+          }
         }
       }
     },
@@ -542,18 +870,20 @@ export function createCloudsSystem(): System {
       }
       ctx.services.sky.veil = 0;
       ctx.services.sky.mist = 0;
+      ctx.services.sky.cross = 0;
       ctx.services.sky.cloudsInView = 0;
       for (const m of lod?.meshes ?? []) m.removeFromParent();
-      veil?.removeFromParent();
-      block?.removeFromParent();
+      for (const m of crossMeshes) {
+        m.removeFromParent();
+        (m.material as ShaderMaterial).dispose();
+      }
+      crossMeshes.length = 0;
       lod?.dispose();
       puffMat?.dispose();
-      veilMat?.dispose();
-      blockMat?.dispose();
       tex?.dispose();
       lod = null;
-      veil = block = null;
-      puffMat = veilMat = blockMat = null;
+      crossBody = crossPuffs = crossBodyW = crossPuffsW = null;
+      puffMat = bodyMat = null;
       tex = null;
       ready = false;
     },
@@ -569,7 +899,7 @@ export function createCloudsSystem(): System {
  * bridge to the body), so the camera cuts through the cloud's edge: a brief white-out with a thin
  * gap between the two puffs, then out beside the wall, under the belly.
  */
-function anchors(): CloudAnchor[] {
+function anchors(driftDeg: number): CloudAnchor[] {
   const out: CloudAnchor[] = [];
   const mid = (CLOUD_MIN + CLOUD_MAX) / 2;
   const rad = R + mid;
@@ -578,9 +908,19 @@ function anchors(): CloudAnchor[] {
     const side = normalize3(v3(), cross3(v3(), c0.travel, c0.at));
     const toCity = addScaled3(v3(), CITY_AXIS, c0.at, -1);
     const s = dot3(toCity, side) > 0 ? -1 : 1; // away from the city
+    // Placed where the drifting layer will be when the /play clip gets there (DIVE_CROSS_T): turned
+    // back about the city's axis by the drift until then.
+    const back = -driftDeg * DEG * DIVE_CROSS_T;
+    const cb = Math.cos(back);
+    const sb = Math.sin(back);
+    const k = CITY_AXIS;
     const at = (base: Vec3, lateral: number, along: number) => {
       const d = addScaled3(v3(), base, side, (s * lateral) / rad);
-      return normalize3(addScaled3(d, d, c0.travel, along / rad));
+      normalize3(d, addScaled3(d, d, c0.travel, along / rad));
+      // Rodrigues: d·cos + (k × d)·sin + k (k·d)(1 − cos).
+      const kd = dot3(k, d);
+      const kx = cross3(v3(), k, d);
+      return normalize3(v3(), v3(d.x * cb + kx.x * sb + k.x * kd * (1 - cb), d.y * cb + kx.y * sb + k.y * kd * (1 - cb), d.z * cb + kx.z * sb + k.z * kd * (1 - cb)));
     };
     // The body: a modest cumulus well off the track (its nearest lobes ~3 m from it).
     out.push({ dir: at(c0.at, 15, -2), radius: 8, base: CLOUD_MIN + 1, top: CLOUD_MAX - 2 });
