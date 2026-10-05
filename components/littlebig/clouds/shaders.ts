@@ -23,6 +23,7 @@ float puffShape(vec3 P, vec3 upP, float seed, float near, out vec3 n, out float 
   float best = 1.0;
   float second = 1.0;
   vec3 nB = P;
+  vec3 nS = P;
   for (int i = 0; i < 6; i++) {
     float fi = float(i);
     float hA = lbHash(seed * 91.7 + fi * 1.37);
@@ -40,12 +41,18 @@ float puffShape(vec3 P, vec3 upP, float seed, float near, out vec3 n, out float 
       float t = pc + sqrt(disc);
       if (t > best) {
         second = best;
+        nS = nB;
         best = t;
         nB = (P * t - C) / rho;
-      } else if (t > second) second = t;
+      } else if (t > second) {
+        second = t;
+        nS = (P * t - C) / rho;
+      }
     }
   }
-  crease = best > 1.0 ? 1.0 - smoothstep(0.0, 0.03, best - second) : 0.0;
+  // A crease line only where the surface really folds (the two lobes' normals > ~35° apart): shallow
+  // seams drew stacked discs, like bubble-wrap, on every cumulus.
+  crease = best > 1.0 ? (1.0 - smoothstep(0.0, 0.03, best - second)) * (1.0 - smoothstep(0.76, 0.86, dot(normalize(nB), normalize(nS)))) : 0.0;
   // Wider: is a seam close enough that a triangle here may straddle it?
   seam = best > 1.0 ? 1.0 - smoothstep(0.0, 0.14, best - second) : 0.0;
   // Fine irregularity on top (stronger near the eye: torn cotton silhouettes when flying past).
@@ -162,17 +169,19 @@ ${LB_COMMON_GLSL}
 ${PUFF_SHAPE_GLSL}
 #include <common>
 #include <fog_pars_fragment>
-uniform float uPalE[5];
-uniform vec3 uPalLit[5];
-uniform vec3 uPalShade[5];
-uniform vec3 uPalBelly[5];
-uniform vec3 uPalRim[5];
+uniform float uPalE[6];
+uniform vec3 uPalLit[6];
+uniform vec3 uPalShade[6];
+uniform vec3 uPalBelly[6];
+uniform vec3 uPalRim[6];
 uniform vec3 uMoonDir;
 uniform mat3 uDrift;   // cloud frame → world
 uniform float uBump;   // fine bump (value) strength
 uniform vec3 uMist;    // the colour inside a cloud at the eye: puff surfaces right at the eye melt into it
 uniform float uMask;   // debug: 1 = flat magenta (frame-coverage measurements)
 uniform float uExact;  // per-pixel shape within this distance (m)
+uniform float uLift;   // inside the air at night / dusk: a gain so the cloud body never sits darker than the sky behind it
+uniform float uFogMin; // the white-out's fog far plane, floored for the puffs: a puff right ahead keeps its form
 // Seen from inside the air, nearby clouds share the eye's (dip-aware) time of day, like the sky;
 // clouds far from the eye, and every cloud seen from orbit, use their own.
 uniform float uEyeSun, uAirSpace;
@@ -196,6 +205,7 @@ void cloudPal(float e, out vec3 lit, out vec3 shade, out vec3 belly, out vec3 ri
   if (e > uPalE[1]) i = 1;
   if (e > uPalE[2]) i = 2;
   if (e > uPalE[3]) i = 3;
+  if (e > uPalE[4]) i = 4;
   float t = clamp((e - uPalE[i]) / (uPalE[i + 1] - uPalE[i]), 0.0, 1.0);
   lit = mix(uPalLit[i], uPalLit[i + 1], t);
   shade = mix(uPalShade[i], uPalShade[i + 1], t);
@@ -248,12 +258,16 @@ void main() {
   vec3 dc = vWorld - vClusterC;
   float dv = dot(dc, upC);
   vec3 nE = normalize((dc - upC * dv) / (vClusterR.x * vClusterR.x) + upC * (dv / (vClusterR.y * vClusterR.y)));
-  float farK = smoothstep(20.0, 120.0, cd);
+  // The lobes carry the shading within ~20 m; by 60 m the cloud is lit as one mass (puff + cluster
+  // form), so mid-distance cumulus are cotton, not stacked translucent discs.
+  float farK = smoothstep(8.0, 32.0, cd);
   // On the cluster's underside the form takes over almost entirely: seen from below a cumulus is
   // one even belly, not a honeycomb of puff bottoms with lit rims.
   // Likewise when the eye looks up at the cloud: what shows then is every puff's lower half.
   float under = max(smoothstep(0.1, -0.35, dot(nE, upC)), smoothstep(0.05, 0.45, dot(-V, upC)));
-  n = normalize(mix(n, normalize(n0 * 0.3 + nE), max(mix(0.3, 0.75, farK), 0.9 * under)));
+  // (The puff's own sphere normal jumps where one puff overlaps another: it fades too, or every
+  // overlap draws a disc edge.)
+  n = normalize(mix(n, normalize(n0 * mix(0.35, 0.1, farK) + nE), max(mix(0.25, 0.92, farK), 0.9 * under)));
   // The flat base, by height above it (continuous across the cluster's puffs, so seen from below
   // the belly is one face, not an oval per puff).
   float baseK = 1.0 - smoothstep(0.08, 1.3, vHb);
@@ -261,6 +275,9 @@ void main() {
 
   // Time of day at this cloud.
   float eOwn = dot(normalize(vWorld + up * 6.0), lbSunDir);
+  // From orbit, clouds deep in the night (far from the terminator) dim: moonlit cotton, but quieter
+  // than the city's lights.
+  float deepNight = (1.0 - smoothstep(-0.55, -0.22, eOwn)) * uAirSpace;
   // Inside the air a cloud is never more than a step darker than the eye's own sky (on a 160 m
   // planet a cloud 100 m away is ~36° further into the night: it hung as a navy storm blob in a
   // lilac dusk sky beside a peach one).
@@ -299,7 +316,7 @@ void main() {
   // Only where a lobe overhangs (its seam on the shaded or downward side): lit cotton stays clean,
   // the undersides of the lobes get a soft shade line.
   float overhang = (1.0 - smoothstep(0.3, 0.6, w)) * 0.7 + (1.0 - smoothstep(-0.3, 0.3, dot(n, up))) * 0.5;
-  float crease = smoothstep(0.35, 0.85, vCrease) * min(1.0, overhang) * (1.0 - smoothstep(60.0, 160.0, cd)) * (1.0 - vSquash);
+  float crease = smoothstep(0.35, 0.85, vCrease) * min(1.0, overhang) * (1.0 - farK) * (1.0 - vSquash);
   col = mix(col, shade * 0.95, crease * 0.6);
   // Fine cotton texture as a faint value tweak only, fading with distance.
   float bk = uBump * (1.0 - smoothstep(30.0, 90.0, cd)) * (1.0 - vSquash);
@@ -314,18 +331,26 @@ void main() {
   float edgeE = smoothstep(0.4, 0.88, 1.0 - abs(dot(nE, V)));
   float fr = 1.0 - clamp(dot(n0, V), 0.0, 1.0);
   float back = 0.25 + 0.75 * smoothstep(-0.2, 0.75, dot(-V, L));
-  float dayRim = fr * fr * edgeE * back * 0.45;
-  float moonRim = smoothstep(0.8, 0.9, fr) * smoothstep(-0.1, 0.4, dot(n0, L)) * edgeE * 0.7;
+  float dayRim = fr * fr * edgeE * edgeE * back * 0.45;
+  // At night a silver fresnel rim over the whole moon-facing half of the cluster.
+  float moonRim = (fr * fr * 0.55 + smoothstep(0.75, 0.92, fr) * 0.35) * smoothstep(-0.25, 0.35, dot(nE, L)) * (0.35 + 0.65 * edgeE);
   col += rimC * mix(dayRim, moonRim, moonW);
 
   // Right at the eye the surface melts into the mist the veil shows once inside: no hard sphere
   // edge across the white-out.
-  col = mix(col, uMist, 1.0 - smoothstep(1.0, 7.0, cd));
+  // (Only in the last metres: until then the wall keeps its lit cap, bands and rim.)
+  col = mix(col, uMist, 1.0 - smoothstep(1.0, 3.0, cd));
+  col *= uLift * (1.0 - 0.35 * deepNight);
 
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
-  #include <fog_fragment>
+  #ifdef USE_FOG
+    // The scene fog, with its far plane floored: near the white-out the scene fog closes to a few
+    // metres so the city fades into the mist, but a puff right ahead must keep its form.
+    float fogF = smoothstep(fogNear, max(fogFar, uFogMin), vFogDepth);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogF);
+  #endif
 }`;
 
 // The white-out: a full-screen overlay while the eye is inside a puff (or the mist slab). The scene

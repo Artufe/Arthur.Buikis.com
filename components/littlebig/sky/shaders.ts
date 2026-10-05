@@ -62,14 +62,19 @@ uniform vec3 uEast, uNorth; // the eye's horizontal frame
 uniform float uCTime;
 uniform vec3 uCLit, uCShade, uCBelly, uCRim;
 // az (rad), elevation of the base (rad), half-width (rad), seed
-const vec4 SKC[7] = vec4[7](
-  vec4(0.35, 0.17, 0.13, 0.13),
-  vec4(1.35, 0.30, 0.09, 0.71),
-  vec4(2.30, 0.12, 0.15, 0.37),
-  vec4(3.10, 0.36, 0.08, 0.91),
-  vec4(3.95, 0.21, 0.12, 0.55),
-  vec4(4.90, 0.10, 0.16, 0.23),
-  vec4(5.70, 0.31, 0.10, 0.83)
+// (11 over every bearing: with 7 half of each low frame was bare sky, G2.)
+const vec4 SKC[11] = vec4[11](
+  vec4(0.30, 0.17, 0.13, 0.13),
+  vec4(0.90, 0.29, 0.07, 0.47),
+  vec4(1.45, 0.11, 0.11, 0.71),
+  vec4(2.05, 0.24, 0.09, 0.37),
+  vec4(2.62, 0.13, 0.14, 0.61),
+  vec4(3.20, 0.34, 0.08, 0.91),
+  vec4(3.80, 0.18, 0.12, 0.55),
+  vec4(4.38, 0.09, 0.10, 0.29),
+  vec4(4.92, 0.23, 0.15, 0.23),
+  vec4(5.50, 0.12, 0.09, 0.77),
+  vec4(6.02, 0.30, 0.10, 0.83)
 );
 // The cumulus template: crown, shoulders, side lumps, a top lump (x, y, r in half-widths).
 const vec3 SKP[6] = vec3[6](
@@ -87,9 +92,9 @@ vec4 skyCumulus(vec3 v, vec3 sunD) {
   if (uCloudAmt <= 0.0 || el < 0.04 || el > 0.85) return vec4(0.0);
   float az = atan(dot(v, uEast), dot(v, uNorth));
   vec4 res = vec4(0.0);
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < 11; i++) {
     vec4 c = SKC[i];
-    float caz = c.x + uCTime * (0.0035 + 0.0015 * float(i));
+    float caz = c.x + uCTime * (0.0035 + 0.0009 * float(i));
     float dAz = mod(az - caz + 3.14159265, 6.2831853) - 3.14159265;
     vec2 p = vec2(dAz * cos(el), el - c.y) / c.z;
     if (abs(p.x) > 1.3 || p.y < -0.1 || p.y > 1.4) continue;
@@ -142,6 +147,19 @@ vec4 skyCumulus(vec3 v, vec3 sunD) {
   res.a *= uCloudAmt;
   return res;
 }
+// Faint high cirrus streaks over the upper sky (inside the air only): a little structure up there.
+uniform float uCirrus;
+float skyCirrus(vec3 v) {
+  float up = dot(v, uUp);
+  if (uCirrus <= 0.0 || up < 0.25) return 0.0;
+  vec2 p = vec2(dot(v, uEast), dot(v, uNorth)) / (up + 0.35);
+  p += vec2(0.6, 0.25) * uCTime * 0.0016;
+  vec2 q = vec2(dot(p, vec2(0.8, 0.6)), dot(p, vec2(-0.6, 0.8)));
+  float f = sin(q.y * 15.0 + sin(q.x * 2.7) * 1.6 + sin(q.x * 6.1 + 1.3) * 0.5);
+  float cirMask = smoothstep(0.15, 0.9, sin(q.x * 2.1 + 0.7) * sin(q.y * 1.3 - q.x * 0.6 + 2.0));
+  float a = smoothstep(0.55, 0.98, f) * cirMask * smoothstep(0.25, 0.55, up) * (1.0 - smoothstep(0.85, 1.0, up));
+  return a * 0.3 * uCirrus;
+}
 `;
 
 export const skyFrag = /* glsl */ `
@@ -169,7 +187,9 @@ void main() {
   float a = airA(v);
   float at = mix(a, airTail(v), uSpace);
   float sunAt = airSun(v);
-  float night = 1.0 - smoothstep(-0.26, 0.05, sunAt);
+  // From orbit the night limb turns indigo sooner (only the band near the terminator stays lit /
+  // rose), so the night disc is not ringed in daylight blue.
+  float night = 1.0 - smoothstep(mix(-0.26, -0.15, uSpace), 0.05, sunAt);
   float dusk = smoothstep(-0.3, -0.02, sunAt) * (1.0 - smoothstep(0.02, 0.3, sunAt));
   float sd = dot(v, uSunDir);
   float sdn = sd * 0.5 + 0.5;
@@ -178,7 +198,8 @@ void main() {
 
   // Day: pale horizon → sky blue → deep blue aloft. Seen from orbit the profile tightens: a crisp
   // pale inner edge on the limb, then blue, then a long soft fade into space (on the tail).
-  vec3 day = mix(uHorizon, uTop, pow(smoothstep(0.0, mix(0.36, 0.14, uSpace), a), 0.7));
+  // (From orbit the pale inner edge is half as white: no glass-bubble ring round the planet.)
+  vec3 day = mix(mix(uHorizon, uTop, 0.5 * uSpace), uTop, pow(smoothstep(0.0, mix(0.36, 0.14, uSpace), a), 0.7));
   day = mix(day, uDeep, smoothstep(mix(0.42, 0.16, uSpace), mix(0.88, 0.55, uSpace), a));
   // Golden hour (inside the air): a luminous gold band on the horizon that swells under the sun,
   // a warm wash over the lower sky, and a wide peach glow around a low sun. Gold is mixed only into
@@ -187,11 +208,16 @@ void main() {
   vec3 hv = v - uUp * dot(v, uUp);
   vec3 hs = uSunDir - uUp * dot(uSunDir, uUp);
   float sh = dot(hv, hs) * inversesqrt(max(dot(hv, hv) * dot(hs, hs), 1e-8)) * 0.5 + 0.5; // 1 under the sun
-  float lowSun = 1.0 - smoothstep(0.3, 0.6, sunEye);
+  // How low the sun reads: by its elevation over the eye, or by the city's golden clock (uWarm):
+  // the street viewpoint has the sun ~14° higher than the city centre, so keyed to the eye alone the
+  // opening frames read as neutral midday (G2).
+  float lowSun = max(1.0 - smoothstep(0.3, 0.6, sunEye), uWarm * 0.85);
   float bw = mix(0.1, mix(0.12, 0.34, lowSun), pow(sh, 4.0));
   float band = 1.0 - smoothstep(0.0, bw, a);
   day = mix(day, day * vec3(1.06, 0.98, 0.88) + vec3(0.07, 0.035, 0.0), gw * (1.0 - smoothstep(0.0, 0.55, a)));
   day = mix(day, uGold, gw * band * (0.35 + 0.65 * sh * sh) * 0.88);
+  // A peach wash over the lowest sky toward the sun's azimuth (above the gold band).
+  day = mix(day, uPeach, gw * lowSun * pow(sh, 3.0) * (1.0 - smoothstep(0.03, 0.16, a)) * 0.3);
   float sdp = max(sd, 0.0);
   float lobe = pow(sdp, 10.0);
   day += mix(uPeach, uGold, smoothstep(0.2, 0.8, lobe)) * lobe * gw * lowSun * 0.32;
@@ -205,12 +231,16 @@ void main() {
   vec3 nightC = mix(uNightHorizon, uNightTop, pow(smoothstep(0.0, 0.5, a), 0.7));
   nightC = mix(nightC, mix(uSpaceCol, uNightHorizon, 0.5 * (1.0 - smoothstep(0.0, 0.3, a))), uSpace * 0.92);
   vec3 col = mix(day, nightC, night);
-  // Space beyond the air: a deep blue with a faint milky band.
+  // From orbit the rim is a softer, less electric blue (20 % toward its luminance).
+  col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), 0.2 * uSpace);
+  // Space beyond the air: a deep blue with a faint milky band. From orbit the glow thins ~35 %
+  // sooner into space (its reach past the cloud shell is kept, only fainter).
   float mw = dot(v, uBandAxis);
   vec3 spaceC = uSpaceCol * (1.0 + 0.6 * exp(-mw * mw * 40.0) + 0.1 * (1.0 - abs(mw)));
-  col = mix(col, spaceC, pow(smoothstep(mix(0.7, 0.25, uSpace), 1.0, at), mix(1.0, 0.75, uSpace)));
+  col = mix(col, spaceC, pow(smoothstep(mix(0.7, 0.12, uSpace), 1.0, at), mix(1.0, 0.55, uSpace)));
 
   // Painted far cumulus (inside the air only).
+  col = mix(col, mix(uCLit, uCShade, 0.25), skyCirrus(v));
   if (uCloudAmt > 0.0) {
     vec4 cu = skyCumulus(v, uSunDir);
     col = mix(col, cu.rgb, cu.a);

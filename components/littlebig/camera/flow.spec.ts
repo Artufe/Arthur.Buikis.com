@@ -7,7 +7,8 @@ import { PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import type { LBContext } from '../core/contracts';
 import { getCityIndex, getCityPlan } from '../world/city';
-import { fromSphere } from '../world/city/frame';
+import { fromSphere, planHeadingToWorld, planToDir } from '../world/city/frame';
+import { latLonFromDir } from '../world/sphere';
 import { EYE_HEIGHT, PLATEAU_HEIGHT, SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { sunDirection } from '../world/sun';
@@ -90,6 +91,48 @@ describe('interactive descent (camera system, 30 fps)', () => {
     let off = brg - Math.atan2(fp.x - prev!.x, -(fp.z - prev!.z));
     off -= Math.round(off / (2 * Math.PI)) * 2 * Math.PI;
     expect(Math.abs(off)).toBeLessThan((32 * Math.PI) / 180);
+    sys.dispose!(ctx);
+    canvas.remove();
+  });
+
+  it('the FPV body slides round a pedestrian instead of walking through it', () => {
+    const { ctx, sys, step, canvas } = setup();
+    const cam = ctx.services.camera!;
+    const vp = ctx.world.city.viewpoints.street;
+    const ll = latLonFromDir(planToDir(vp.x, vp.z));
+    cam.setView({ lat: ll.lat, lon: ll.lon, alt: EYE_HEIGHT, heading: (planHeadingToWorld(vp.x, vp.z, vp.heading) * 180) / Math.PI });
+    step();
+    // A walker standing 2.5 m ahead, 0.1 m off the line (B2's service, faked: body radius 0.3 m).
+    const wx = vp.x + Math.sin(vp.heading) * 2.5 + Math.cos(vp.heading) * 0.1;
+    const wz = vp.z - Math.cos(vp.heading) * 2.5 + Math.sin(vp.heading) * 0.1;
+    const reach = 0.35 + 0.3;
+    ctx.services.people = {
+      pushOut(x, z, r, out) {
+        const dx = x - wx;
+        const dz = z - wz;
+        const d = Math.hypot(dx, dz);
+        const need = r + 0.3;
+        if (d >= need || d < 1e-9) return false;
+        out.x = wx + (dx / d) * need;
+        out.z = wz + (dz / d) * need;
+        return true;
+      },
+    };
+    canvas.tabIndex = 0;
+    canvas.focus();
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true }));
+    const plan = { x: 0, z: 0 };
+    let closest = Infinity;
+    for (let k = 0; k < 90; k++) {
+      step();
+      fromSphere(ctx.view.focus, plan);
+      closest = Math.min(closest, Math.hypot(plan.x - wx, plan.z - wz));
+    }
+    canvas.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', bubbles: true }));
+    // Never inside the walker, and slid past (not stuck behind it).
+    expect(closest).toBeGreaterThan(reach - 0.1);
+    const along = (plan.x - wx) * Math.sin(vp.heading) - (plan.z - wz) * Math.cos(vp.heading);
+    expect(along).toBeGreaterThan(0.5);
     sys.dispose!(ctx);
     canvas.remove();
   });

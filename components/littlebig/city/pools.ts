@@ -27,7 +27,7 @@ import { facadeWindows } from './shader';
 /** Pool radius under a street lamp / a plaza globe lamp (m). */
 const RADIUS = 4.6;
 const GLOBE_RADIUS = 2.6;
-const N = 8; // grid cells per side
+const N = 12; // grid cells per side (~0.8 m: the step up onto the curb stays within one cell)
 
 const vert = /* glsl */ `
 ${LB_COMMON_GLSL}
@@ -55,16 +55,13 @@ varying vec3 vWorld;
 void main() {
   float r2 = dot(vUv, vUv);
   if (r2 >= 1.0) discard;
-  // inverse-square-like falloff (1 / (1 + 7r²)) windowed to zero at the rim by (1 − r²)²: a hot
-  // spot under the lamp spreading into a soft amber skirt; the core tints toward pale gold
   float w = (1.0 - r2) * (1.0 - r2);
   float k = w / (1.0 + 7.0 * r2);
-  vec3 rim = vec3(1.0, 0.479, 0.074);  // #FFB84D (linear)
-  vec3 core = vec3(1.0, 0.693, 0.352); // #FFD9A0 (linear)
+  vec3 rim = vec3(1.0, 0.479, 0.074);
+  vec3 core = vec3(1.0, 0.693, 0.352);
   vec3 col = mix(rim, core, smoothstep(0.35, 1.0, k));
   float night = lbNightAt(vWorld);
-  // fade out from ~110 m to ~170 m up: from orbit the lamp-head sparks carry the city
-  float alt = 1.0 - smoothstep(110.0, 170.0, lbCamAlt);
+  float alt = 1.0 - smoothstep(120.0, 200.0, lbCamAlt);
   vec3 c = col * k * vGain * night * uStrength * uReveal * alt;
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
@@ -75,12 +72,16 @@ void main() {
 const pointVert = /* glsl */ `
 ${LB_COMMON_GLSL}
 uniform vec2 uViewport;
+uniform float uCityLate;
 attribute float aSize;
 attribute float aNear;
 attribute vec3 aNormal;
 attribute vec2 aCell;
+attribute vec4 aTint;
 varying float vFade;
 varying float vCore;
+varying float vHalo;
+varying vec3 vTint;
 varying vec3 vWorld;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
@@ -88,7 +89,6 @@ void main() {
   vec3 toCam = lbCamPos - w.xyz;
   float d = length(toCam);
   vec3 V = toCam / max(d, 1e-3);
-  // pull the sprite toward the eye a touch (depth-tested against its own wall at any distance)
   w.xyz += V * min(0.35, d * 0.0025);
   vec4 mv = viewMatrix * w;
   gl_Position = projectionMatrix * mv;
@@ -96,25 +96,27 @@ void main() {
   float fade;
   float px;
   if (dot(aNormal, aNormal) > 0.5) {
-    // A window: only on a wall facing the eye, and only where the facade's own window pattern has
-    // shrunk below ~3 px (it averages out there; the spark takes over).
     float facing = dot(aNormal, V);
     vec3 up = normalize(w.xyz);
     vec3 T = normalize(cross(up, aNormal));
     float pu = aCell.x * pxPerM * sqrt(max(0.0, 1.0 - dot(T, V) * dot(T, V)));
     float pv = aCell.y * pxPerM * sqrt(max(0.0, 1.0 - dot(up, V) * dot(up, V)));
-    fade = smoothstep(0.12, 0.4, facing) * (1.0 - smoothstep(2.6, 4.6, min(pu, pv)));
+    fade = smoothstep(0.12, 0.4, facing) * (1.0 - smoothstep(2.6, 4.6, min(pu, pv))) * step(aTint.w, 1.0 - 0.2 * uCityLate);
     px = clamp(aSize * pxPerM * 2.2, 2.2, 3.6);
     vCore = 0.55;
+    vHalo = 0.45;
+    vTint = aTint.rgb;
   } else {
-    // a lamp head / porch light: takes over from its lens past aNear metres
     fade = smoothstep(aNear, aNear * 2.2, d);
-    px = clamp(aSize * pxPerM * 3.0, 5.0, 9.0);
-    vCore = 2.6 / px; // a ~2.6 px crisp core inside a soft halo
+    float orb = smoothstep(150.0, 320.0, lbCamAlt);
+    px = mix(clamp(aSize * pxPerM * 3.0, 5.0, 9.0), 15.0, orb);
+    vCore = mix(2.6, 4.6, orb) / px;
+    vHalo = mix(0.45, 0.8, orb);
+    vTint = vec3(0.0);
   }
   vFade = fade;
   gl_PointSize = px;
-  if (fade <= 0.001) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // off screen: skip the fragments
+  if (fade <= 0.001) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }
 `;
 
@@ -123,6 +125,8 @@ ${LB_COMMON_GLSL}
 uniform float uReveal;
 varying float vFade;
 varying float vCore;
+varying float vHalo;
+varying vec3 vTint;
 varying vec3 vWorld;
 void main() {
   float r = length(gl_PointCoord - 0.5) * 2.0;
@@ -130,9 +134,10 @@ void main() {
   float core = 1.0 - smoothstep(vCore * 0.7, vCore, r);
   float halo = (1.0 - r) * (1.0 - r);
   float night = lbNightAt(vWorld);
-  vec3 hot = vec3(1.0, 0.78, 0.45);
-  vec3 warm = vec3(1.0, 0.48, 0.1);
-  vec3 c = (hot * core * 2.2 + warm * halo * 0.45) * night * vFade * uReveal;
+  bool win = dot(vTint, vTint) > 0.0;
+  vec3 hot = win ? vTint * 1.15 + 0.06 : vec3(1.0, 0.78, 0.45);
+  vec3 warm = win ? vTint * 0.45 : vec3(1.0, 0.48, 0.1);
+  vec3 c = (hot * core * 2.2 + warm * halo * vHalo) * night * vFade * uReveal;
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -152,12 +157,14 @@ export function poolLayout(plan: CityPlan): Array<{ x: number; z: number; r: num
   plan.features.forEach((f, fi) => {
     if (f.kind !== 'streetlight' && f.kind !== 'lamp') return;
     const globe = f.kind === 'lamp';
-    const reach = globe ? 0 : LAMP_REACH * 0.75;
+    // centred just off the pole toward the road (not under the head): the pavement right under the
+    // lamp is the brightest spot, the light still spreads well over the carriageway
+    const reach = globe ? 0 : 0.3;
     const j = hash3(fi, 71, 5);
     out.push({
       x: f.x + Math.cos(f.angle) * reach,
       z: f.z + Math.sin(f.angle) * reach,
-      r: (globe ? GLOBE_RADIUS : RADIUS) * (0.92 + 0.16 * hash3(fi, 13, 9)),
+      r: (globe ? GLOBE_RADIUS : RADIUS + 0.4) * (0.92 + 0.16 * hash3(fi, 13, 9)),
       gain: (globe ? 0.6 : 1) * (0.75 + 0.5 * j), // ±25 %
       hx: f.x + Math.cos(f.angle) * (globe ? 0 : LAMP_REACH - 0.25),
       hz: f.z + Math.sin(f.angle) * (globe ? 0 : LAMP_REACH - 0.25),
@@ -175,7 +182,7 @@ const fall = (d2: number, r: number) => {
   return t > 0 ? (t * t) / (1 + 7 * r2) : 0;
 };
 
-export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, facades: number[]): CityLights {
+export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, facades: number[], late: { value: number }): CityLights {
   const lamps = poolLayout(plan);
   // neighbours whose pools overlap (a handful each)
   const nb: number[][] = lamps.map(() => []);
@@ -199,6 +206,8 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
   const pnear: number[] = [];
   const pnorm: number[] = [];
   const pcell: number[] = [];
+  const ptint: number[] = [];
+  const gh0 = new Float64Array(per);
   const p = v3();
   const pushPoint = (x: number, y: number, z: number, size: number, near: number) => {
     ppos.push(x, y, z);
@@ -206,19 +215,30 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
     pnear.push(near);
     pnorm.push(0, 0, 0);
     pcell.push(0, 0);
+    ptint.push(0, 0, 0, 0);
   };
   lamps.forEach((L, li) => {
     const gh = index.groundH(L.hx, L.hz);
     toSphere(L.hx, L.hz, gh + (L.globe ? GLOBE_H : LAMP_H - 0.12), p);
     pushPoint(p.x, p.y, p.z, L.globe ? 0.7 : 0.8, L.globe ? 18 : 25);
     const base = li * per;
+    // Ground height per grid vertex, then lifted to its highest 4-neighbour: a cell spanning the
+    // step up onto the sidewalk (or a lot, a bed) is drawn at the upper surface, never under it —
+    // the light reaches the pavement under the lamp, not just the asphalt and the curb face.
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) gh0[j * (N + 1) + i] = index.groundH(L.x + ((i / N) * 2 - 1) * L.r, L.z + ((j / N) * 2 - 1) * L.r);
     for (let j = 0; j <= N; j++) {
       for (let i = 0; i <= N; i++) {
         const u = (i / N) * 2 - 1;
         const v = (j / N) * 2 - 1;
         const x = L.x + u * L.r;
         const z = L.z + v * L.r;
-        toSphere(x, z, index.groundH(x, z) + 0.025, p);
+        const at = j * (N + 1) + i;
+        let h = gh0[at];
+        if (i > 0) h = Math.max(h, gh0[at - 1]);
+        if (i < N) h = Math.max(h, gh0[at + 1]);
+        if (j > 0) h = Math.max(h, gh0[at - N - 1]);
+        if (j < N) h = Math.max(h, gh0[at + N + 1]);
+        toSphere(x, z, h + 0.025, p);
         const k = base + j * (N + 1) + i;
         pos[k * 3] = p.x;
         pos[k * 3 + 1] = p.y;
@@ -268,12 +288,13 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
   pools.renderOrder = 2;
 
   // Window sparks on every lit window centre of the recorded facade quads.
-  facadeWindows(facades, (x, y, z, nx, ny, nz, bay, floor, winW) => {
+  facadeWindows(facades, (x, y, z, nx, ny, nz, bay, floor, winW, l) => {
     ppos.push(x + nx * 0.05, y + ny * 0.05, z + nz * 0.05);
     psize.push(winW);
     pnear.push(0);
     pnorm.push(nx, ny, nz);
     pcell.push(bay, floor);
+    ptint.push(Math.max(l.r, 1e-3), l.g, l.b, l.lit);
   });
   // A porch light at every house door.
   for (const b of plan.buildings) {
@@ -288,13 +309,14 @@ export function buildPools(ctx: LBContext, plan: CityPlan, index: CityIndex, fac
   pgeo.setAttribute('aNear', new BufferAttribute(new Float32Array(pnear), 1));
   pgeo.setAttribute('aNormal', new BufferAttribute(new Float32Array(pnorm), 3));
   pgeo.setAttribute('aCell', new BufferAttribute(new Float32Array(pcell), 2));
+  pgeo.setAttribute('aTint', new BufferAttribute(new Float32Array(ptint), 4));
   pgeo.computeBoundingSphere();
   const pointMat = ctx.track(
     new ShaderMaterial({
       name: 'city:lamp-points',
       vertexShader: pointVert,
       fragmentShader: pointFrag,
-      uniforms: { ...ctx.uniforms, uReveal: { value: 1 }, uViewport: { value: new Vector2(1280, 800) } },
+      uniforms: { ...ctx.uniforms, uReveal: { value: 1 }, uViewport: { value: new Vector2(1280, 800) }, uCityLate: late },
       transparent: true,
       depthWrite: false,
       depthTest: true,

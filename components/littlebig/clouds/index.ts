@@ -43,7 +43,7 @@ import { CLOUD_MAX, CLOUD_MIN, R } from '../world/config';
 import { addScaled3, cross3, dirFromLatLon, dot3, headingVector, normalize3, v3, type Vec3 } from '../world/sphere';
 import { moonDirection } from '../world/sun';
 import { CITY_AXIS, type CloudAnchor, coverageMap, layoutClouds, SHELL_R } from './layout';
-import { airSpace, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
+import { airSpace, cloudLift, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, mistBlend, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
 import { PuffLod } from './puffs';
 import { blockFrag, blockVert, puffFrag, puffVert, veilFrag, veilVert } from './shaders';
 
@@ -64,6 +64,15 @@ const SLAB = [31.5, 38.5, 44, 49];
 /** Plan radius (m) the mist slab covers (it fades out between these). */
 const SLAB_R0 = 72;
 const SLAB_R1 = 92;
+/**
+ * Temporal release (s): leaving a cloud, the overlay thins over ~6 frames and the scene fog opens
+ * over ~10 more (overlay first, fog last), so the city is revealed out of the mist, never cut to.
+ * Entering is instant (the near plane must never slice a puff open).
+ */
+const VEIL_RELEASE = 0.2;
+const MIST_RELEASE = 0.4;
+/** The puffs' own fog far plane is floored at this while the white-out fog is closed (m). */
+const PUFF_FOG_MIN = 30;
 
 export function createCloudsSystem(): System {
   let lod: PuffLod | null = null;
@@ -87,6 +96,8 @@ export function createCloudsSystem(): System {
   let ready = false;
   let phase = 0;
   let hasPrev = false;
+  let veilS = 0;
+  let mistS = 0;
   // The mist slab (interactive descents over the city).
   let slabOn = false;
   let slabIdle = 0;
@@ -170,6 +181,8 @@ export function createCloudsSystem(): System {
             uMoonDir: { value: moonDir },
             uMist: { value: mist },
             uMask: { value: 0 },
+            uLift: { value: 1 },
+            uFogMin: { value: 0 },
             uExact: { value: hi ? 110 : 60 },
             uPalE: { value: CLOUD_PAL_E },
             uPalLit: { value: CLOUD_PAL_LIT },
@@ -331,6 +344,7 @@ export function createCloudsSystem(): System {
       pu.uBump.value = bump.value * (ctx.quality === 'high' ? 1 : 0.7);
       pu.uMask.value = mask.value;
       mistColor(eyeSun, mist, mistLit);
+      pu.uLift.value = 1 + (cloudLift(eyeSun) - 1) * (1 - pu.uAirSpace.value);
       moonDirection(ctx.time.render, moonDir);
 
       // Real clouds over the eye's visible horizon and toward the view (the sky fades its painted
@@ -444,8 +458,17 @@ export function createCloudsSystem(): System {
       const slab = slabK * (1 - smooth(SLAB_R0, SLAB_R1, v.cityDist)) * smooth(SLAB[0], SLAB[1], altSea) * (1 - smooth(SLAB[2], SLAB[3], altSea));
 
       // Leaving through a flat base the veil thins over a few metres of mist (no cut to clear).
-      const amount = Math.max(inside, slab, under * 0.85);
-      const fogAmt = Math.max(near, under, amount);
+      const amountNow = Math.max(inside, slab, under * 0.85);
+      const fogNow = Math.max(near, under, amountNow);
+      // Temporal release: in at once, out over a few frames (overlay first, fog last). The sky dome
+      // reads the same smoothed values at draw time, so silhouettes fade into the sky with the fog.
+      const rel = ctx.time.realDt;
+      veilS = jump ? amountNow : Math.max(amountNow, veilS * Math.exp(-rel / VEIL_RELEASE));
+      mistS = jump ? fogNow : Math.max(fogNow, veilS, mistS * Math.exp(-rel / MIST_RELEASE));
+      if (veilS < 1e-3) veilS = 0;
+      if (mistS < 1e-3) mistS = 0;
+      const amount = veilS;
+      const fogAmt = mistS;
       const vm = veilMat.uniforms;
       vm.uAmount.value = amount;
       veil.visible = amount > 0.002;
@@ -474,15 +497,16 @@ export function createCloudsSystem(): System {
         vm.uPhase.value = phase;
         vm.uAspect.value = ctx.camera.aspect;
         // Wisps only well inside: gone the moment the eye is out (no streaks over a clear city).
-        vm.uWisp.value = smooth(0.3, 0.75, amount);
+        vm.uWisp.value = smooth(0.3, 0.75, amountNow) * smooth(0.5, 0.9, amount);
       }
+      pu.uFogMin.value = fogAmt > 0.002 ? PUFF_FOG_MIN : 0;
       if (fogAmt > 0.002) {
         // Fog the scene by depth toward the mist: visibility closes in log-space from the sky's
         // aerial fog to a few metres, so the city fades into the cloud instead of showing crisp
         // through a flat overlay.
         const fog = ctx.services.sky.fog;
         if (fog) {
-          fog.color.lerp(mist, smooth(0, 0.35, fogAmt));
+          fog.color.lerp(mist, mistBlend(fogAmt));
           const far = Math.exp(mix(Math.log(Math.max(VEIL_VIS + 1, fog.far)), Math.log(VEIL_VIS), Math.pow(fogAmt, 1.6)));
           fog.near = Math.min(fog.near, far * mix(0.35, 0.05, smooth(0, 0.6, fogAmt)));
           fog.far = far;

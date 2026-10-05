@@ -23,7 +23,9 @@ import { R } from '../world/config';
 import { icoHeights } from '../world/ico-heights';
 import { icosphere } from '../world/icosphere';
 import { terrainData } from '../terrain/data';
+import { chunkedMesh, terrainChunkBounds, type ChunkedMesh } from '../terrain/chunked';
 import { extendToon, softShadows } from '../terrain/shader-ext';
+import { SWELL_GLSL } from './swell';
 
 const DEEP = PALETTE.ocean.deep;
 const SHALLOW = PALETTE.ocean.shallow;
@@ -36,6 +38,7 @@ const glslColor = (c: { r: number; g: number; b: number }) => `vec3(${c.r.toFixe
 
 export function createOceanSystem(): System {
   let geometry: BufferGeometry | null = null;
+  let chunks: ChunkedMesh | null = null;
   return {
     name: 'ocean',
     stage: 1,
@@ -49,7 +52,8 @@ export function createOceanSystem(): System {
       const depth = new Float32Array(n);
       // Seabed slope (rise per metre) per vertex, from the terrain's smooth normals: the foam turns
       // depth into metres from the shore with it (even foam width on flat and steep shores).
-      const slope = terrainData(ctx.world.planet, detail).slope;
+      const tdata = terrainData(ctx.world.planet, detail);
+      const slope = tdata.slope;
       const grad = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         grad[i] = Math.max(0.12, Math.sqrt(2 * Math.max(0, slope[i])));
@@ -102,17 +106,15 @@ varying float vDepth;
 varying float vShore;
 varying float vSwell;
 varying float vFar;
-varying vec3 vWaterCol;`,
+varying vec3 vWaterCol;
+${SWELL_GLSL}`,
           vertex: /* glsl */ `
   {
     vec3 lbP = (modelMatrix * vec4(transformed, 1.0)).xyz;
     float lbD = distance(lbP, lbCamPos);
     vFar = smoothstep(50.0, 160.0, lbD);
     // Swell: three travelling trains, faded out with distance and softened over the beach.
-    float lbT = lbTime;
-    float w = sin(dot(lbP, vec3(0.78, 0.29, 0.46)) + lbT * 1.15)
-            + 0.7 * sin(dot(lbP, vec3(-0.36, 0.64, 0.69)) + lbT * 1.7)
-            + 0.5 * sin(dot(lbP, vec3(1.1, -0.72, 0.28)) + lbT * 2.4);
+    float w = lbSwellW(lbP, lbTime);
     float amp = uSwell * (1.0 - vFar) * mix(0.55, 1.0, smoothstep(0.0, 2.0, aDepth));
     vSwell = amp * w * 0.46;
     transformed += normalize(transformed) * vSwell;
@@ -209,14 +211,28 @@ float lbVNoise(vec3 p) {
     vec3 H = normalize(L + V);
     float nh = dot(normal, H);
     // The glint follows a softened normal (a toon sun path, not whole facets flashing white). Far
-    // away it is a crisp little ellipse (~25 px from orbit, foreshortened toward the limb) in the
-    // site's amber.
+    // away it is a small soft core plus a scatter of twinkling sparkle points along the sun path
+    // (a coarse world lattice, a handful lit at a time), in the site's amber: a solid disc read
+    // as a hole in the sea from orbit.
     vec3 lbSn = normalize(mix(normalize(vNormal), normal, 0.3 * (1.0 - vFar)));
     float nhs = dot(lbSn, H);
     float glintNear = smoothstep(0.9965, 0.998, nhs);
     float lbGr = length(lbSn - H);
-    float aaG = max(fwidth(lbGr), 1e-5);
-    float glintFar = 1.0 - smoothstep(0.022 - aaG, 0.022 + aaG, lbGr);
+    float glintFar = 0.0;
+    vec3 lbGd = lbSn - H;
+    float lbGa = length(vec3(lbGd.x, lbGd.y * 0.4, lbGd.z));
+    if (vFar > 0.0 && lbGa < 0.08) {
+      float core = exp(-lbGr * lbGr * 20000.0) * 0.55;
+      vec3 gp = vLbWorld * 0.42;
+      vec3 gc = floor(gp);
+      float gt = floor(lbTime * 2.5);
+      float gl = lbHash3(gc + gt * 13.0);
+      vec3 go = vec3(lbHash3(gc + 1.7), lbHash3(gc + 4.1), lbHash3(gc + 8.9)) * 0.5 + 0.25;
+      float gd = length(fract(gp) - go);
+      float aaF = max(fwidth(gp.x) + fwidth(gp.y), 1e-3);
+      float pt = step(0.8, gl) * (1.0 - smoothstep(0.1, 0.1 + aaF * 1.5, gd));
+      glintFar = max(core, pt * (1.0 - smoothstep(0.02, 0.075, lbGa)));
+    }
     float glint = mix(glintNear, glintFar, vFar);
     // Sparkles: tiny star points on a 0.33 m lattice that re-roll a few times a second.
     vec3 sp = vLbWorld * 3.0;
@@ -246,10 +262,15 @@ float lbVNoise(vec3 p) {
           );
       });
       extendToon(mat, softShadows(0.55));
-      const mesh = ctx.toon.mesh(geometry, mat, { cast: false, receive: true });
-      ctx.scene.add(mesh);
+      chunks = chunkedMesh(ctx, geometry, mat, terrainChunkBounds(tdata), ico.triangleCount, { cast: false, receive: true, inflate: 2 });
+      for (const m of chunks.meshes) ctx.scene.add(m);
+    },
+    update(ctx: LBContext) {
+      chunks?.update(ctx);
     },
     dispose() {
+      chunks?.dispose();
+      chunks = null;
       geometry?.dispose();
       geometry = null;
     },

@@ -45,7 +45,24 @@ import {
 } from 'three';
 import type { SharedUniforms } from '../core/uniforms';
 
-/** GLSL declarations of the shared uniforms + helpers. Include in any custom ShaderMaterial. */
+/**
+ * GLSL declarations of the shared uniforms + helpers. Include in any custom ShaderMaterial.
+ *
+ * - lbNightAt(p): 0 day … 1 night at a world position (planet centred on the origin); twin of
+ *   world/sun.ts nightFactor. (Edges ascending: smoothstep(e0, e1) with e0 >= e1 is undefined in
+ *   GLSL ES 3.0 / MSL.)
+ * - lbDuskAt(p): 0..1 weight of the dusk band (sun just above / at the local horizon), where
+ *   lbDuskTint colours the direct light (the soft pink/purple terminator, BRIEF §3).
+ * - lbCloudShadowAt(p): direct-light multiplier from cloud shadows (1 = unshadowed). lbCloudShadow
+ *   is an equirectangular coverage map (R: 0 clear … 1 full shadow, LinearFilter, no mipmaps) looked
+ *   up by the direction lbCloudShadowRot · normalize(p): u = atan(d.x, d.z) / 2π + 0.5,
+ *   v = asin(d.y) / π + 0.5.
+ * - lbSmooth01(x): smoothstep(0, 1, x) for any x (ranges whose ends may be in either order).
+ * - lbSpring(p): springy 0→1 ease with a small overshoot (the reveal "pop").
+ * - lbBayer4(fragCoord): 4×4 ordered-dither threshold.
+ *
+ * (No comments inside the GLSL strings: they would ship in the bundle.)
+ */
 export const LB_COMMON_GLSL = /* glsl */ `
 uniform float lbTime;
 uniform vec3 lbSunDir;
@@ -63,32 +80,23 @@ uniform vec3 lbDuskTint;
 uniform sampler2D lbCloudShadow;
 uniform float lbCloudShadowOn;
 uniform mat3 lbCloudShadowRot;
-// 0 day … 1 night at a world position (planet centred on the origin). Twin of world/sun.ts nightFactor.
-// (Edges ascending: smoothstep(e0, e1) with e0 >= e1 is undefined in GLSL ES 3.0 / MSL.)
 float lbNightAt(vec3 worldPos) {
   return 1.0 - smoothstep(-0.18, 0.12, dot(normalize(worldPos), lbSunDir));
 }
-// 0..1 weight of the dusk band (sun just above / at the local horizon) at a world position: where
-// lbDuskTint colours the direct light (the soft pink/purple terminator, BRIEF §3).
 float lbDuskAt(vec3 p) {
   float d = dot(normalize(p), lbSunDir);
   return smoothstep(-0.12, 0.05, d) * (1.0 - smoothstep(0.05, 0.35, d));
 }
-// Direct-light multiplier from cloud shadows (1 = unshadowed). lbCloudShadow is an equirectangular
-// coverage map (R: 0 clear … 1 full shadow, LinearFilter, no mipmaps) looked up by the direction
-// lbCloudShadowRot · normalize(p): u = atan(d.x, d.z) / 2π + 0.5, v = asin(d.y) / π + 0.5.
 float lbCloudShadowAt(vec3 p) {
   if (lbCloudShadowOn <= 0.0) return 1.0;
   vec3 d = lbCloudShadowRot * normalize(p);
   vec2 uv = vec2(atan(d.x, d.z) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
   return 1.0 - lbCloudShadowOn * texture2D(lbCloudShadow, uv).r;
 }
-// smoothstep(0, 1, x) for any x (use for ranges whose ends may be in either order).
 float lbSmooth01(float x) {
   x = clamp(x, 0.0, 1.0);
   return x * x * (3.0 - 2.0 * x);
 }
-// Springy 0→1 ease with a small overshoot (the reveal "pop").
 float lbSpring(float p) {
   p = clamp(p, 0.0, 1.0);
   return 1.0 - exp(-6.5 * p) * cos(9.0 * p) * (1.0 - p);
@@ -283,17 +291,48 @@ varying float vLbReveal;
 uniform vec2 lbFadeRange;
 `;
 
+// Planet-aware hemisphere fill, faded to moonlight on the night side, plus A3's per-fragment
+// direct-light hooks:
+// - No direct sun once it has set over the fragment: the ramp shades by N·L alone and the shadow
+//   map never covers the planet's bulk, so a sun-facing wall past the terminator would still glow.
+// - Dusk tint in the terminator band, half of it on the light's LUMINANCE: a plain multiply turns
+//   rose × green grass into olive, this makes every surface blush the same pink. Cloud shadows.
+// - Moonlight sees colour less: the night albedo is 30 % toward its luminance (blue hour, not
+//   dark-green day), which also lets the warm city lights carry the night side.
+// - Twilight: between the day fill and the moonlight the shade passes through dusk violet (BRIEF
+//   §3: the terminator is soft and colourful). A multiply, so greens stay green.
+// - From orbit the terminator is one thin colour band: the dusk band widens (to ~33° of sun angle)
+//   and the violet multiply and the dusk-luminance blend strengthen with camera altitude (lbOrb),
+//   so it reads rose-violet, not grey-sage/brown.
+// - Dark albedos (asphalt, slate) at dusk — the twilight band, or anywhere past it while A3's night
+//   fill is the pink-lilac sunset sky (lbPink) — lose 70 % of the light's chroma, get a capped violet
+//   multiply and a lifted fill, so a cul-de-sac reads slate-lilac instead of crushing to plum.
 const FRAG_FILL = /* glsl */ `
   {
-    // Planet-aware hemisphere fill, faded to moonlight on the night side.
     vec3 lbUp = normalize(vLbWorld);
     vec3 lbN = inverseTransformDirection(normal, viewMatrix);
     float lbHemi = dot(lbN, lbUp) * 0.5 + 0.5;
     float lbNt = lbNightAt(vLbWorld);
-    // A3's per-fragment direct-light hooks: dusk tint in the terminator band, cloud shadows.
-    reflectedLight.directDiffuse *= mix(vec3(1.0), lbDuskTint, lbDuskAt(vLbWorld)) * lbCloudShadowAt(vLbWorld);
-    vec3 lbFillC = mix(mix(lbGroundFill, lbSkyFill, lbHemi), lbNightFill * (0.6 + 0.4 * lbHemi), lbNt);
-    reflectedLight.indirectDiffuse += lbFill * lbFillC * BRDF_Lambert(material.diffuseColor);
+    float lbOrb = smoothstep(70.0, 300.0, lbCamAlt);
+    float lbSe = dot(normalize(vLbWorld), lbSunDir);
+    float lbDk = mix(lbDuskAt(vLbWorld), smoothstep(-0.12, 0.05, lbSe) * (1.0 - smoothstep(0.1, 0.55, lbSe)), lbOrb);
+    vec3 lbA = material.diffuseColor;
+    const vec3 lbLum = vec3(0.2126, 0.7152, 0.0722);
+    float lbLow = 1.0 - smoothstep(0.03, 0.3, dot(lbA, lbLum));
+    float lbTw = lbNt * (1.0 - lbNt) * 2.2;
+    vec3 lbD = reflectedLight.directDiffuse * lbCloudShadowAt(vLbWorld) * smoothstep(-0.14, 0.0, lbSe);
+    float lbDl = dot(lbD, vec3(0.3, 0.59, 0.11));
+    lbD = mix(lbD * mix(vec3(1.0), lbDuskTint, 0.5 * lbDk), lbDl * lbDuskTint * 1.3, (0.45 + 0.35 * lbOrb) * lbDk);
+    float lbPink = clamp(6.0 * (lbNightFill.r - lbNightFill.g) / max(dot(lbNightFill, vec3(1.0)), 1e-3), 0.0, 1.0);
+    float lbDs = max(min(1.0, 2.0 * max(lbDk, lbTw)), lbNt * lbPink) * lbLow * (1.0 - lbOrb);
+    reflectedLight.directDiffuse = mix(lbD, vec3(dot(lbD, lbLum)) * vec3(1.05, 0.98, 1.1), 0.7 * lbDs) * (1.0 + 0.9 * lbDs);
+    vec3 lbAn = mix(lbA, vec3(dot(lbA, lbLum)), 0.3);
+    vec3 lbDayFill = mix(lbGroundFill, lbSkyFill, lbHemi) * BRDF_Lambert(lbA);
+    vec3 lbNightFillC = lbNightFill * (0.6 + 0.4 * lbHemi) * BRDF_Lambert(lbAn);
+    vec3 lbFillC = mix(lbDayFill, lbNightFillC, lbNt);
+    lbFillC *= mix(vec3(1.0), mix(vec3(1.16, 0.88, 1.2), vec3(1.32, 0.82, 1.3), lbOrb), min(1.0, lbTw * (1.0 + 0.8 * lbOrb)) * (1.0 - 0.6 * lbLow * (1.0 - lbOrb)));
+    lbFillC = mix(lbFillC, vec3(dot(lbFillC, lbLum)) * vec3(1.05, 0.98, 1.1), 0.7 * lbDs) * (1.0 + 0.9 * lbDs);
+    reflectedLight.indirectDiffuse += lbFill * lbFillC;
     totalEmissiveRadiance += lbNightEmissive * lbNt;
   }
 `;
@@ -304,6 +343,35 @@ const FRAG_RIM = /* glsl */ `
     float lbR = pow(1.0 - clamp(dot(normal, lbV), 0.0, 1.0), 3.0);
     float lbDay = 1.0 - 0.7 * lbNightAt(vLbWorld);
     outgoingLight += lbRimColor * (lbRim * lbR * lbDay) * (0.35 + 0.65 * diffuseColor.rgb);
+  }
+`;
+
+// Foliage at dusk (G2: the terminator went grey-sage and dusk crowns grey rocks under an orange
+// sky). Runs AFTER the system patches, so it has the last word over any low-light grade a system
+// applies (A1's LOW_LIGHT_GRADE desaturates toward moonlit blue; on top of the kit's twilight
+// multiply the two turned every green neutral grey). Green-dominant albedos (grass, meadow, crowns,
+// bushes, green roofs) inside the twilight band — sun from ~11° below to ~15° above the fragment,
+// strongest at the terminator, or anywhere under A3's pink sunset-sky night fill near the eye — blend toward
+// their own luminance × a violet that is rose on sun-facing sides (alpenglow catches the crowns'
+// sunward faces), plus a soft rose rim on those faces. Luminance-preserving: the tint has luma ~1.
+// Targets (G2): dusk crown ≈ (95,70,110), terminator grass ≈ (110,95,125).
+const FRAG_DUSK_FOLIAGE = /* glsl */ `
+  {
+    vec3 lbAf = diffuseColor.rgb;
+    float lbG = smoothstep(0.1, 0.35, (lbAf.g - max(lbAf.r, lbAf.b)) / max(lbAf.g, 1e-3));
+    if (lbG > 0.0) {
+      float lbSf = dot(normalize(vLbWorld), lbSunDir);
+      float lbOf = smoothstep(70.0, 300.0, lbCamAlt);
+      float lbTf = smoothstep(-0.2, -0.03, lbSf) * (1.0 - smoothstep(0.02, 0.26, lbSf));
+      float lbPf = clamp(6.0 * (lbNightFill.r - lbNightFill.g) / max(dot(lbNightFill, vec3(1.0)), 1e-3), 0.0, 1.0);
+      float lbWf = lbG * max(lbTf, lbPf * lbNightAt(vLbWorld) * (1.0 - lbOf));
+      vec3 lbNf = inverseTransformDirection(normal, viewMatrix);
+      float lbFs = smoothstep(-0.1, 0.6, dot(lbNf, lbSunDir));
+      float lbLf = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
+      outgoingLight = mix(outgoingLight, lbLf * mix(vec3(1.35, 0.68, 2.1), vec3(1.7, 0.7, 1.2), 0.7 * lbFs), 0.68 * lbWf);
+      float lbRf = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.0);
+      outgoingLight += lbRimColor * vec3(1.0, 0.6, 0.75) * (lbRf * lbFs * lbWf * 0.3 * (1.0 - lbOf)) * (0.3 + lbAf);
+    }
   }
 `;
 
@@ -382,7 +450,7 @@ export function createToonKit(uniforms: SharedUniforms, opts: { reducedMotion: b
         .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${FRAG_FILL}`)
         .replace(
           'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;',
-          `vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;\n${FRAG_RIM}\n${p?.fragment ?? ''}`,
+          `vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;\n${FRAG_RIM}\n${p?.fragment ?? ''}\n${FRAG_DUSK_FOLIAGE}`,
         );
     };
     const fadeKey = o.fade?.by ?? '';

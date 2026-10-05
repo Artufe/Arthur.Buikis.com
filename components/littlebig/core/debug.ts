@@ -3,6 +3,7 @@
 // production only with ?shot=1.
 
 import type { BootEntry, LBContext, ViewSpec } from './contracts';
+import { DIVE_SECONDS } from '../camera/dive';
 import { diveAt, SHOTS } from './shots';
 
 export interface PerfResult {
@@ -43,8 +44,16 @@ export interface LittlebigHook {
   shots(): Array<{ name: string; about: string }>;
   /** Apply a named shot (view + time). Returns false for an unknown name. */
   shot(name: string): boolean;
-  /** Put the camera at fraction u of the scripted dive. glide = seconds since the previous frame. */
-  dive(u: number, glide?: number): void;
+  /**
+   * Put the camera at fraction u of the scripted dive and render one full frame. glide = seconds
+   * since the previous frame (the camera's ground/roof reference springs over it); dt = sim seconds
+   * to advance with the frame (default: glide), so cars, people, planes and clouds move along the
+   * descent. The true camera path needs glide = diveSeconds / (frames − 1): render the /play clip
+   * at 30 fps (diveSeconds × 30 + 1 frames).
+   */
+  dive(u: number, glide?: number, dt?: number): void;
+  /** Nominal length of the scripted dive at 1× (s). */
+  readonly diveSeconds: number;
   /** Measure n frames serially (CPU + GPU, synced). */
   perf(frames?: number): Promise<PerfResult>;
   boot(): BootEntry[];
@@ -116,11 +125,12 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
       deps.frameNow(0);
       return true;
     },
-    dive(u, glide) {
+    dive(u, glide, dt) {
       ctx.debug.cameraLocked = true;
       ctx.services.camera.setView(diveAt(ctx, u), glide ? { glide } : undefined);
-      deps.frameNow(0);
+      deps.frameNow(Math.max(0, dt ?? glide ?? 0));
     },
+    diveSeconds: DIVE_SECONDS,
     async perf(frames = 120) {
       const raf = ctx.perf.summarize();
       deps.pauseLoop();

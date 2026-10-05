@@ -399,7 +399,7 @@ export async function buildGround(g: Geo, P: Geo, plan: CityPlan, index: CityInd
     pivot(mid.x, mid.z);
     g.color.copy(C.asphalt);
     g.kind = K.asphalt;
-    g.param = 0;
+    g.param = e.width / 2; // the shader's night glow profile across the road
     ribbon(g, extend(e.centre, 0.05), -e.width / 2, e.width / 2, ROAD_H, 4);
     await tick();
   }
@@ -410,7 +410,9 @@ export async function buildGround(g: Geo, P: Geo, plan: CityPlan, index: CityInd
     pivot(n.x, n.z);
     g.color.copy(C.asphalt);
     g.kind = K.asphalt;
-    fillPolygon(g, x.outline, ROAD_H);
+    // uv relative to the node, param = −reach: the shader's night glow is a soft knot here
+    g.param = -(n.radius + 2);
+    fillPolygon(g, x.outline, ROAD_H, (px, pz) => [px - n.x, pz - n.z]);
     await tick();
   }
 
@@ -461,7 +463,7 @@ export async function buildGround(g: Geo, P: Geo, plan: CityPlan, index: CityInd
   await tick();
   // ── Paint ──
   P.kind = K.plain;
-  P.param = 0;
+  P.param = 7; // road paint: the shader lets the night glow show through it from high up
   for (const e of plan.edges) {
     sampleAt(e.centre, e.centre.length / 2, mid);
     pivot(mid.x, mid.z);

@@ -32,7 +32,7 @@ import { LAYER_NO_INK, type LBContext, type System } from '../core/contracts';
 import { R } from '../world/config';
 import { Rng } from '../world/rng';
 import { CITY_DIR, moonDirection, nightFactor, sunDirection } from '../world/sun';
-import { airSpace, cloudPalette, computeRig, createRig, domeAngle, FILL, mistColor, mix, SKY, skyDipSin, smooth, spaceAmount, tailAngle } from './rig';
+import { airSpace, cloudPalette, computeRig, createRig, domeAngle, FILL, mistBlend, mistColor, mix, SKY, skyDipSin, smooth, spaceAmount, tailAngle } from './rig';
 import { hazeFrag, hazeVert, skyFrag, skyVert, starFrag, starVert } from './shaders';
 
 const DEG = Math.PI / 180;
@@ -49,9 +49,11 @@ const TWILIGHT_PINK = new Color('#c86ce8');
  * of the radius) past the terminator plane. On a 160 m planet a roof or tree crown 5–10 m up keeps
  * the sun until it is 14–20° below its local horizon, so sun-facing facets lit up under a starry
  * sky. The disc casts into the shadow map only (it writes neither colour nor depth), so nothing
- * past it gets direct light: the night side reads as night.
+ * past it gets direct light: the night side reads as night. (G2: moved from 0.085 to 0.15 R: the
+ * toon kit already fades direct sun out by up·sun = −0.14, so the cut now falls where there is no
+ * direct light left to cut; at 0.085 it sliced a hard diagonal seam across the city at blue hour.)
  */
-const NIGHT_CUT = 0.085;
+const NIGHT_CUT = 0.15;
 
 export function createSkySystem(): System {
   const disposables: Array<{ dispose(): void }> = [];
@@ -131,6 +133,7 @@ export function createSkySystem(): System {
           uPeach: { value: SKY.peach },
           uBandAxis: { value: new Vector3(0.42, 0.78, -0.46).normalize() },
           uCloudAmt: { value: 0 },
+          uCirrus: { value: 0 },
           uEast: { value: east },
           uNorth: { value: north },
           uCTime: { value: 0 },
@@ -157,6 +160,10 @@ export function createSkySystem(): System {
       dome.name = 'sky';
       dome.frustumCulled = false;
       dome.renderOrder = -1000;
+      dome.onBeforeRender = () => {
+        const sky = ctx.services.sky;
+        if (skyMat) skyMat.uniforms.uVeil.value = mistBlend(Math.max(sky.veil ?? 0, sky.mist ?? 0));
+      };
       dome.layers.set(LAYER_NO_INK);
       ctx.scene.add(dome);
       disposables.push(domeGeo, skyMat);
@@ -332,19 +339,17 @@ export function createSkySystem(): System {
         const su = skyMat.uniforms;
         su.uSpace.value = space;
         su.uWarm.value = rig.warm;
-        // The clouds' white-out (last frame's: the clouds update after the sky): the sky sinks
-        // into the same mist as the fogged scene.
-        const veil = Math.max(ctx.services.sky.veil ?? 0, ctx.services.sky.mist ?? 0);
-        su.uVeil.value = smooth(0.15, 0.9, veil);
-        if (veil > 0) {
-          mistColor(elev + skyDip + 0.04, su.uVeilCol.value as Color);
-        }
+        // The clouds' white-out: the sky sinks into the same mist as the fogged scene. Read at draw
+        // time (the clouds update after the sky), from the same smoothed amount as the scene fog.
+        mistColor(elev + skyDip + 0.04, su.uVeilCol.value as Color);
         // Painted far cumulus: seen from the street up to the cloud layer, gone above it, and
         // faded out while any real cloud stands over the visible horizon (the clouds system
         // reports it: a painted cloud never shares the frame with a 3D one).
         const camt = (1 - smooth(32, 56, v.altSea)) * (1 - (ctx.services.sky.cloudsInView ?? 0));
         su.uCloudAmt.value = camt;
-        if (camt > 0) {
+        const cir = 1 - smooth(32, 56, v.altSea);
+        su.uCirrus.value = cir;
+        if (camt > 0 || cir > 0) {
           // The eye's horizontal frame (north = toward the pole, projected).
           north.set(0, 1, 0).addScaledVector(air.uUp.value, -air.uUp.value.y);
           if (north.lengthSq() < 1e-6) north.set(0, 0, 1).addScaledVector(air.uUp.value, -air.uUp.value.z);
@@ -372,7 +377,7 @@ export function createSkySystem(): System {
       if (hazeMat && haze) {
         (hazeMat.uniforms.uCam.value as Vector3).copy(v.eye);
         const k = smooth(150, 360, v.altSea);
-        hazeMat.uniforms.uStrength.value = 0.4 * k;
+        hazeMat.uniforms.uStrength.value = 0.24 * k; // (G2: was 0.4: a white inner ring, planet in a glass bubble)
         hazeMat.uniforms.uTwilight.value = 0.045 * k;
         haze.visible = k > 0.001 && v.altSea > HAZE_R - R + 1;
       }

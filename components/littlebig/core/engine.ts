@@ -18,19 +18,21 @@ import {
   Scene,
   type Side,
   SRGBColorSpace,
+  Vector2,
   Vector3,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
+import { createPost } from '../render/post';
 import { createToonKit } from '../render/toon';
 import { getCityIndex, getCityPlan } from '../world/city';
 import { SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
-import { type BootEntry, LAYER_NO_INK, type LBContext, type Quality, type Services, type System, type Variant, type ViewState } from './contracts';
+import { type BootEntry, LAYER_NO_INK, type LBContext, type Quality, type Services, type System, type Variant, type ViewSpec, type ViewState } from './contracts';
 import type { DebugDeps } from './debug';
 import { ParamRegistry } from './params';
 import { Perf } from './perf';
-import { detectQuality, QUALITY } from './quality';
+import { detectQuality, qualitySettings } from './quality';
 import { createReveal } from './reveal';
 import { createSystems } from './systems';
 import { createSharedUniforms } from './uniforms';
@@ -44,6 +46,11 @@ export interface EngineOptions {
   /** location.search: `?q=low|high`, `?p.<key>=<v>`, `?shot=1`, `?t=<s>`. */
   search: string;
   onProgress?: (fraction: number, label: string) => void;
+  /**
+   * Reboot after a WebGL context loss: carry on from this camera view and sim time, with the
+   * reveal instant (the player is not thrown back to the opening orbit, nor shown the reveal again).
+   */
+  resume?: { view: ViewSpec; t: number };
 }
 
 export interface Engine {
@@ -81,7 +88,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const query = new URLSearchParams(opts.search);
   const shotMode = query.has('shot');
   const quality: Quality = detectQuality(opts.search);
-  const q = QUALITY[quality];
+  const q = qualitySettings(quality);
 
   // WebGL2 or nothing (three r163+ needs it).
   let renderer: WebGLRenderer;
@@ -105,9 +112,18 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const camera = new PerspectiveCamera(40, 16 / 9, 1, 1000);
   const uniforms = createSharedUniforms();
   const toon = createToonKit(uniforms, { reducedMotion: opts.reducedMotion });
-  const reveal = createReveal(shotMode, uniforms);
+  const reveal = createReveal(shotMode || !!opts.resume, uniforms);
   const params = new ParamRegistry(opts.search);
+  // three's shader error check reads every program's info logs on its first use: synchronous GPU
+  // round trips that stalled the main thread 40–55 ms per program on a cold first visit. A program
+  // that fails still logs WebGL's "program not valid" warnings. On in dev for the readable log;
+  // `?p.core.shaderChecks=false` measures the production path there.
+  renderer.debug.checkShaderErrors = params.toggle('core.shaderChecks', { label: 'shader error logs (read at boot)', value: process.env.NODE_ENV !== 'production' }).value;
   const perf = new Perf();
+  // The post chain (B4, render/post): the scene renders into its own HDR target, so every scene
+  // program must be compiled with a render target bound (no tone mapping, linear output), exactly
+  // as it will be drawn. compileScene() does that; null post = plain render (no float targets).
+  const post = createPost(renderer, q.post, params, uniforms);
 
   const planet = getPlanet(SEED);
   boot.mark('planet');
@@ -155,7 +171,8 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     cityDist: 0,
   };
   const services: Services = {
-    render: (c) => c.renderer.render(c.scene, c.camera),
+    // (`.stats` on the post render function: why the ¼-res pass ran last frame, for review tools.)
+    render: post ? Object.assign((c: LBContext) => post.render(c), { stats: post.stats }) : (c) => c.renderer.render(c.scene, c.camera),
     sky: { sun: null, fog: null },
     camera: {
       setView() {},
@@ -174,7 +191,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     scene,
     camera,
     canvas: opts.canvas,
-    time: { t: Number(query.get('t') ?? 0) || 0, fixedDt: FIXED_DT, alpha: 0, render: 0, dt: 0, realDt: 0, frame: 0, frozen: shotMode, timeScale: 1 },
+    time: { t: opts.resume?.t ?? (Number(query.get('t') ?? 0) || 0), fixedDt: FIXED_DT, alpha: 0, render: 0, dt: 0, realDt: 0, frame: 0, frozen: shotMode, timeScale: 1 },
     view,
     world,
     quality,
@@ -262,6 +279,16 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // material) with a render target bound and the fog off, exactly as the shadow pass will.
   const warmRT = new WebGLRenderTarget(1, 1, { depthBuffer: false });
   const defaultDepth: Partial<Record<Side, MeshDepthMaterial>> = {}; // stand-ins for three's internal one
+  /** Compile the scene's colour programs for the target the frame draws into (see `post`). */
+  const compileScene = (): Promise<unknown> => {
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(post?.offscreen ? warmRT : null);
+    try {
+      return renderer.compileAsync(scene, camera);
+    } finally {
+      renderer.setRenderTarget(prevRT);
+    }
+  };
   const shadowProxy = (roots: Iterable<Object3D>): Scene | null => {
     const proxy = new Scene();
     for (const root of roots) {
@@ -339,12 +366,14 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     const was = fresh.map((o) => o.visible);
     for (const o of fresh) o.visible = false; // compile() still traverses invisible objects
     try {
-      await Promise.race([Promise.all([renderer.compileAsync(scene, camera).catch(() => {}), warmShadows(fresh)]), disposedPromise]);
+      await Promise.race([Promise.all([compileScene().catch(() => {}), warmShadows(fresh)]), disposedPromise]);
     } finally {
       fresh.forEach((o, i) => (o.visible = was[i]));
       if (watching || initRoots) watchPrograms = renderer.info.programs?.length ?? 0;
     }
     if (disposed) return never();
+    // Warm now: frames may draw them (see renderFrame).
+    if (initRoots) for (const o of fresh) initRoots.add(o);
   }
 
   // Stage 1. Once the sky has made the lights and fog (which every lit program depends on), start
@@ -370,16 +399,23 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     if (!warmKick && services.sky.sun) {
       scene.add(warmMesh);
       applyCold();
-      warmKick = Promise.all([renderer.compileAsync(scene, camera).catch(() => {}), warmShadows([warmMesh])]);
+      warmKick = Promise.all([compileScene().catch(() => {}), warmShadows([warmMesh]), post?.compile()]);
       buildCity();
     }
   }
   buildCity();
+  if (opts.resume) services.camera.setView(opts.resume.view);
 
   // Size before the first frame so the projection is right.
   let width = opts.canvas.clientWidth || 960;
   let height = opts.canvas.clientHeight || 600;
   renderer.setSize(width, height, false);
+  const dbSize = new Vector2();
+  const sizePost = () => {
+    renderer.getDrawingBufferSize(dbSize);
+    post?.setSize(dbSize.x, dbSize.y);
+  };
+  sizePost();
   camera.aspect = width / Math.max(1, height);
   camera.updateProjectionMatrix();
 
@@ -427,11 +463,30 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   };
   // Dev guard (BRIEF §1: no shader compiles after the reveal): warn when a frame builds a program.
   let watchPrograms = -1;
+  const unwarmed: Object3D[] = [];
   const renderFrame = () => {
     renderer.toneMappingExposure = exposure.value;
     uniforms.lbTime.value = ctx.time.render;
     renderer.info.reset();
-    services.render(ctx);
+    // Roots a stage-2 init has added but ctx.compile() has not warmed yet are not drawn: a frame
+    // that drew them (a system yielding between scene.add and compile) would build their programs
+    // synchronously inside it, ~40-200 ms each on a cold visit.
+    if (initRoots) {
+      const ch = scene.children;
+      for (let i = 0; i < ch.length; i++) {
+        const o = ch[i];
+        if (o.visible && !initRoots.has(o)) {
+          o.visible = false;
+          unwarmed.push(o);
+        }
+      }
+    }
+    try {
+      services.render(ctx);
+    } finally {
+      for (let i = 0; i < unwarmed.length; i++) unwarmed[i].visible = true;
+      unwarmed.length = 0;
+    }
     if (watchPrograms >= 0) {
       const n = renderer.info.programs?.length ?? 0;
       if (n > watchPrograms && process.env.NODE_ENV !== 'production') {
@@ -458,7 +513,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // Warm every program the first frame needs — colour and shadow depth — in parallel where the
   // driver can (KHR_parallel_shader_compile), then draw it.
   try {
-    await Promise.all([renderer.compileAsync(scene, camera), warmShadows(scene.children)]);
+    await Promise.all([compileScene(), warmShadows(scene.children), post?.compile()]);
   } catch (e) {
     console.warn('[littlebig] compile', e);
   }
@@ -522,11 +577,15 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // Context loss (GPU reset, iOS backgrounding): stop drawing; littlebig-canvas.tsx reboots the
   // engine on a fresh canvas when the browser restores the context.
   let contextLost = false;
+  // Everything is released right here, while the context is lost: GL deletes are silent no-ops
+  // then. Released after the restore instead (the canvas reboots on a fresh one), every delete
+  // would hit the restored context with objects from the lost one (INVALID_OPERATION spam).
   const onLost = (e: Event) => {
     e.preventDefault();
     contextLost = true;
     sync();
     console.warn('[littlebig] WebGL context lost');
+    engine.dispose();
   };
   opts.canvas.addEventListener('webglcontextlost', onLost);
 
@@ -615,7 +674,24 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       renderFrame();
     },
     renderNow: renderFrame,
-    frameNow: (dt) => frame(dt, dt || 1 / 60),
+    // A scripted frame advances the sim by all of dt: the live loop's MAX_STEPS cap (a hitch guard)
+    // froze most of a coarse dive (1/6 s frames ran 0.13 s of sim each).
+    frameNow(dt) {
+      const r0 = ctx.time.render;
+      let left = Math.max(0, dt);
+      do {
+        const d = Math.min(left, MAX_STEPS * FIXED_DT);
+        advanceSim(d);
+        left -= d;
+      } while (left > 1e-9);
+      ctx.time.dt = ctx.time.render - r0;
+      ctx.time.realDt = dt || 1 / 60;
+      ctx.time.timeScale = timeScale.value;
+      reveal.tick(ctx.time.realDt);
+      runUpdates();
+      renderFrame();
+      ctx.time.frame++;
+    },
     pauseLoop() {
       paused = true;
       sync();
@@ -646,6 +722,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       const dpr = Math.min(window.devicePixelRatio || 1, q.maxDpr);
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
+      sizePost();
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       for (const s of systems) {
@@ -690,11 +767,12 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       for (const r of tracked) r.dispose();
       tracked.clear();
       toon.dispose();
+      post?.dispose();
       for (const d of Object.values(defaultDepth)) d?.dispose();
       warmRT.dispose();
       renderer.renderLists.dispose();
       renderer.dispose();
-      renderer.forceContextLoss();
+      if (!contextLost) renderer.forceContextLoss();
     },
   };
   return engine;

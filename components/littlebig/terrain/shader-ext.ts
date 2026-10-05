@@ -8,24 +8,21 @@ import type { ToonMaterial } from '../render/toon';
 
 type Shader = { vertexShader: string; fragmentShader: string };
 
-/**
- * The sun only lights what it is above: direct light fades out where the sun sinks under the
- * fragment's local horizon (sun elevation sine −0.14 … 0). The shared ramp shades by N·L alone, so
- * without this a crown facet facing down toward a sun on the far side of the planet lit up at
- * local midnight (the shadow map never covers the planet's own bulk). Kept a little past the
- * geometric horizon: tree tops and hills on this tiny planet still catch the last light.
- */
-const SUN_UP = 'directLight.color *= smoothstep( -0.14, 0.0, dot( normalize( vLbWorld ), lbSunDir ) );';
+// The sun-under-the-local-horizon mask (direct light × smoothstep(−0.14, 0, up·sun)) lives in the
+// toon kit for every material now (render/toon.ts); these chunks no longer apply it a second time.
 
 /**
- * Low-light grade for vegetation (terrain greens and nature): as the sun sinks under ~17° over the
- * fragment, foliage loses saturation toward the fill's hue (the eye's night vision), so lime crowns
- * and fields sit in the same mauve dusk / moonlit light as the city instead of staying daytime
- * green. Full strength at night. GLSL; edits `outgoingLight`, reads vLbWorld (ToonPatch.fragment).
+ * Low-light grade for vegetation (terrain greens and nature): at night foliage loses saturation
+ * toward the fill's hue (the eye's night vision), so lime crowns and fields sit in the same
+ * moonlit light as the city instead of staying daytime green. It stays out of the twilight band
+ * (sun −11.5° … +15° over the fragment): there the toon kit's FRAG_DUSK_FOLIAGE (B4) owns foliage,
+ * and the two desaturations stacked into neutral grey at the terminator. GLSL; edits
+ * `outgoingLight`, reads vLbWorld (ToonPatch.fragment).
  */
 export const LOW_LIGHT_GRADE = /* glsl */ `
   {
-    float lbLow = 1.0 - smoothstep(-0.02, 0.3, dot(normalize(vLbWorld), lbSunDir));
+    float lbSl = dot(normalize(vLbWorld), lbSunDir);
+    float lbLow = (1.0 - smoothstep(-0.02, 0.3, lbSl)) * (1.0 - smoothstep(-0.2, -0.03, lbSl) * (1.0 - smoothstep(0.02, 0.26, lbSl)));
     float lbL = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
     outgoingLight = mix(outgoingLight, vec3(lbL) * vec3(0.86, 0.92, 1.18), 0.5 * lbLow);
   }`;
@@ -52,7 +49,6 @@ export const GRAZING_SHADOW_FRAGMENT = ShaderChunk.lights_fragment_begin.replace
   `{
 			float lbSh = ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
 			directLight.color *= mix( 1.0, lbSh, smoothstep( 0.03, 0.16, dot( geometryNormal, directLight.direction ) ) );
-			${SUN_UP}
 		}`,
 );
 
@@ -64,7 +60,7 @@ export function grazingShadows(shader: Shader): void {
 export function softShadows(strength: number) {
   const chunk = ShaderChunk.lights_fragment_begin.replace(
     SHADOW_LINE,
-    `directLight.color *= mix( 1.0, ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0, ${strength.toFixed(3)} );\n\t\t${SUN_UP}`,
+    `directLight.color *= mix( 1.0, ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0, ${strength.toFixed(3)} );`,
   );
   return (shader: Shader) => {
     shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', chunk);
@@ -82,7 +78,6 @@ export function grazingShadowsWithOptOut(shader: Shader): void {
     `{
 			float lbSh = ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
 			directLight.color *= mix( 1.0, lbSh, ( 1.0 - vLbNoShadow ) * smoothstep( 0.03, 0.16, dot( geometryNormal, directLight.direction ) ) );
-			${SUN_UP}
 		}`,
   );
   shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', chunk);

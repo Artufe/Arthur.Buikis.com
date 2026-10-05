@@ -46,7 +46,7 @@ export const SKY = {
 
 const SUN_DAY = new Color('#fff4e2');
 /** The warmest the key light gets over the planet: golden, never sunset orange (the terminator is per fragment). */
-export const SUN_GOLD = new Color('#ffcb80');
+export const SUN_GOLD = new Color('#ffc87a');
 /**
  * Alpenglow: the key light as the EYE sees a low sun from inside the air (street … cloud layer), when
  * the sun hangs on the dipped visible horizon. Only near the eye (faded out toward orbit), so the
@@ -61,7 +61,7 @@ export const DUSK_TINT = new Color('#ff8fb4');
  * neutral surfaces in shade lose their red and land as navy holes (BRIEF §3: tinted, not black).
  */
 const SKY_FILL_DAY = new Color('#a8b6f2');
-const SKY_FILL_GOLD = new Color('#e6c4dc');
+const SKY_FILL_GOLD = new Color('#e6d2bc');
 /** At dusk the open sky is pink and lilac: so is the light it throws. */
 const SKY_FILL_DUSK = new Color('#d9a0dc');
 const GROUND_FILL = new Color('#e0b892');
@@ -260,7 +260,8 @@ export function computeRig(elev: number, elevSky: number, night: number, out: Li
   // (sun ~16° over the street, ~28° over the centre) sits well inside it.
   // `elevGold` lets the city's clock decide how golden the light is near the city (see the sky
   // system): its edge is ~30° of sun angle from its middle on this tiny planet.
-  const warm = (1 - smooth(0.3, 0.72, Math.min(elev, elevGold))) * smooth(-0.06, 0.08, Math.max(elev, elevSky));
+  // (G2: the window widened from 0.3–0.72 to 0.5–0.88: the city's ~28° start read as neutral midday.)
+  const warm = (1 - smooth(0.5, 0.88, Math.min(elev, elevGold))) * smooth(-0.06, 0.08, Math.max(elev, elevSky));
   // The sunset band of the sky: sun within ~±12° of the visible horizon.
   const dusk = Math.max(0, 1 - Math.abs(elevSky - 0.02) / 0.24) * (1 - nightSky * 0.6);
   // Alpenglow: inside the air, sun from ~2° under to ~10° over the visible horizon. The key light
@@ -273,15 +274,17 @@ export function computeRig(elev: number, elevSky: number, night: number, out: Li
   out.nightSky = nightSky;
   out.alpen = alpen;
   // From orbit the whole lit hemisphere is in view (noon included): half the golden tint there.
-  out.sun.copy(SUN_DAY).lerp(SUN_GOLD, Math.min(1, warm * 0.95 + dusk * 0.15) * (1 - 0.5 * space)).lerp(SUN_ALPEN, alpen * 0.85);
-  out.sunIntensity = FILL.key * (1 - 0.22 * alpen);
+  out.sun.copy(SUN_DAY).lerp(SUN_GOLD, Math.min(1, warm + dusk * 0.15) * (1 - 0.5 * space)).lerp(SUN_ALPEN, alpen * 0.85);
+  // In golden light the key carries more of the look than the lavender sky fill (G2: sun-facing
+  // walls read neutral-midday at t = 0).
+  out.sunIntensity = FILL.key * (1 - 0.22 * alpen) * (1 + 0.1 * warm * (1 - space));
   // Fill: lavender sky light from above, warm bounce from below; peach in golden light, pink-lilac
   // at dusk. Strong enough that shade stays a colour (see FILL).
   out.skyFill
     .copy(SKY_FILL_DAY)
-    .lerp(SKY_FILL_GOLD, warm * 0.25)
+    .lerp(SKY_FILL_GOLD, warm * 0.32)
     .lerp(SKY_FILL_DUSK, dusk * 0.55)
-    .multiplyScalar(FILL.sky * (1 + dusk * 0.1));
+    .multiplyScalar(FILL.sky * (1 + dusk * 0.1) * (1 - 0.12 * warm * (1 - space)));
   out.groundFill.copy(GROUND_FILL).multiplyScalar(FILL.bounce);
   // Moonlight: a dim blue-violet: the night side keeps its shapes but reads as night, so windows,
   // streetlights and headlights are the brightest things there.
@@ -299,21 +302,22 @@ export function computeRig(elev: number, elevSky: number, night: number, out: Li
 
 // ── the cloud palette ──
 // Cloud colour by the sun's elevation (sin) at the cloud: white → cream (golden) → peach-pink (dusk)
-// → mauve (twilight) → moonlit indigo (night). Every stop is saturated, and interpolation only runs
-// between neighbours, so a cloud never passes through grey (a white → navy lerp did). The puff
-// shader gets the same stops as uniform arrays (clouds/), the sky's painted cumulus a CPU sample.
-// Peach and mauve live strictly inside the dusk band (lbDuskAt > 0.8 at both stops); by the time
-// lbNightAt passes 0.5 (e ≈ −0.03) the clouds are 80 % of the way to a deep indigo, and fully there
-// at −0.04, so the city lights stay the brightest thing on the night side.
+// → mauve (sunset) → lavender afterglow (blue hour) → moonlit silver-lilac cotton (night). Every
+// stop is saturated, and interpolation only runs between neighbours, so a cloud never passes
+// through grey (a white → navy lerp did) or charcoal (a dark night stop read as asteroids from
+// orbit and as holes in the night sky from the street, G2).
+// Peach and mauve live strictly inside the dusk band (lbDuskAt > 0.8 at both stops). The blue-hour
+// stop has pink-mauve bellies and lavender tops. At night the side toward the moon is silver-lilac
+// (well above the night sky's luminance), the body never darker than the sky behind it, and still
+// far below the warm city lights.
 // The night stops are given as the colour they should SHOW (fromScreen): the Neutral tone curve
-// crushes dark colours with a small darkest channel, so a plain #2c315f rendered as (12, 25, 85),
-// a saturated royal blue glowing over the black-green night ground.
-export const CLOUD_PAL_E = [-0.04, 0.01, 0.07, 0.2, 0.42];
-export const CLOUD_PAL_LIT = [fromScreen('#1c2041'), ...['#c69ad0', '#ffcab4', '#fff2de', '#ffffff'].map((h) => new Color(h))];
-export const CLOUD_PAL_SHADE = [fromScreen('#11142d'), ...['#8a7fc4', '#c6a8dc', '#d4cdee', '#cdd3f3'].map((h) => new Color(h))];
-export const CLOUD_PAL_BELLY = [fromScreen('#0d1024'), ...['#6a62ae', '#a898d4', '#bcb9e6', '#c3c8ef'].map((h) => new Color(h))];
-/** Rim: a thin silvery moon edge at night, warm by day. */
-export const CLOUD_PAL_RIM = ['#9aa3e0', '#e6b4e0', '#ffd6b8', '#fff0d8', '#ffffff'].map((h) => new Color(h));
+// crushes dark colours with a small darkest channel.
+export const CLOUD_PAL_E = [-0.14, -0.06, 0.01, 0.07, 0.2, 0.42];
+export const CLOUD_PAL_LIT = [fromScreen('#4a4f92'), ...['#a59bd8', '#c69ad0', '#ffcab4', '#fff2de', '#ffffff'].map((h) => new Color(h))];
+export const CLOUD_PAL_SHADE = [fromScreen('#2b3066'), ...['#7467b0', '#8a7fc4', '#c6a8dc', '#d4cdee', '#cdd3f3'].map((h) => new Color(h))];
+export const CLOUD_PAL_BELLY = [fromScreen('#23275a'), ...['#94689f', '#6a62ae', '#a898d4', '#bcb9e6', '#c3c8ef'].map((h) => new Color(h))];
+/** Rim: a silvery moon edge at night, warm by day. */
+export const CLOUD_PAL_RIM = ['#b4bdf6', '#e8c4f2', '#e6b4e0', '#ffd6b8', '#fff0d8', '#ffffff'].map((h) => new Color(h));
 
 /** CPU sample of the cloud palette (twin of the puff shader's cloudPal()). */
 export function cloudPalette(e: number, lit: Color, shade: Color, belly: Color, rim: Color) {
@@ -340,4 +344,30 @@ export function mistColor(e: number, out: Color, lit?: Color): Color {
   cloudPalette(e, _l, _s, _b, _r);
   if (lit) lit.copy(_l).lerp(_s, 0.1);
   return out.copy(_s).lerp(_b, 0.45).lerp(_l, 0.1);
+}
+
+const _sky = new Color();
+const lumOf = (c: Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+/**
+ * Inside the air at night and dusk: the gain that keeps a cloud's belly at ≥ 1.3× the luminance of
+ * the sky behind it (a cloud must never read as a hole in the night sky). `eyeSun` is the eye's
+ * dip-aware sun sine (+0.04, as the clouds use it). 1 by day.
+ */
+export function cloudLift(eyeSun: number): number {
+  const elevSky = eyeSun - 0.04;
+  const nx = Math.min(1, Math.max(0, (elevSky + 0.2) / 0.3));
+  const nightSky = 1 - nx * nx * (3 - 2 * nx);
+  const dusk = Math.max(0, 1 - Math.abs(elevSky - 0.02) / 0.24) * (1 - nightSky * 0.6);
+  // The sky ~15° up, roughly as the dome paints it.
+  _sky.copy(SKY.horizon).lerp(SKY.top, 0.5).lerp(_c.copy(SKY.duskPurple).lerp(SKY.duskPink, 0.4), dusk * 0.8);
+  _sky.lerp(_c.copy(SKY.nightHorizon).lerp(SKY.nightTop, 0.45), nightSky);
+  cloudPalette(eyeSun - 0.07, _l, _s, _b, _r);
+  const g = Math.min(2.5, Math.max(1, (1.3 * lumOf(_sky)) / Math.max(1e-4, lumOf(_b))));
+  return 1 + (g - 1) * (1 - smooth(0, 0.15, eyeSun));
+}
+
+/** How far the scene fog colour AND the sky dome are pulled into the cloud mist for a white-out
+ *  fog amount (clouds → services.sky.mist): one curve for both, so silhouettes fade into the sky. */
+export function mistBlend(m: number): number {
+  return smooth(0.03, 0.5, m);
 }

@@ -1321,14 +1321,16 @@ function pickViewpoints(seed: number, g: RoadGraph, layout: Layout, buildings: B
   const computeDusk = (): Viewpoint => {
     const sky = skyline();
     // Dusk: a sidewalk spot whose view toward the setting sun (at the shot's own time there) shows an
-    // unbroken horizon within ±4° of the disc (views.ts pickDusk); falls back to the most westward
+    // unbroken horizon within ±1.5° of the disc (views.ts pickDusk); falls back to the most westward
     // open view.
     const spots: WalkSpot[] = [];
     for (const w of W.edges) {
       if (w.kind !== 'sidewalk' && w.kind !== 'corner') continue;
       for (let si = 0.5; si < w.path.length; si += 1) {
         sampleAt(w.path, si, sp);
-        spots.push({ x: sp.x, z: sp.z, tx: sp.tx, tz: sp.tz, straight: w.kind === 'sidewalk' });
+        let endDist = Infinity;
+        for (const n of g.nodes) if (n.kind === 'end') endDist = Math.min(endDist, Math.hypot(sp.x - n.x, sp.z - n.z));
+        spots.push({ x: sp.x, z: sp.z, tx: sp.tx, tz: sp.tz, straight: w.kind === 'sidewalk', endDist });
       }
     }
     const dusk: Viewpoint = pickDusk(sky, getPlanet(seed), spots, CITY_PLAN_RADIUS, (x, z) => !obstacleNear(x, z, 1.2)) ?? { ...street, heading: -Math.PI / 2 };

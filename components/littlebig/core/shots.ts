@@ -30,6 +30,28 @@ export function viewAt(vp: Viewpoint, alt: number, pitch?: number): ViewSpec {
   return v;
 }
 
+/**
+ * Sim time (s) the /play clip starts at: render it with `--dive 301 --t DIVE_T0`, so its last frame
+ * (the poster and loop point, at DIVE_T0 + DIVE_SECONDS) is the `landing` shot's light and life. Picked
+ * by scanning T0 ∈ [0, 6] for a loop point and final second with no walker or vehicle near the lens,
+ * nobody walking at it and people + cars in view (docs/littlebig/shots/A4-G2fix/scan2.mjs). The sims
+ * are chaotic (±0.25 s changes the frame), so re-scan whenever traffic or people change.
+ */
+export const DIVE_T0 = 1;
+
+/**
+ * The `street` shot stands on A2's viewpoint stepped 0.9 m toward the building side and turned 6°
+ * toward it: on the viewpoint itself a lamp pole 8 m ahead split the frame against the clock tower.
+ * Kept only if the stepped spot is still clear pavement.
+ */
+function streetView(ctx: LBContext): ViewSpec {
+  const vp = ctx.world.city.viewpoints.street;
+  const x = vp.x + Math.cos(vp.heading) * 0.9;
+  const z = vp.z + Math.sin(vp.heading) * 0.9;
+  const ok = ctx.world.cityIndex.classify(x, z) === 'sidewalk' && !ctx.world.cityIndex.collide(x, z, 0.4, { x: 0, z: 0 });
+  return viewAt(ok ? { ...vp, x, z, heading: vp.heading + (6 * Math.PI) / 180 } : vp, EYE_HEIGHT);
+}
+
 /** Plan point (x, z) as lat/lon. */
 function planLL(x: number, z: number) {
   return latLonFromDir(planToDir(x, z));
@@ -48,7 +70,7 @@ export const SHOTS: Record<string, ShotDef> = {
   // Pitched up to −24° (the curve's −35° puts everything above the 16 m eye out of frame): from the
   // viewpoint's 58–70 m the plateau's curve drops the whole clock tower into view (A2).
   rooftops: { about: 'rooftop height (16 m), in over downtown at the clock tower', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24) },
-  street: { about: 'FPV on a city sidewalk', view: (ctx) => viewAt(ctx.world.city.viewpoints.street, EYE_HEIGHT) },
+  street: { about: "FPV on a city sidewalk (A2's viewpoint, stepped off a lamp pole's line)", view: streetView },
   horizon: { about: '6 m up at the plateau edge, looking along the curve', view: (ctx) => viewAt(ctx.world.city.viewpoints.horizon, 6) },
   night: {
     about: 'orbit over the city at local midnight (the constellation)',
@@ -58,10 +80,12 @@ export const SHOTS: Record<string, ShotDef> = {
   approach: {
     about: 'the dive at ~12 m, gliding in down the street toward the landing (A4)',
     view: (ctx) => diveAt(ctx, 0.7),
+    t: DIVE_T0 + 0.7 * DIVE_SECONDS,
   },
   landing: {
-    about: "the dive's last frame: its own landing on a sunlit street (A4; the /play loop point)",
+    about: "the dive's last frame: its own landing on a sunlit downtown corner (A4; the /play loop point, at the clip's end time)",
     view: (ctx) => diveAt(ctx, 1),
+    t: DIVE_T0 + DIVE_SECONDS,
   },
   cloudscape: {
     about: 'across the cloud layer from its top (46 m), toward the clouds-shot anchors: crowns, bellies, rims (A3)',
@@ -96,7 +120,7 @@ export function divePath(ctx: LBContext): DivePath {
  * The scripted descent at u ∈ [0, 1] (camera/dive.ts): from orbit down through the cloud layer,
  * gliding in along a street to land at eye height on the dive's own landing (camera/landing.ts:
  * the best sunlit pavement spot with a long view down the street), facing down it.
- * Render it at DIVE_SECONDS × fps frames with glide = 1 / fps.
+ * Render it at DIVE_SECONDS × fps + 1 frames with glide = 1 / fps, the sim starting at DIVE_T0.
  */
 export function diveAt(ctx: LBContext, u: number): ViewSpec {
   const p = divePoseAt(divePath(ctx), u, _pose);

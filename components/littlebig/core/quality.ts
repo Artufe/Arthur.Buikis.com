@@ -15,7 +15,17 @@ export function detectQuality(search: string): Quality {
   return coarse || cores <= 4 || mem <= 4 ? 'low' : 'high';
 }
 
+/**
+ * The session's settings: the tier's, with `low` on a coarse pointer (a phone or tablet, DPR 2-3)
+ * capped at DPR 1.25: −30 % pixels against 1.5 for a frame that is mostly flat toon colour and ink.
+ */
+export function qualitySettings(quality: Quality): QualitySettings {
+  const q = QUALITY[quality];
+  const coarse = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches ?? false);
+  return quality === 'low' && coarse ? { ...q, maxDpr: Math.min(q.maxDpr, 1.25) } : q;
+}
+
 export const QUALITY: Record<Quality, QualitySettings> = {
-  high: { maxDpr: 2, shadowMapSize: 2048, terrainDetail: 6, antialias: true, density: 1, post: true },
-  low: { maxDpr: 1.5, shadowMapSize: 1024, terrainDetail: 6, antialias: false, density: 0.45, post: false },
+  high: { maxDpr: 2, shadowMapSize: 2048, terrainDetail: 6, antialias: false, density: 1, post: true },
+  low: { maxDpr: 1.5, shadowMapSize: 1024, terrainDetail: 5, antialias: false, density: 0.45, post: false },
 };

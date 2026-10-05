@@ -19,12 +19,14 @@
 import { BufferAttribute, BufferGeometry, Vector2 } from 'three';
 import type { LBContext, System } from '../core/contracts';
 import { R } from '../world/config';
+import { chunkedMesh, terrainChunkBounds, type ChunkedMesh } from './chunked';
 import { faceColor, vertexColors } from './colors';
 import { terrainData } from './data';
 import { extendToon, grazingShadows, LOW_LIGHT_GRADE } from './shader-ext';
 
 export function createTerrainSystem(): System {
   let geometry: BufferGeometry | null = null;
+  let chunks: ChunkedMesh | null = null;
   return {
     name: 'terrain',
     stage: 1,
@@ -136,10 +138,16 @@ varying float vSnow;`,
         },
       });
       extendToon(mat, grazingShadows);
-      const mesh = ctx.toon.mesh(geometry, mat, { cast: true, receive: true });
-      ctx.scene.add(mesh);
+      // Only the chunks in view (and just outside it, for shadows cast into view) are drawn.
+      chunks = chunkedMesh(ctx, geometry, mat, terrainChunkBounds(t), tris, { cast: true, receive: true, inflate: 40 });
+      for (const m of chunks.meshes) ctx.scene.add(m);
+    },
+    update(ctx: LBContext) {
+      chunks?.update(ctx);
     },
     dispose() {
+      chunks?.dispose();
+      chunks = null;
       geometry?.dispose();
       geometry = null;
     },

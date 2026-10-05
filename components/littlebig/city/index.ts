@@ -12,6 +12,8 @@ import type { LBContext, System } from '../core/contracts';
 import { CITY_PLAN_RADIUS } from '../world/config';
 import { fromSphere } from '../world/city/frame';
 import type { Building, CityIndex } from '../world/city/types';
+import { v3 } from '../world/sphere';
+import { CITY_DIR, nightFactor, sunDirection } from '../world/sun';
 import { buildBuilding, type BuildCtx } from './buildings';
 import { Geo } from './geo';
 import { buildGround } from './ground';
@@ -54,15 +56,20 @@ export function createCitySystem(): System {
   let lights: CityLights | null = null;
   let revealStart = 0;
   const vp = new Vector2();
+  // How late in the night it is over the city (night both 60 s ago and 40 s ahead, as the people
+  // thin out): dims the share of lit windows on every city material and the window sparks.
+  const late = { value: 0 };
+  const sd = v3();
+  const nightAt = (t: number) => nightFactor(CITY_DIR, sunDirection(t, sd));
   return {
     name: 'city',
     stage: 2,
     async init(ctx: LBContext) {
       const plan = ctx.world.city;
       const index = ctx.world.cityIndex;
-      const buildMat = ctx.toon.material({ name: 'city', vertexColors: true, reveal: 'instance', revealDuration: 0.8, rim: 0.32, patch: cityPatch(false) });
-      const groundMat = ctx.toon.material({ name: 'city:ground', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true) });
-      const paintMat = ctx.toon.material({ name: 'city:paint', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true) });
+      const buildMat = ctx.toon.material({ name: 'city', vertexColors: true, reveal: 'instance', revealDuration: 0.8, rim: 0.32, patch: cityPatch(false, late) });
+      const groundMat = ctx.toon.material({ name: 'city:ground', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true, late) });
+      const paintMat = ctx.toon.material({ name: 'city:paint', vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.0, patch: cityPatch(true, late) });
       paintMat.polygonOffset = true;
       paintMat.polygonOffsetFactor = -1;
       paintMat.polygonOffsetUnits = -4;
@@ -125,7 +132,7 @@ export function createCitySystem(): System {
       groundMesh.renderOrder = -2;
       paintMesh.renderOrder = -1;
       ctx.scene.add(groundMesh, paintMesh, buildMesh);
-      lights = buildPools(ctx, plan, index, facades);
+      lights = buildPools(ctx, plan, index, facades, late);
       ctx.scene.add(lights.pools, lights.points);
       await ctx.yield();
 
@@ -144,6 +151,7 @@ export function createCitySystem(): System {
     },
     update(ctx) {
       if (!lights) return;
+      late.value = nightAt(ctx.time.t - 60) * nightAt(ctx.time.t + 40);
       if (lights.poolMat.uniforms.uReveal.value < 1) {
         const v = ctx.reveal.progress(revealStart + BUILD_START + BUILD_SPREAD * 0.5, 1.2);
         lights.poolMat.uniforms.uReveal.value = v;

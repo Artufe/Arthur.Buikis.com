@@ -28,6 +28,10 @@ const AWNINGS = [new Color('#E2543F'), new Color('#2F8F8A'), new Color('#F2A93B'
 const CREAM = new Color('#FFF6E4');
 const METAL = new Color('#8C93A3');
 const DARK = new Color('#3B3F4C');
+const INK = new Color('#2A2342');
+const SUNSET = new Color('#F28A5B');
+const SEA = new Color('#2F6FB8');
+const _hsl = { h: 0, s: 0, l: 0 };
 const GLASS_DOOR = new Color('#26384A');
 const PIPE = new Color('#6E7482');
 const SKY_GLASS = new Color('#9FD3F2');
@@ -148,25 +152,129 @@ function downpipe(g: Geo, xf: Xf, x: number, z: number, top: number) {
 
 /** A painted ad panel on a side wall facing ±x at x = xw (face sign sx), centred on zc. */
 function adPanel(g: Geo, xf: Xf, xw: number, sx: number, zc: number, y0: number, w: number, h: number, rng: Rng) {
-  const c1 = AWNINGS[rng.int(0, AWNINGS.length - 1)];
-  const c2 = AWNINGS[rng.int(0, AWNINGS.length - 1)];
   g.kind = K.plain;
   const x0 = sx > 0 ? xw : xw - 0.06;
-  const x1 = sx > 0 ? xw + 0.06 : xw;
-  g.color.copy(CREAM);
-  g.box(xf, x0, x1, y0, y0 + h, zc - w / 2, zc + w / 2, 0, { bottom: true });
-  const xi0 = sx > 0 ? x1 : x0 - 0.02;
-  const xi1 = sx > 0 ? x1 + 0.02 : x0;
-  g.color.copy(c1);
-  g.box(xf, xi0, xi1, y0 + 0.15, y0 + h - 0.15, zc - w / 2 + 0.15, zc + w / 2 - 0.15, 0);
-  // a big dot and a stripe: a cartoon logo
-  g.color.copy(CREAM);
-  const xj0 = sx > 0 ? xi1 : xi0 - 0.02;
-  const xj1 = sx > 0 ? xi1 + 0.02 : xi0;
-  g.box(xf, xj0, xj1, y0 + h * 0.3, y0 + h * 0.75, zc - w * 0.32, zc - w * 0.32 + h * 0.45, 0.12);
-  g.color.copy(c2);
-  g.box(xf, xj0, xj1, y0 + h * 0.35, y0 + h * 0.5, zc - w * 0.02, zc + w * 0.38, 0);
+  g.color.copy(INK);
+  g.box(xf, x0, x0 + 0.06, y0, y0 + h, zc - w / 2, zc + w / 2, 0.03, { bottom: true });
+  poster(g, xf, (a, y, k, out) => {
+    out[0] = xw + sx * (0.065 + 0.02 * k);
+    out[1] = y0 + y;
+    out[2] = zc + sx * a;
+  }, [sx, 0, 0], w, h, rng);
 }
+
+/** Maps poster coordinates (a across from −w/2, y up from 0, layer k) to local xyz. */
+type PosterMap = (a: number, y: number, k: number, out: number[]) => void;
+const _pp = [0, 0, 0];
+const POSTER_BG = [new Color('#8EC9F0'), new Color('#FFF1D6'), new Color('#E2543F'), new Color('#F2CC5B'), new Color('#3D9CA8'), new Color('#A99CDA')];
+
+/**
+ * An illustrated poster (flat shapes on an ink border), one of four motifs: a sun setting over the
+ * sea, a curling wave, a soda bottle with a bold title, a two-colour diagonal stripe with a dot.
+ */
+function poster(g: Geo, xf: Xf, at: PosterMap, face: [number, number, number], w: number, h: number, rng: Rng) {
+  const m = rng.int(0, 3);
+  const hw = w / 2 - 0.09;
+  const y0 = 0.09;
+  const y1 = h - 0.09;
+  const ph = y1 - y0;
+  /** A convex polygon (poster coords a, y pairs, fanned from the first point) on layer k. */
+  const poly = (pts: number[], k: number, c: Color) => {
+    g.color.copy(c);
+    const p: number[] = [];
+    for (let i = 0; i < pts.length; i += 2) {
+      at(Math.max(-hw, Math.min(hw, pts[i])), Math.max(y0, Math.min(y1, pts[i + 1])), k, _pp);
+      p.push(_pp[0], _pp[1], _pp[2]);
+    }
+    for (let i = 3; i + 5 < p.length; i += 3) g.triL(xf, [p[0], p[1], p[2], p[i], p[i + 1], p[i + 2], p[i + 3], p[i + 4], p[i + 5]], [0, 0, 1, 0, 1, 1], face);
+  };
+  const rect = (a0: number, a1: number, b0: number, b1: number, k: number, c: Color) => poly([a0, b0, a1, b0, a1, b1, a0, b1], k, c);
+  const disc = (ca: number, cy: number, r: number, k: number, c: Color) => {
+    const pts: number[] = [];
+    for (let i = 0; i < 14; i++) pts.push(ca + Math.cos((i / 14) * Math.PI * 2) * r, cy + Math.sin((i / 14) * Math.PI * 2) * r);
+    poly(pts, k, c);
+  };
+  /** A band from the poster's foot up to a wavy top edge (one convex slice per segment). */
+  const wave = (top: number, amp: number, ph0: number, k: number, c: Color) => {
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      const a0 = -hw + (2 * hw * i) / n;
+      const a1 = -hw + (2 * hw * (i + 1)) / n;
+      const t0 = top + amp * Math.sin(ph0 + (i / n) * Math.PI * 3);
+      const t1 = top + amp * Math.sin(ph0 + ((i + 1) / n) * Math.PI * 3);
+      poly([a0, y0, a1, y0, a1, t1, a0, t0], k, c);
+    }
+  };
+  if (m === 0) {
+    // sunset over the sea
+    rect(-hw, hw, y0, y1, 0, POSTER_BG[3]);
+    rect(-hw, hw, y0 + ph * 0.62, y1, 1, SUNSET);
+    disc(-hw * 0.2, y0 + ph * 0.5, ph * 0.24, 2, CREAM);
+    wave(y0 + ph * 0.36, ph * 0.04, 0.4, 3, SEA);
+    rect(-hw * 0.38, -hw * 0.02, y0 + ph * 0.22, y0 + ph * 0.26, 4, CREAM);
+    rect(-hw * 0.3, -hw * 0.1, y0 + ph * 0.12, y0 + ph * 0.15, 4, CREAM);
+  } else if (m === 1) {
+    // a curling wave under a little sun
+    rect(-hw, hw, y0, y1, 0, POSTER_BG[1]);
+    disc(hw * 0.55, y0 + ph * 0.74, ph * 0.13, 1, AWNINGS[2]);
+    wave(y0 + ph * 0.5, ph * 0.1, 0, 1, AWNINGS[1]);
+    wave(y0 + ph * 0.3, ph * 0.07, 2.2, 2, SEA);
+    wave(y0 + ph * 0.13, ph * 0.04, 1.1, 3, SKY_GLASS);
+  } else if (m === 2) {
+    // a soda bottle and a bold title
+    const bg = rng.chance(0.5) ? AWNINGS[0] : AWNINGS[3];
+    rect(-hw, hw, y0, y1, 0, bg);
+    const ba = -hw + Math.min(hw * 0.5, ph * 0.32);
+    const bw = ph * 0.11;
+    rect(ba - bw, ba + bw, y0 + ph * 0.1, y0 + ph * 0.56, 1, CREAM);
+    poly([ba - bw, y0 + ph * 0.56, ba + bw, y0 + ph * 0.56, ba + bw * 0.42, y0 + ph * 0.7, ba - bw * 0.42, y0 + ph * 0.7], 1, CREAM);
+    rect(ba - bw * 0.42, ba + bw * 0.42, y0 + ph * 0.7, y0 + ph * 0.84, 1, CREAM);
+    rect(ba - bw * 0.5, ba + bw * 0.5, y0 + ph * 0.84, y0 + ph * 0.9, 2, INK);
+    rect(ba - bw, ba + bw, y0 + ph * 0.28, y0 + ph * 0.42, 2, AWNINGS[2]);
+    const t0 = ba + bw + ph * 0.18;
+    rect(t0, hw - 0.1, y0 + ph * 0.52, y0 + ph * 0.74, 1, CREAM);
+    rect(t0, t0 + (hw - 0.1 - t0) * 0.7, y0 + ph * 0.3, y0 + ph * 0.4, 1, CREAM);
+  } else {
+    // a bold two-colour diagonal stripe and a dot
+    const bg = POSTER_BG[rng.int(0, POSTER_BG.length - 1)];
+    rect(-hw, hw, y0, y1, 0, bg);
+    const c2 = bg === AWNINGS[0] || bg === POSTER_BG[2] ? AWNINGS[1] : AWNINGS[0];
+    const k = ph * 0.9;
+    poly([-hw * 0.3, y0, -hw * 0.3 + ph * 0.4, y0, -hw * 0.3 + ph * 0.4 + k, y1, -hw * 0.3 + k, y1], 1, c2);
+    poly([-hw * 0.3 + ph * 0.48, y0, -hw * 0.3 + ph * 0.6, y0, -hw * 0.3 + ph * 0.6 + k, y1, -hw * 0.3 + ph * 0.48 + k, y1], 1, CREAM);
+    disc(-hw * 0.62, y0 + ph * 0.66, ph * 0.17, 2, CREAM);
+  }
+}
+
+/**
+ * Sign lettering on a board facing −z at z = zf (local x from a0 to a1, cap band y0..y1): words of
+ * chunky rounded glyph blocks — mostly x-height, some ascenders, a capital to start each word.
+ */
+function lettering(g: Geo, xf: Xf, a0: number, a1: number, y0: number, y1: number, zf: number, ink: Color, rng: Rng) {
+  g.color.copy(ink);
+  const H = y1 - y0;
+  const xh = H * 0.62;
+  let x = a0;
+  let start = true;
+  let left = 3 + rng.int(0, 3);
+  while (x < a1 - H * 0.3) {
+    const cap = start;
+    const tall = cap || rng.chance(0.22);
+    const w = H * (cap ? 0.58 : 0.34 + rng.float() * 0.2);
+    if (x + w > a1) break;
+    g.box(xf, x, x + w, y0, y0 + (tall ? H : xh), zf - 0.025, zf, 0, { top: tall });
+    x += w + H * 0.12;
+    start = false;
+    if (--left <= 0) {
+      x += H * 0.4; // word gap
+      start = true;
+      left = 3 + rng.int(0, 4);
+    }
+  }
+}
+
+/** Ink colour for lettering on a board of colour c: dark on light boards, cream on dark ones. */
+const inkOn = (c: Color) => (c.r * 0.3 + c.g * 0.59 + c.b * 0.11 > 0.55 ? INK : CREAM);
 
 // ── Towers, offices, mid-rise: a recessed shop floor, stacked tiers, cornices, roof clutter ──
 
@@ -299,13 +407,8 @@ function cafeFront(g: Geo, xf: Xf, b: Building, x0: number, x1: number, zf: numb
   g.box(xf, x0 + 0.4, x1 - 0.4, gy - 0.95, gy - 0.25, zf - 0.08, zf, 0, { bottom: true });
   g.color.copy(col);
   g.box(xf, x0 + 0.5, x1 - 0.5, gy - 0.88, gy - 0.32, zf - 0.1, zf - 0.08, 0);
-  g.color.copy(CREAM);
-  let x = -Math.min(2.4, (x1 - x0) / 2 - 1);
-  while (x < Math.min(2.4, (x1 - x0) / 2 - 1)) {
-    const w = 0.18 + rng.float() * 0.22;
-    g.box(xf, x, x + w, gy - 0.78, gy - 0.42, zf - 0.12, zf - 0.1, 0);
-    x += w + 0.1 + (rng.chance(0.15) ? 0.25 : 0);
-  }
+  const half = Math.min(2.4, (x1 - x0) / 2 - 1);
+  lettering(g, xf, -half, half, gy - 0.78, gy - 0.42, zf - 0.1, inkOn(col), rng);
   // door
   entrance(g, xf, Math.max(x0 + 1.2, Math.min(x1 - 1.2, door)), zf, 0, CREAM, col, false);
   // blade sign on a bracket at the front corner, projecting toward the street side
@@ -515,12 +618,13 @@ function roofClutter(g: Geo, xf: Xf, b: Building, rng: Rng, hw: number, hd: numb
     const zb = -hd + 0.9;
     g.color.copy(DARK);
     for (const sx of [-bw * 0.35, bw * 0.35]) g.box(xf, sx - 0.07, sx + 0.07, y, y + 1.2, zb - 0.07, zb + 0.07, 0, { top: false });
-    g.color.copy(CREAM);
-    g.box(xf, -bw / 2, bw / 2, y + 1.1, y + 2.75, zb - 0.06, zb + 0.06, 0, { bottom: true });
-    g.color.copy(AWNINGS[rng.int(0, AWNINGS.length - 1)]);
-    g.box(xf, -bw / 2 + 0.12, bw / 2 - 0.12, y + 1.22, y + 2.63, zb - 0.09, zb - 0.06, 0);
-    g.color.copy(WHITE);
-    g.box(xf, -bw * 0.32, bw * 0.05, y + 1.65, y + 2.2, zb - 0.11, zb - 0.09, 0.1);
+    g.color.copy(INK);
+    g.box(xf, -bw / 2, bw / 2, y + 1.1, y + 2.75, zb - 0.06, zb + 0.06, 0.03, { bottom: true });
+    poster(g, xf, (a, py, k, out) => {
+      out[0] = a;
+      out[1] = y + 1.1 + py;
+      out[2] = zb - 0.065 - 0.02 * k;
+    }, [0, 0, -1], bw, 1.65, rng);
   }
   if (b.style === 'tower' && b.h >= 26) {
     const mx = hw * 0.35;
@@ -724,14 +828,7 @@ function shop(g: Geo, xf: Xf, b: Building, rng: Rng, ctx: BuildCtx) {
     g.color.copy(sign);
     g.kind = K.plain;
     g.box(xf, -hw * 0.7, hw * 0.7, gy - 0.05, gy + 0.55, front - 0.12, front, 0, { bottom: true });
-    // lettering on the sign
-    g.color.copy(CREAM);
-    let x = -hw * 0.55;
-    while (x < hw * 0.55 - 0.3) {
-      const w = 0.16 + rng.float() * 0.2;
-      g.box(xf, x, x + w, gy + 0.08, gy + 0.42, front - 0.14, front - 0.12, 0);
-      x += w + 0.1;
-    }
+    lettering(g, xf, -hw * 0.55, hw * 0.55, gy + 0.1, gy + 0.42, front - 0.12, inkOn(sign), rng);
     wrapAwning(gy - 0.25, AWNINGS[rng.int(0, AWNINGS.length - 1)]);
     entrance(g, xf, Math.max(-hw + 1.1, Math.min(hw - 1.1, b.door ?? 0)), front, 0, trim, sign, false);
   }
@@ -866,13 +963,7 @@ function cornerShop(g: Geo, xf: Xf, b: Building, rng: Rng, ctx: BuildCtx) {
   g.color.copy(sign);
   g.kind = K.plain;
   g.box(xf, -hw * 0.75, hw * 0.75, gy + 0.2, gy + 0.85, zf - 0.1, zf, 0, { bottom: true });
-  g.color.copy(CREAM);
-  let x = -hw * 0.6;
-  while (x < hw * 0.6 - 0.3) {
-    const w = 0.16 + rng.float() * 0.2;
-    g.box(xf, x, x + w, gy + 0.33, gy + 0.72, zf - 0.12, zf - 0.1, 0);
-    x += w + 0.1;
-  }
+  lettering(g, xf, -hw * 0.6, hw * 0.6, gy + 0.35, gy + 0.7, zf - 0.1, inkOn(sign), rng);
   {
     // the awning along the front, wrapping (mitred) down the street sides under the eaves
     const pts: number[] = [];
@@ -934,7 +1025,10 @@ function house(g: Geo, xf: Xf, b: Building, rng: Rng) {
   if (b.roof === 'hip') hipRoof(g, xf, hw + eave, hd + eave, wallH, rise * 0.85, roofC);
   else gableRoof(g, xf, hw + eave, hd + eave, hw, hd, wallH, rise, roofC, wall, alongX);
   const dx = doorX(b);
-  g.color.copy(AWNINGS[rng.int(0, AWNINGS.length - 1)]);
+  // a painted door, a third of the way toward the wall's own colour and at most half saturated (a
+  // pure awning blue read as a violet-blue hole next to a crimson wall at dusk)
+  g.color.copy(AWNINGS[rng.int(0, AWNINGS.length - 1)]).lerp(wall, 0.35).getHSL(_hsl);
+  g.color.setHSL(_hsl.h, Math.min(_hsl.s, 0.5), _hsl.l * 0.9);
   g.box(xf, dx - 0.5, dx + 0.5, 0.2, 2.25, -hd - 0.06, -hd + 0.02, 0, { bottom: false });
   g.color.copy(CREAM);
   g.box(xf, dx - 0.8, dx + 0.8, 2.4, 2.55, -hd - 0.38, -hd, 0, { bottom: true });
@@ -1204,17 +1298,40 @@ function stadium(g: Geo, xf: Xf, b: Building) {
     const a1 = ((i + 1) / 16) * Math.PI * 2;
     line(Math.cos(a0) * 2.4, Math.sin(a0) * 2.4, Math.cos(a1) * 2.4, Math.sin(a1) * 2.4);
   }
+  // Floodlight masts: a dark lamp bank (2 × 4 lamps) tipped down toward the centre spot.
   const masts = stadiumMasts(b);
   for (let mi = 0; mi < masts.length; mi += 2) {
     const mx = masts[mi];
     const mz = masts[mi + 1];
     g.color.copy(METAL);
     g.kind = K.plain;
-    g.cylinder(xf, mx, mz, 0.14, 0, top + 2.4, 6, false);
+    g.param = 0;
+    g.cylinder(xf, mx, mz, 0.14, 0, top + 2.2, 6, false);
+    const l = Math.hypot(mx, mz) || 1;
+    const nx = -mx / l, nz = -mz / l; // toward the pitch
+    const tx = -nz, tz = nx;
+    const ca = Math.cos(0.45), sa = Math.sin(0.45);
+    // facing f = n·cos − up·sin; panel up u = n·sin + up·cos
+    const fx = nx * ca, fy = -sa, fz = nz * ca;
+    const ux = nx * sa, uy = ca, uz = nz * sa;
+    const cx = mx + nx * 0.2, cy = top + 2.3, cz = mz + nz * 0.2;
+    const P = (a: number, v: number, d: number): number[] => [cx + tx * a + ux * v + fx * d, cy + uy * v + fy * d, cz + tz * a + uz * v + fz * d];
+    const quad = (a0: number, a1: number, v0: number, v1: number, d: number, face: [number, number, number]) =>
+      g.quadL(xf, [...P(a0, v0, d), ...P(a1, v0, d), ...P(a1, v1, d), ...P(a0, v1, d)], [0, 0, 1, 0, 1, 1, 0, 1], face);
+    g.color.copy(INK);
+    quad(-0.85, 0.85, -0.5, 0.5, 0, [fx, fy, fz]);
+    g.color.copy(METAL);
+    quad(-0.85, 0.85, -0.5, 0.5, -0.1, [-fx, -fy, -fz]);
+    quad(-0.85, 0.85, 0.5, 0.5, 0, [ux, uy, uz]);
+    g.box(xf, mx - 0.08, mx + 0.08, top + 2.05, top + 2.25, mz - 0.08, mz + 0.08, 0);
     g.color.set('#FFF4D6');
     g.kind = K.glow;
     g.param = 1.8;
-    g.box(xf, mx - 0.7, mx + 0.7, top + 2.2, top + 2.9, mz - 0.2, mz + 0.2, 0);
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+      const a0 = -0.75 + c * 0.39;
+      const v0 = -0.4 + r * 0.42;
+      quad(a0, a0 + 0.3, v0, v0 + 0.36, 0.02, [fx, fy, fz]);
+    }
     g.kind = K.plain;
     g.param = 0;
   }

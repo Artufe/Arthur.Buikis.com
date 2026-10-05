@@ -7,7 +7,12 @@
 //   node scripts/littlebig-shot.mjs --view 20,10,16,45,-30 --t 120 --out a.png     lat,lon,alt,heading,pitch (deg; pitch optional)
 //   node scripts/littlebig-shot.mjs --shot street --seq 8 --interval 0.25 --out seq/   frame sequence (sim time steps)
 //   node scripts/littlebig-shot.mjs --dive 48 --out dive/                            scripted orbit → street descent
-//   node scripts/littlebig-shot.mjs --shot city --perf 240 --size 1280x800          frame-time JSON (serial CPU+GPU ms)
+//   node scripts/littlebig-shot.mjs --dive 301 --t 0 --size 1280x800 --out clip/     the /play clip: 30 fps, the true path,
+//                                                    the world moving (frames are diveSeconds/(N−1) apart in camera AND sim time)
+//   node scripts/littlebig-shot.mjs --shot city,street --perf 90 --reps 5 --size 1280x800   frame-time JSON lines: best-of-reps
+//                                                    net (≈ quiet GPU) + median of reps; serial CPU+GPU ms
+//   node scripts/littlebig-shot.mjs --shot street --perf 60 --reps 7 --ab 'noink:post.ink=0;nopost:post.on=false'
+//                                                    paired A/B: variants interleaved per round, deltaNet = median of per-round diffs
 //   node scripts/littlebig-shot.mjs --dive 120 --perf 1 --size 1280x800              per-frame cost along the descent
 //   node scripts/littlebig-shot.mjs --boot                                            startup timeline per stage
 //   node scripts/littlebig-shot.mjs --list                                            named shots
@@ -22,6 +27,7 @@
 // listener growth and engines that are never garbage-collected.
 
 import { chromium } from '@playwright/test';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -46,6 +52,10 @@ const ext = flags.jpg ? 'jpg' : 'png';
 
 const search = new URLSearchParams({ shot: '1', q });
 if (flags.cold) search.set('cold', '1'); // defeat shader caches: first-visit compile timings
+// Timing runs measure the production path: three's shader error check (on in dev for readable GLSL
+// errors) costs synchronous GPU round trips at each program's first use. --p core.shaderChecks=true
+// puts it back.
+if (flags.boot || flags.perf || flags.cold) search.set('p.core.shaderChecks', 'false');
 for (const kv of multi.p) {
   const s = String(kv);
   const i = s.indexOf('=');
@@ -56,6 +66,15 @@ const browser = await chromium.launch({
   headless: !flags.headed,
   args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-webgl', ...(flags.leak ? ['--js-flags=--expose-gc'] : [])],
 });
+// Other headless browsers on the machine (other agents' review runs) share the GPU: perf warns.
+const busy = (() => {
+  try {
+    const out = execSync('ps -axo command', { encoding: 'utf8' });
+    return Math.max(0, out.split('\n').filter((l) => /headless|chrome-headless-shell/i.test(l) && !/--type=/.test(l)).length - 1);
+  } catch {
+    return 0;
+  }
+})();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 const logs = [];
 page.on('console', (m) => {
@@ -185,7 +204,12 @@ try {
   // ── dive ──
   if (flags.dive) {
     const n = Math.max(2, Number(flags.dive === true ? 48 : flags.dive));
-    const glide = Number(flags.interval ?? 1 / 30);
+    // Frames are diveSeconds / (n − 1) apart on the real dive clock: the camera's ground reference
+    // glides and the sim (cars, people, planes, clouds) advances by that much per frame. --interval
+    // overrides it (e.g. a short --dive with a 30 fps glide, which is then NOT the true path).
+    const diveSeconds = await page.evaluate(() => window.__littlebig.diveSeconds ?? 10);
+    const glide = Number(flags.interval ?? diveSeconds / (n - 1));
+    console.log(`dive: ${n} frames, ${glide.toFixed(4)} s apart (${(1 / glide).toFixed(1)} fps), sim from t=${flags.t ?? 0}`);
     if (flags.perf) {
       const res = await page.evaluate(async ({ n, glide }) => {
         const h = window.__littlebig;
@@ -198,7 +222,7 @@ try {
         for (let i = 0; i < n + 10; i++) {
           const u = Math.max(0, i - 10) / (n - 1);
           const a = performance.now();
-          h.dive(u, glide);
+          h.dive(u, i <= 10 ? 0 : glide);
           gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
           if (i >= 10) ts.push(performance.now() - a);
           calls = Math.max(calls, h.ctx.renderer.info.render.calls);
@@ -220,7 +244,7 @@ try {
 
   // ── shots / custom view ──
   const names = flags.shot ? String(flags.shot).split(',') : flags.view ? ['view'] : [];
-  for (const name of names) {
+  const apply = async (name) => {
     if (name === 'view') {
       const [lat, lon, alt, heading, pitch] = String(flags.view).split(',').map(Number);
       const v = { lat, lon, alt, heading: heading || 0 };
@@ -231,14 +255,69 @@ try {
       if (!ok) throw new Error(`unknown shot "${name}" (try --list)`);
     }
     if (flags.t !== undefined) await page.evaluate((t) => window.__littlebig.setTime(t), Number(flags.t));
+  };
 
-    if (flags.perf) {
-      const frames = Number(flags.perf === true ? 240 : flags.perf);
-      const res = await page.evaluate((f) => window.__littlebig.perf(f), frames);
-      const state = await page.evaluate(() => window.__littlebig.state());
-      console.log(JSON.stringify({ shot: name, size: `${W}x${H}`, q, alt: +state.alt.toFixed(2), ...res }, null, 2));
-      continue;
+  // ── perf: best-of-N short runs, interleaved across shots (and --ab variants) ──
+  // A single run on a GPU shared with other headless browsers swings ~2×; the best (lowest net) of
+  // several short runs approximates a quiet GPU, the median of runs shows the noise. --ab pairs
+  // variants inside each round, so drift cancels in the per-round difference.
+  if (flags.perf && names.length) {
+    const frames = Number(flags.perf === true ? 90 : flags.perf);
+    const reps = Math.max(1, Number(flags.reps ?? 5));
+    const variants = [{ name: 'base', set: {} }];
+    if (flags.ab) {
+      for (const spec of String(flags.ab).split(';').filter(Boolean)) {
+        const [vname, body = ''] = spec.includes(':') ? [spec.slice(0, spec.indexOf(':')), spec.slice(spec.indexOf(':') + 1)] : [spec, spec];
+        const set = {};
+        for (const kv of body.split(',').filter(Boolean)) {
+          const [k, v] = kv.split('=');
+          set[k] = v === 'true' ? true : v === 'false' ? false : Number(v);
+        }
+        variants.push({ name: vname, set });
+      }
     }
+    if (busy > 0) console.log(`warning: ${busy} other headless browser(s) running: the GPU is shared, numbers are noisy (record budget numbers on a quiet machine)`);
+    const runs = {};
+    for (let r = 0; r < reps; r++) {
+      for (const name of names) {
+        for (const v of variants) {
+          await apply(name);
+          const res = await page.evaluate(async ({ f, set }) => {
+            const h = window.__littlebig;
+            const before = {};
+            for (const [k, x] of Object.entries(set)) {
+              before[k] = h.params.get(k);
+              if (!h.params.set(k, x)) throw new Error(`unknown param ${k}`);
+            }
+            const p = await h.perf(f);
+            for (const [k, x] of Object.entries(before)) h.params.set(k, x);
+            return { ...p, alt: h.state().alt };
+          }, { f: frames, set: v.set });
+          (runs[`${name}|${v.name}`] ??= []).push(res);
+        }
+      }
+    }
+    const med = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1];
+    const r2 = (x) => Math.round(x * 100) / 100;
+    for (const name of names) {
+      const baseRuns = runs[`${name}|base`];
+      for (const v of variants) {
+        const rs = runs[`${name}|${v.name}`];
+        const best = rs.reduce((a, b) => (b.net < a.net ? b : a));
+        const out = {
+          shot: name, variant: v.name, size: `${W}x${H}`, q, alt: r2(best.alt), reps, frames,
+          bestNet: r2(best.net), medianNet: r2(med(rs.map((x) => x.net))),
+          best: { median: r2(best.median), p95: r2(best.p95), max: r2(best.max), baseline: r2(best.baseline), hitches: best.hitches },
+          drawCalls: best.drawCalls, triangles: best.triangles, programs: best.programs, raf: best.raf,
+        };
+        if (v.name !== 'base') out.deltaNet = r2(med(rs.map((x, i) => x.net - baseRuns[i].net)));
+        console.log(JSON.stringify(out));
+      }
+    }
+  }
+
+  for (const name of flags.perf ? [] : names) {
+    await apply(name);
     if (flags.seq) {
       const n = Number(flags.seq);
       const interval = Number(flags.interval ?? 0.25);

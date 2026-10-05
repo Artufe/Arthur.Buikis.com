@@ -5,8 +5,11 @@
 //     biome (majority; ties → the median-height corner), never the corner mean (sand + grass would
 //     average to olive), evaluated with the facet's own slope, so a boundary is a clean low-poly
 //     staircase. Value jitter comes mostly from a low-frequency field (neighbours match: soft
-//     patches, not a checkerboard), with only ±1.5 % per facet. Rock and snow facets are 'crisp':
+//     patches, not a checkerboard), with only ±1 % per facet. Rock and snow facets are 'crisp':
 //     the shader keeps them faceted at every distance (a toy mountain, not grey putty).
+// No per-facet speckle of any kind: a meadow is one clean sheet of facets (a speckle of yellow
+// facets read as a triangle mosaic from the rooftops to the cloud layer). Flowers live on the
+// ground-cover meshes; a flower field only warms the colour a few percent at a ≥ 20 m scale.
 
 import { Color, SRGBColorSpace } from 'three';
 import { PALETTE } from '../render/palette';
@@ -44,8 +47,8 @@ export const TERRAIN_COLORS = {
   grass: srgb(G.grass),
   meadow: srgb(G.meadow),
   lush: hex('#62BC4C'),
-  hollow: hex('#4FA845'),
-  bloom: hex('#D2E065'),
+  hollow: hex('#5BB04A'),
+  bloom: hex('#B4DC5E'),
   highGrass: hex('#6CB24E'),
   forestFloor: hex('#5DAE48'),
   rock: srgb(G.rock),
@@ -53,15 +56,15 @@ export const TERRAIN_COLORS = {
   rockCool: hex('#8F8D96'),
   snow: srgb(G.snow),
   snowShade: hex('#E4EEF9'),
-  /** Neutral base under the city (A2 draws every surface on top of it). */
-  city: hex('#93CC5E'),
+  /**
+   * Base under the city and on its outskirts: A2's garden lawn green (city/ground.ts), so the
+   * terrain between and around the gardens reads as the same lawn (A2 draws every surface on top).
+   */
+  city: hex('#8ACF55'),
 };
 
-/**
- * Flower speckle tints for meadow facets inside flower fields: buttercup and cowslip yellows (pinks
- * and lilacs mixed into green go grey, so those colours live on the flower meshes instead).
- */
-const BLOOMS: RGB[] = [hex('#F2DE52'), hex('#F7EC7A'), hex('#FFD84A'), hex('#EEF07C')];
+/** Flower fields warm the smooth colour faintly toward this (±3 %); the blooms are ground cover. */
+const WARM = hex('#C8D860');
 
 const C = TERRAIN_COLORS;
 
@@ -72,20 +75,33 @@ const C = TERRAIN_COLORS;
  */
 const FIELDS: Array<[number, RGB, number]> = [
   [0.24, hex('#8AD45C'), 0.55], // bright pasture
-  [0.46, hex('#5DB549'), 0.6], // deep pasture
+  [0.46, hex('#6CBB4C'), 0.55], // deep pasture
   [0.62, hex('#A6DB5E'), 0.35], // plain meadow (the palette's)
-  [0.8, hex('#C6DC70'), 0.7], // mown hay
-  [0.9, hex('#C2CF5E'), 0.75], // ripening barley (green-gold: never mistaken for the beach)
-  [1.01, hex('#9ED65A'), 0.5], // flower meadow: green, its facets speckled yellow / white (faceColor)
+  [0.8, hex('#BCDA6A'), 0.6], // mown hay
+  [0.9, hex('#B8D262'), 0.6], // ripening barley (green-gold: never mistaken for the beach)
+  [1.01, hex('#9ED65A'), 0.5], // flower meadow: green; the ground cover blooms in it
 ];
+/**
+ * On the town's outskirts (the plateau and its blend ring, under the dive's money frames) the
+ * fields are lawn-green variants only, a soft patchwork next to A2's gardens (no hay or barley).
+ */
+const TOWN_FIELDS: RGB[] = [hex('#8FD25A'), hex('#7EC651'), hex('#96D45C'), hex('#84CB54')];
 /** Hedgerow green: field borders, a facet wide, with bushes and the odd tree on them (nature). */
 const HEDGE = hex('#3E9443');
-const FLOWER_WHITE = hex('#F7F4E2');
 
-/** Field tint of a cell hash into out (no-op off farmland, hash < 0). */
-export function fieldTint(hash: number, out: RGB, k = 1): RGB {
+/**
+ * Field tint of a cell hash into out (no-op off farmland, hash < 0). `town` (0..1, the plateau
+ * weight) blends the cell toward its lawn-green outskirts variant.
+ */
+export function fieldTint(hash: number, out: RGB, town = 0): RGB {
   if (hash < 0) return out;
-  for (const [t, c, w] of FIELDS) if (hash < t) return mixInto(out, c, w * k);
+  if (town >= 1) return mixInto(out, TOWN_FIELDS[Math.floor(hash * 4)], 0.7);
+  for (const [t, c, w] of FIELDS) {
+    if (hash < t) {
+      mixInto(out, c, w * (1 - town));
+      return town > 0 ? mixInto(out, TOWN_FIELDS[Math.floor(hash * 4)], 0.7 * town) : out;
+    }
+  }
   return out;
 }
 
@@ -138,8 +154,9 @@ export function biomeColor(b: BiomeId, h: number, slope: number, moist: number, 
       out[1] = C.meadow[1];
       out[2] = C.meadow[2];
       mixInto(out, C.grass, smooth(0.3, 0.6, moist));
-      mixInto(out, C.bloom, 0.5 * smooth(0.6, 0.8, tone));
-      mixInto(out, C.hollow, 0.55 * (1 - smooth(0.2, 0.4, tone)));
+      // Wide, gentle ramps: on flat-coloured facets a steep tone ramp becomes a staircase.
+      mixInto(out, C.bloom, 0.3 * smooth(0.5, 0.85, tone));
+      mixInto(out, C.hollow, 0.35 * (1 - smooth(0.15, 0.45, tone)));
       return mixInto(out, C.highGrass, 0.45 * smooth(5, 14, h));
   }
 }
@@ -154,18 +171,17 @@ export function vertexColor(t: TerrainData, i: number, out: RGB): RGB {
   const slope = t.slope[i];
   biomeColor(b, h, slope, t.moist[i], t.tone[i], out);
   if (b === Biome.Grass || b === Biome.Meadow) {
-    // Flower fields tint the smooth colour faintly (the facets carry the speckle).
-    mixInto(out, BLOOMS[0], 0.16 * t.flower[i] * (1 - t.plateau[i]));
+    // Flower fields warm the colour a few percent (the blooms themselves are ground cover).
+    mixInto(out, WARM, 0.12 * t.flower[i] * (1 - t.plateau[i]));
     // Farmland patchwork and the hedgerow lines between the fields.
-    fieldTint(t.field[i], out);
+    fieldTint(t.field[i], out, t.plateau[i]);
     if (t.field[i] >= 0) mixInto(out, HEDGE, 0.5 * (1 - smooth(0.6, 2.2, t.hedge[i])));
   } else if (b === Biome.City) {
     // The plateau base under the city: meadow tone patches, so the first frame (before the city's
     // ground springs in) reads as landscape, not a flat disc.
     biomeColor(Biome.Meadow, 2, 0, t.moist[i], t.tone[i], _meadow);
-    mixInto(out, _meadow, 0.55);
-    mixInto(out, BLOOMS[0], 0.1 * t.flower[i]);
-    fieldTint(t.field[i], out);
+    mixInto(out, _meadow, 0.25);
+    fieldTint(t.field[i], out, 1);
     if (t.field[i] >= 0) mixInto(out, HEDGE, 0.5 * (1 - smooth(0.6, 2.2, t.hedge[i])));
   }
   // Steep faces turn rocky (not the beach, the city or snow).
@@ -220,9 +236,9 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
   }
   const meadow = dom === Biome.Grass || dom === Biome.Meadow;
   if (dom === Biome.City) {
-    // Plateau base: the same meadow patches and flower speckle as the countryside (see vertexColor).
+    // Plateau base: lawn green with a hint of the countryside's meadow patches (see vertexColor).
     biomeColor(Biome.Meadow, 2, 0, moist, tone, _meadow);
-    mixInto(out, _meadow, 0.55);
+    mixInto(out, _meadow, 0.25);
   }
   let farmed = false;
   if (meadow || dom === Biome.City) {
@@ -232,16 +248,12 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
     const fid = fa === fb || fa === fcl ? fa : fb === fcl ? fb : fa;
     if (fid >= 0) {
       farmed = true;
-      fieldTint(fid, out);
-      if (isFlowerField(fid) && hash3(f, 0xf13) < 0.4) mixInto(out, hash3(f, 0xf14) < 0.75 ? BLOOMS[1] : FLOWER_WHITE, 0.55);
+      fieldTint(fid, out, dom === Biome.City ? 1 : p);
       if ((fa !== fb || fa !== fcl) && Math.min(t.hedge[a], t.hedge[b], t.hedge[c]) < 1.6) mixInto(out, HEDGE, 0.6);
     }
-  }
-  if (meadow || dom === Biome.City) {
-    // Flower fields: a speckle of bloom-tinted facets inside the field mask (persistent per facet),
-    // strong enough to read as a meadow in flower from 50 m up.
-    const fl = ((t.flower[a] + t.flower[b] + t.flower[c]) / 3) * (dom === Biome.City ? 0.7 : 1 - p);
-    if (fl > 0 && hash3(f, 0xf10) < 0.6 * fl) mixInto(out, BLOOMS[Math.floor(hash3(f, 0xf11) * BLOOMS.length)], 0.3 + 0.25 * hash3(f, 0xf12));
+    // Flower fields: the same faint warm tint as the smooth colour, never a per-facet speckle.
+    const fl = ((t.flower[a] + t.flower[b] + t.flower[c]) / 3) * (1 - p);
+    if (dom !== Biome.City) mixInto(out, WARM, 0.12 * fl);
   }
   if (dom === Biome.Rock) {
     // Rock faces: each facet leans warm or cool (strata, not one flat grey).
@@ -252,8 +264,8 @@ export function faceColor(t: TerrainData, f: number, fslope: number, out: RGB): 
   // Value jitter: mostly the low-frequency field (soft patches), a little per facet; warmth too.
   const quiet = p >= 1 ? 0.8 : 1;
   const jl = (t.jit[a] + t.jit[b] + t.jit[c]) / 3;
-  const j = 1 + (0.04 * jl + (hash3(f, 17) - 0.5) * (dom === Biome.Rock ? 0.09 : 0.03)) * quiet;
-  const w = (0.018 * jl + (hash3(f, 91) - 0.5) * 0.012) * quiet;
+  const j = 1 + (0.035 * jl + (hash3(f, 17) - 0.5) * (dom === Biome.Rock ? 0.09 : 0.02)) * quiet;
+  const w = (0.015 * jl + (hash3(f, 91) - 0.5) * 0.008) * quiet;
   out[0] *= j * (1 + w);
   out[1] *= j;
   out[2] *= j * (1 - w);

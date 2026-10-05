@@ -37,6 +37,8 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   // Bumped when the browser restores a lost WebGL context: remounts the canvas (fresh context) and
   // reboots the engine (~150 ms warm).
   const [generation, setGeneration] = useState(0);
+  // Where the player was when the context was lost: the rebooted engine carries on from there.
+  const resumeRef = useRef<{ view: ReturnType<Engine['ctx']['services']['camera']['getView']>; t: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -46,6 +48,12 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
     let ro: ResizeObserver | null = null;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const onRestored = () => !cancelled && setGeneration((g) => g + 1);
+    // (Registered before the engine's own listener, which releases the engine on loss.)
+    const onLost = () => {
+      const e = engineRef.current;
+      if (e && !cancelled) resumeRef.current = { view: e.ctx.services.camera.getView(), t: e.ctx.time.t };
+    };
+    canvas.addEventListener('webglcontextlost', onLost);
     canvas.addEventListener('webglcontextrestored', onRestored);
     const slowTimer = window.setTimeout(() => !cancelled && setSlow(true), 450);
 
@@ -63,7 +71,9 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
         if (cancelled) return;
         let engine: Engine;
         try {
-          engine = await createEngine({ canvas, variant, reducedMotion, search: window.location.search });
+          const resume = resumeRef.current ?? undefined;
+          resumeRef.current = null;
+          engine = await createEngine({ canvas, variant, reducedMotion, search: window.location.search, resume });
         } catch (e) {
           if (!cancelled) setPhase(e instanceof NoWebGLError ? 'nogl' : 'error');
           if (!(e instanceof NoWebGLError)) console.error('[littlebig]', e);
@@ -94,6 +104,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
 
     return () => {
       cancelled = true;
+      canvas.removeEventListener('webglcontextlost', onLost);
       canvas.removeEventListener('webglcontextrestored', onRestored);
       window.clearTimeout(slowTimer);
       ro?.disconnect();

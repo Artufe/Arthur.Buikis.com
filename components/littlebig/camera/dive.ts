@@ -57,8 +57,17 @@ const FAR_LEN = 30;
 const FAR_SWING = 34 * DEG;
 /** Glide-slope exponent: alt − eye ∝ D^(1/P); P < 1 flares the approach. */
 const P = 0.714;
-/** Where the lateral offset onto the sidewalk starts (m before touchdown). */
-const SIDEWALK_EASE = 24;
+/**
+ * The lateral ease onto the pavement: [starts, done] in m of track before touchdown. Tried in order
+ * until the path clears: the long glide; stepping across low at the end (under the lamp heads and
+ * crowns that hang over the kerb at 4–7 m, where the long glide crosses them); stepping over high
+ * (done by ~7 m up).
+ */
+const EASES = [
+  [24, 0],
+  [9, 0],
+  [36, 14],
+] as const;
 /** Heading eases onto the landing heading over the last metres. */
 const HEADING_EASE = 26;
 /** Heading sweep below the clouds (rad). */
@@ -392,7 +401,7 @@ function streetBackwards(plan: CityPlan, index: CityIndex, ex: number, ez: numbe
 }
 
 /** The ground track for one landing: street approach + the swing-in from orbit. */
-function pathFor(plan: CityPlan, index: CityIndex, land: Landing): DivePath {
+export function pathFor(plan: CityPlan, index: CityIndex, land: Landing, ease: readonly number[] = EASES[0]): DivePath {
   const ex = land.x;
   const ez = land.z;
   const hx = Math.sin(land.heading);
@@ -415,7 +424,7 @@ function pathFor(plan: CityPlan, index: CityIndex, land: Landing): DivePath {
       tx /= tl;
       tz /= tl;
       const togo = len - cs[i];
-      const k = Math.min(1, Math.max(0, 1 - togo / SIDEWALK_EASE));
+      const k = Math.min(1, Math.max(0, (ease[0] - togo) / (ease[0] - ease[1])));
       const off = street.lateral * k * k * (3 - 2 * k);
       out.push(sp[i * 2] - tz * off, sp[i * 2 + 1] + tx * off);
     }
@@ -435,10 +444,12 @@ function pathFor(plan: CityPlan, index: CityIndex, land: Landing): DivePath {
     for (let i = 0; i < n - 1; i++) {
       const togo = len - cs[i];
       if (togo > 34) continue;
+      const x = sp[i * 2];
+      const z = sp[i * 2 + 1];
       const r = 0.7 + 1.3 * smoothstep01((togo - 2) / 7);
-      if (index.collide(sp[i * 2], sp[i * 2 + 1], r, o)) {
-        dx[i] = o.x - sp[i * 2];
-        dz[i] = o.z - sp[i * 2 + 1];
+      if (index.collide(x, z, r, o)) {
+        dx[i] = o.x - x;
+        dz[i] = o.z - z;
       }
     }
     const win = 8; // samples (0.5 m apart): ±4 m
@@ -540,7 +551,7 @@ function pathFor(plan: CityPlan, index: CityIndex, land: Landing): DivePath {
  * 25 m nothing at eye level sits within 4 m inside ±30° of the view. Returns the smallest margin
  * (m, ≥ 0 = passes; a blocked view cone counts as −1).
  */
-export function clearPath(path: DivePath, index: CityIndex, solids: Float64Array, samples = 1200): number {
+export function clearPath(path: DivePath, index: CityIndex, solids: Float64Array, samples = 1200, failFast = false): number {
   const pose: DivePose = { x: 0, z: 0, alt: 0, heading: 0, pitch: 0, togo: 0 };
   const near: number[] = [];
   let margin = Infinity;
@@ -554,7 +565,9 @@ export function clearPath(path: DivePath, index: CityIndex, solids: Float64Array
   }
   const u14 = hi;
   const high = Math.max(20, Math.round(samples * 0.2));
-  for (let i = 0; i <= high + samples; i++) {
+  // Bottom up: a path that fails, fails low (failFast returns at the first violation).
+  for (let i = high + samples; i >= 0; i--) {
+    if (failFast && margin < 0) return margin;
     const u = i <= high ? (u14 * i) / high : u14 + ((1 - u14) * (i - high)) / samples;
     divePoseAt(path, u, pose);
     const h = pose.alt + index.groundH(pose.x, pose.z);
@@ -582,14 +595,17 @@ export function buildDivePath(plan: CityPlan, index: CityIndex, t = 0): DivePath
   if (vs > -Infinity) cands.push({ x: vp.x, z: vp.z, heading: vp.heading, score: vs });
   cands.sort((a, b) => b.score - a.score);
   if (!cands.length) cands.push({ x: vp.x, z: vp.z, heading: vp.heading, score: 0 });
-  let best: DivePath | null = null;
+  // The best candidate whose path clears, trying each lateral ease onto the pavement.
   for (const c of cands) {
-    const p = pathFor(plan, index, c);
-    p.margin = clearPath(p, index, finder.solids, 500);
-    if (!best || (best.margin < 0 && p.margin > best.margin)) best = p;
-    if (p.margin >= 0) break;
+    for (const e of EASES) {
+      const p = pathFor(plan, index, c, e);
+      p.margin = clearPath(p, index, finder.solids, 500, true);
+      if (p.margin >= 0) return p;
+    }
   }
-  return best!;
+  const p = pathFor(plan, index, cands[0]);
+  p.margin = clearPath(p, index, finder.solids, 500);
+  return p;
 }
 
 /** The framing target sits this far from the landing toward the city centre. */

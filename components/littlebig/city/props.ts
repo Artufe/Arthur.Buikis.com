@@ -15,6 +15,7 @@ const LAMP = new Color('#FFF1C9');
 const WOOD = new Color('#B87A4B');
 const IRON = new Color('#3B3F4C');
 const STONE = new Color('#E2D9C6');
+const BRONZE = new Color('#B07A48');
 const tmpC = new Color();
 const shade = (c: Color, k: number) => tmpC.copy(c).multiplyScalar(k);
 const HEDGE = new Color('#3F9A4C');
@@ -184,13 +185,25 @@ function statue(g: Geo, xf: Xf, y: number) {
   g.box(xf, -0.45, 0.45, y + 0.35, y + 1.6, -0.45, 0.45, 0.06);
   g.color.copy(STONE);
   g.box(xf, -0.55, 0.55, y + 1.6, y + 1.75, -0.55, 0.55, 0.06);
-  const bronze = new Color('#5E9C84');
-  g.color.copy(bronze);
-  g.box(xf, -0.16, 0.16, y + 1.75, y + 2.55, -0.12, 0.12, 0.05); // legs + body
-  g.box(xf, -0.24, 0.24, y + 2.4, y + 3.05, -0.16, 0.16, 0.08);
-  g.cylinder(xf, 0, 0, 0.15, y + 3.05, y + 3.38, 8, true); // head
-  g.box(xf, 0.22, 0.32, y + 2.9, y + 3.6, -0.06, 0.06, 0); // raised arm
-  g.box(xf, -0.32, -0.22, y + 2.45, y + 2.95, -0.06, 0.06, 0);
+  // a warm bronze figure in a long coat: legs, flared coat, shoulders, a head with a hat, one arm
+  // raised high holding a torch, the other at its side
+  g.color.copy(BRONZE);
+  g.box(xf, -0.15, -0.03, y + 1.75, y + 2.05, -0.07, 0.07, 0.02);
+  g.box(xf, 0.03, 0.15, y + 1.75, y + 2.05, -0.07, 0.07, 0.02);
+  g.cylinder(xf, 0, 0, 0.3, y + 2.0, y + 2.25, 8, false);
+  g.cylinder(xf, 0, 0, 0.23, y + 2.25, y + 2.62, 8, false);
+  g.box(xf, -0.34, 0.34, y + 2.56, y + 2.76, -0.14, 0.14, 0.07);
+  g.cylinder(xf, 0, 0, 0.07, y + 2.74, y + 2.82, 6, false);
+  g.cylinder(xf, 0, 0, 0.14, y + 2.8, y + 3.08, 10, true);
+  g.color.copy(shade(BRONZE, 0.8));
+  g.cylinder(xf, 0, 0, 0.2, y + 3.06, y + 3.1, 10, true);
+  g.cylinder(xf, 0, 0, 0.11, y + 3.1, y + 3.24, 10, true);
+  g.color.copy(BRONZE);
+  g.box(xf, 0.26, 0.38, y + 2.62, y + 3.4, -0.06, 0.06, 0.02); // the raised arm
+  g.box(xf, -0.4, -0.28, y + 2.08, y + 2.72, -0.06, 0.06, 0.02);
+  g.cylinder(xf, 0.32, 0, 0.07, y + 3.4, y + 3.52, 6, true); // torch
+  g.color.copy(PALETTE.accent);
+  g.cylinder(xf, 0.32, 0, 0.1, y + 3.52, y + 3.66, 6, true);
 }
 
 function bench(g: Geo, xf: Xf, y: number) {

@@ -91,21 +91,25 @@ describe('cloud palette', () => {
     }
   });
 
-  it('is a dim indigo past the terminator and keeps peach and mauve inside the dusk band', () => {
+  it('is moonlit cotton past the terminator (never a dark hole) and keeps peach and mauve inside the dusk band', () => {
     const lit = new Color();
     const shade = new Color();
     const belly = new Color();
     const rim = new Color();
-    // Night (lbNightAt > 0.5): dark on screen, blue-violet, never the bright lavender that glowed.
+    const space = lum(neutral(new Color().setRGB(0.017, 0.02, 0.047)));
+    // Night (lbNightAt > 0.5): the moon side silver-lilac, ≥ 2.5× space, the body above the night
+    // sky, blue-violet; still far below a warm window (~0.6).
     for (let e = -0.6; e <= 1; e += 0.005) {
       if (nightAtSin(e) <= 0.55) continue;
       cloudPalette(e, lit, shade, belly, rim);
       const shown = neutral(lit);
-      expect(lum(shown)).toBeLessThan(0.03);
+      expect(lum(shown)).toBeGreaterThan(2.5 * space);
+      if (nightAtSin(e) > 0.9) expect(lum(shown)).toBeLessThan(0.15); // (blue hour above that: lavender afterglow)
+      expect(lum(neutral(belly))).toBeGreaterThan(1.3 * space);
       expect(shown.b).toBeGreaterThan(shown.r);
     }
     // The warm stops (mauve, peach) sit where the dusk band is strong and it is not yet night.
-    for (const e of [CLOUD_PAL_E[1], CLOUD_PAL_E[2]]) {
+    for (const e of [CLOUD_PAL_E[2], CLOUD_PAL_E[3]]) {
       expect(duskAtSin(e)).toBeGreaterThan(0.8);
       expect(nightAtSin(e)).toBeLessThan(0.5);
     }

@@ -1,12 +1,579 @@
-// People system: placeholder registered by the orchestrator so parallel agents never edit
-// core/systems.ts at the same time. B2 owns this directory and replaces this file.
+// People and street life (B2). The "zoom in really close" reward: chunky toy pedestrians walking
+// the sidewalks, the plaza loop, the park path and the market lane with a lively vertex-shader gait,
+// waiting at zebra crossings (ctx.services.crossings), a few walking dogs, people on benches, at
+// café tables and on the fountain rim, waiting at bus stops and chatting in little groups. They
+// glance at you when you walk past, and stand in the warm light of the street lamps at night.
+//
+// Rendering: one toon program (people/shader.ts) shared by four instanced meshes (people in three
+// LODs, dogs) plus leash lines. Every frame the instances near the camera and in front of it are
+// packed into the first slots (matrix + aAnim), so the cost follows what is on screen. On the way
+// down the crowd builds up: each person pops in (a springy scale from the feet, like the world's
+// reveal) at their own altitude between POP_HI and POP_LO m (ViewState.altTerrain), and out at the
+// edge of the draw radius, which reaches past the planet's horizon (nobody pops in view). Under
+// reduced motion both are a dither fade instead. Someone at the player's eye dithers out over a
+// short, coarse band and is skipped below it (no dot screen in the frame).
 
-import type { System } from '../core/contracts';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  DataTexture,
+  DynamicDrawUsage,
+  InstancedBufferAttribute,
+  type InstancedMesh,
+  LineBasicMaterial,
+  LineSegments,
+  NearestFilter,
+  RGBAFormat,
+  UnsignedByteType,
+  Vector3,
+} from 'three';
+import { LAYER_NO_INK, type LBContext, type System } from '../core/contracts';
+import { PALETTE } from '../render/palette';
+import { CITY_SURFACE_R, SEED } from '../world/config';
+import { CITY_CHART as CC, planFrame, toSphere } from '../world/city/frame';
+import { hash3, Rng } from '../world/rng';
+import { v3 } from '../world/sphere';
+import { CITY_DIR, nightFactor, sunDirection } from '../world/sun';
+import { dogGeometry, J, personGeometry, POSE_LEASH, posedHand } from './figure';
+import { makeIdlers } from './idlers';
+import { peoplePatch } from './shader';
+import { LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look } from './sim';
+
+/** Altitude band (m, ViewState.altTerrain): everyone is in below POP_LO, nobody above POP_HI. */
+const POP_LO = 27;
+const POP_HI = 58;
+/** Above this altitude people cast no shadow (a few pixels each from up there). */
+const SHADOW_ALT = 36;
+/** Sea-level radius of the city ground (m) and a person's height, for the horizon distance. */
+const GROUND_R = 162;
+const WALKERS = 230;
+const DOG_SHARE = 0.11;
+const TEX_W = 5;
+/** LOD distances (m at a 70° field of view; scaled with the view's FOV so they follow screen size). */
+const NEAR_R = 10;
+const FAR_R = 21;
+/** Share of walkers / idlers gone home at full night. */
+const THIN_WALK = 0.4;
+const THIN_IDLE = 0.55;
+
+const DOG_FUR = [0xc98b4f, 0xf2e6d0, 0x3a3030, 0xe0b46a, 0x8a5a3a, 0xffffff, 0x9a8f87];
+const DOG_PATCH = [0xffffff, 0x8a5a3a, 0x3a3030, 0xf2e6d0, 0xc98b4f];
+const COLLAR = [0xd9483b, 0x3d9ca8, 0xffb84d, 0x7fb04a];
+
+function srgb(hex: number, out: Uint8Array, o: number, a: number): void {
+  out[o] = (hex >> 16) & 255;
+  out[o + 1] = (hex >> 8) & 255;
+  out[o + 2] = hex & 255;
+  out[o + 3] = a;
+}
+
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+function upload(attr: { clearUpdateRanges(): void; addUpdateRange(o: number, c: number): void; needsUpdate: boolean }, count: number): void {
+  attr.clearUpdateRanges();
+  if (count > 0) attr.addUpdateRange(0, count);
+  attr.needsUpdate = true;
+}
+
+/**
+ * How late in the night it is over the city at sim time t (0..1): night both a while ago and still
+ * a while ahead, so evenings stay lively and the crowd thins only from ~2.5 h after dusk to ~1.5 h
+ * before dawn (DAY_LENGTH 480 s: 20 s ≈ 1 h).
+ */
+const night = (t: number) => nightFactor(CITY_DIR, sunDirection(t));
+const nightAt = (t: number) => night(t - 60) * night(t + 40);
 
 export function createPeopleSystem(): System {
+  let sim: PeopleSim | null = null;
+  let meshes: InstancedMesh[] = [];
+  let leash: LineSegments | null = null;
+  let looks: Look[] = [];
+  /** Per idler: 1 = there. */
+  let idleOn = new Uint8Array(0);
+  /** Per person: the altitude below which they pop in. */
+  let popAt = new Float32Array(0);
+  /** Lamps: x, z, radius of their pool. */
+  let lamps = new Float64Array(0);
+  let slot = new Int32Array(0);
+  let arr: Float32Array[] = [];
+  let anim: Float32Array[] = [];
+  const kk = new Int32Array(4);
+  let gs = new Float32Array(0);
+  /** Per walker: its fade (reduced motion) for its dog. */
+  let gv = new Float32Array(0);
+  let ready = false;
+  const lastEye = new Vector3(1e9, 0, 0);
+  let camPX = 0;
+  let camPZ = 0;
+  let camStill = 0;
+
+  // scratch
+  const fr = { up: v3(), ax: v3(), az: v3() };
+  const pos = v3();
+  const tmp = new Vector3();
+  const hand = posedHand(1, POSE_LEASH[0], POSE_LEASH[1]);
+  const collar = new Vector3(0, 0.42, 0.21);
+
+  /**
+   * Write instance k's matrix: feet at the world point pos (toSphere of the plan point), facing
+   * plan (W[0], W[1]), scale W[2] (arguments through W: doubles crossing a call box, i.e.
+   * allocate). The plan axes there are the city centre's carried over to pos's tangent plane:
+   * exact along the plan axes, a degree or two off on the diagonals at the plateau's edge (a
+   * person's facing), and no chart evaluation per person.
+   */
+  const W = new Float64Array(3);
+  const AX0 = v3();
+  function writeMatrix(arr: Float32Array, k: number): void {
+    const fx = W[0];
+    const fz = W[1];
+    const s = W[2];
+    const pl = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+    const u = fr.up;
+    u.x = pos.x / pl;
+    u.y = pos.y / pl;
+    u.z = pos.z / pl;
+    // ax = AX0 projected onto the tangent plane; az = ax × up
+    const pa = AX0.x * u.x + AX0.y * u.y + AX0.z * u.z;
+    let ax = AX0.x - u.x * pa;
+    let ay = AX0.y - u.y * pa;
+    let az = AX0.z - u.z * pa;
+    const al = Math.sqrt(ax * ax + ay * ay + az * az) || 1;
+    ax /= al;
+    ay /= al;
+    az /= al;
+    const bx = ay * u.z - az * u.y;
+    const by = az * u.x - ax * u.z;
+    const bz = ax * u.y - ay * u.x;
+    let wx = ax * fx + bx * fz;
+    let wy = ay * fx + by * fz;
+    let wz = az * fx + bz * fz;
+    const l = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
+    wx /= l;
+    wy /= l;
+    wz /= l;
+    // columns: left = up × forward, up, forward
+    const o = k * 16;
+    arr[o] = (u.y * wz - u.z * wy) * s;
+    arr[o + 1] = (u.z * wx - u.x * wz) * s;
+    arr[o + 2] = (u.x * wy - u.y * wx) * s;
+    arr[o + 3] = 0;
+    arr[o + 4] = u.x * s;
+    arr[o + 5] = u.y * s;
+    arr[o + 6] = u.z * s;
+    arr[o + 7] = 0;
+    arr[o + 8] = wx * s;
+    arr[o + 9] = wy * s;
+    arr[o + 10] = wz * s;
+    arr[o + 11] = 0;
+    arr[o + 12] = pos.x;
+    arr[o + 13] = pos.y;
+    arr[o + 14] = pos.z;
+    arr[o + 15] = 1;
+  }
+
+  /** World point of a figure-space point under instance k's matrix. */
+  function apply(arr: Float32Array, k: number, p: Vector3, out: Vector3): Vector3 {
+    const o = k * 16;
+    return out.set(
+      arr[o] * p.x + arr[o + 4] * p.y + arr[o + 8] * p.z + arr[o + 12],
+      arr[o + 1] * p.x + arr[o + 5] * p.y + arr[o + 9] * p.z + arr[o + 13],
+      arr[o + 2] * p.x + arr[o + 6] * p.y + arr[o + 10] * p.z + arr[o + 14],
+    );
+  }
+
+  /** Warm light (0..1) from the nearest street lamps at plan (x, z). */
+  function lampLight(x: number, z: number): number {
+    let best = 0;
+    for (let k = 0; k < lamps.length; k += 3) {
+      const q = 1 - ((lamps[k] - x) ** 2 + (lamps[k + 1] - z) ** 2) / lamps[k + 2];
+      if (q > best) best = q;
+    }
+    return best * best;
+  }
+
+  /** Who is out at this hour (time jumps: everyone at once; live: only people out of view change). */
+  function thinAll(night: number): void {
+    if (!sim) return;
+    for (let i = 0; i < sim.n; i++) sim.on[i] = hash3(i, 91, SEED) >= night * THIN_WALK ? 1 : 0;
+    for (let k = 0; k < idleOn.length; k++) idleOn[k] = hash3(k, 92, SEED) >= night * THIN_IDLE ? 1 : 0;
+  }
+
+  /** A cut to street level: nobody in the lens (sim.clearAround, in the camera's plan frame). */
+  function clearView(ctx: LBContext): void {
+    const v = ctx.view;
+    if (!sim || v.altTerrain > 3 || v.cityDist > ctx.world.city.radius) return;
+    planFrame(v.cityX, v.cityZ, fr);
+    const fx = v.forward.x * fr.ax.x + v.forward.y * fr.ax.y + v.forward.z * fr.ax.z;
+    const fz = v.forward.x * fr.az.x + v.forward.y * fr.az.y + v.forward.z * fr.az.z;
+    const l = Math.sqrt(fx * fx + fz * fz) || 1;
+    sim.clearAround(v.cityX, v.cityZ, fx / l, fz / l);
+  }
+
   return {
     name: 'people',
     stage: 2,
-    init() {},
+    async init(ctx: LBContext) {
+      const plan = ctx.world.city;
+      const index = ctx.world.cityIndex;
+      const nW = Math.round(WALKERS * Math.max(0.65, Math.min(1, ctx.q.density)));
+      const idlers = makeIdlers(plan, index, SEED, nW);
+      looks = makeLooks(SEED, nW + idlers.length);
+      for (const p of idlers) {
+        const l = looks[p.id];
+        l.pose = p.pose;
+        l.flags &= ~(LookFlag.Umbrella | LookFlag.Phone | (p.pose === Pose.Stand ? 0 : LookFlag.Backpack | LookFlag.Bag));
+        if (p.pose === Pose.Lean) {
+          // the one leaning over the fountain rim is a kid
+          l.flags = (l.flags & ~LookFlag.Dress) | LookFlag.Kid | LookFlag.Shorts;
+          l.scale = 0.66;
+        }
+      }
+      // dog walkers: grown-ups with a free left hand
+      const rng = Rng.for(SEED, 'people-dogs');
+      const own: number[] = [];
+      for (let i = 0; i < nW; i++) {
+        const l = looks[i];
+        if (!(l.flags & (LookFlag.Kid | LookFlag.Bag)) && rng.float() < DOG_SHARE) {
+          l.flags |= LookFlag.Leash;
+          own.push(i);
+        }
+      }
+      await ctx.yield();
+      sim = new PeopleSim(plan, index, SEED, makeTraits(SEED, looks, nW), idlers, own);
+      idleOn = new Uint8Array(idlers.length).fill(1);
+      planFrame(0, 0, fr);
+      AX0.x = fr.ax.x;
+      AX0.y = fr.ax.y;
+      AX0.z = fr.ax.z;
+      const nP = looks.length;
+      const nD = own.length;
+      // pop altitudes skewed low: the crowd thickens as the streets get readable
+      popAt = Float32Array.from({ length: nP + nD }, (_, i) => POP_LO + (POP_HI - POP_LO) * Math.pow(hash3(i, 93, SEED), 1.4));
+      slot = new Int32Array(nW);
+      gs = new Float32Array(nW);
+      gv = new Float32Array(nW);
+      const lp: number[] = [];
+      for (const f of plan.features) {
+        const r = f.kind === 'streetlight' ? 1.25 : f.kind === 'lamp' ? 0 : -1;
+        if (r >= 0) lp.push(f.x + Math.cos(f.angle) * r, f.z + Math.sin(f.angle) * r, r ? 4.8 ** 2 : 3 ** 2);
+      }
+      lamps = Float64Array.from(lp);
+      await ctx.yield();
+
+      // Look texture: people rows, then dog rows.
+      const data = new Uint8Array(TEX_W * 4 * (nP + nD));
+      looks.forEach((l, r) => {
+        const o = r * TEX_W * 4;
+        srgb(l.skin, data, o, l.hairStyle);
+        srgb(l.shirt, data, o + 4, l.flags & 255);
+        srgb(l.legs, data, o + 8, l.flags >> 8);
+        srgb(l.hair, data, o + 12, l.pose);
+        srgb(l.acc, data, o + 16, Math.round(l.bounce * 255));
+      });
+      own.forEach((_, k) => {
+        const o = (nP + k) * TEX_W * 4;
+        const fur = DOG_FUR[Math.floor(hash3(k, 1, SEED) * DOG_FUR.length)];
+        const patch = DOG_PATCH[Math.floor(hash3(k, 2, SEED) * DOG_PATCH.length)];
+        srgb(fur, data, o, 0);
+        srgb(patch === fur ? 0x3a3030 : patch, data, o + 4, 0);
+        srgb(COLLAR[k % 4], data, o + 8, 0);
+      });
+      const tex = ctx.track(new DataTexture(data, TEX_W, nP + nD, RGBAFormat, UnsignedByteType));
+      tex.minFilter = tex.magFilter = NearestFilter;
+      tex.needsUpdate = true;
+
+      const mat = ctx.toon.material({ name: 'people', vertexColors: true, reveal: 'object', revealDuration: 0.6, rim: 0.45, patch: peoplePatch(tex) });
+      mat.defines = { ...mat.defines, PP_COLOR: '' };
+      const geos = [personGeometry(0), personGeometry(1), personGeometry(2), dogGeometry()];
+      meshes = geos.map((g, m) => {
+        ctx.track(g);
+        const cnt = Math.max(1, m < 3 ? nP : nD);
+        g.setAttribute('aAnim', new InstancedBufferAttribute(new Float32Array(cnt * 4), 4).setUsage(DynamicDrawUsage));
+        const mesh = ctx.toon.instanced(g, mat, cnt);
+        mesh.frustumCulled = false;
+        mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+        mesh.name = ['people', 'people:mid', 'people:far', 'people:dogs'][m];
+        return mesh;
+      });
+      arr = meshes.map((m) => m.instanceMatrix.array as Float32Array);
+      anim = meshes.map((m) => (m.geometry.getAttribute('aAnim') as InstancedBufferAttribute).array as Float32Array);
+      const lg = ctx.track(new BufferGeometry());
+      lg.setAttribute('position', new BufferAttribute(new Float32Array(Math.max(1, nD) * 12), 3).setUsage(DynamicDrawUsage));
+      const lm = ctx.track(new LineBasicMaterial({ color: new Color().copy(PALETTE.ink).lerp(new Color('#6b4a33'), 0.35) }));
+      leash = new LineSegments(lg, lm);
+      leash.frustumCulled = false;
+      leash.layers.set(LAYER_NO_INK);
+      leash.visible = false;
+      leash.name = 'people:leash';
+
+      // Establish the crowd for the current time, the settle split across frames.
+      const t = ctx.time.t;
+      thinAll(nightAt(t));
+      sim.scatter(t, nightAt(t) * THIN_WALK);
+      for (let k = 0; k < SETTLE_STEPS; k += 9) {
+        await ctx.yield();
+        sim.settle(t, k, Math.min(SETTLE_STEPS, k + 9), null, null);
+      }
+
+      ctx.scene.add(...meshes, leash);
+      for (const m of meshes) m.count = 1; // warm the program with something drawn
+      await ctx.compile();
+      for (const m of meshes) m.count = 0;
+      mat.userData.lbUniforms.lbRevealDelay.value = ctx.reveal.slot(0.6);
+      ready = true;
+    },
+
+    fixedUpdate(ctx) {
+      if (!sim || !ready) return;
+      const v = ctx.view;
+      const cr = ctx.services.crossings;
+      // a player standing still gets a wider berth (nobody brushes past the lens)
+      const mx = v.cityX - camPX;
+      const mz = v.cityZ - camPZ;
+      camPX = v.cityX;
+      camPZ = v.cityZ;
+      camStill = mx * mx + mz * mz < (0.3 * ctx.time.fixedDt) ** 2 ? Math.min(1, camStill + ctx.time.fixedDt) : 0;
+      sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, v.cityX, v.cityZ, v.altTerrain < 3 && v.cityDist < ctx.world.city.radius, camStill >= 0.5 ? 1.15 : 0.75);
+    },
+
+    onTimeJump(ctx) {
+      if (!sim || !ready) return;
+      const late = nightAt(ctx.time.t);
+      thinAll(late);
+      sim.placeAt(ctx.time.t, ctx.services.crossings.busy, ctx.services.crossings.blocked, late * THIN_WALK);
+      clearView(ctx);
+    },
+
+    update(ctx) {
+      if (!sim || !leash || !ready) return;
+      const v = ctx.view;
+      const alt = v.altTerrain;
+      const eye = v.eye;
+      // a camera cut (shot, fly-to landing): step people out of the lens first
+      const jx = eye.x - lastEye.x;
+      const jy = eye.y - lastEye.y;
+      const jz = eye.z - lastEye.z;
+      lastEye.copy(eye);
+      if (jx * jx + jy * jy + jz * jz > 16) clearView(ctx);
+      const show = alt < POP_HI && v.cityDist < ctx.world.city.radius + 60 + alt;
+      for (const m of meshes) m.visible = show;
+      meshes[2].castShadow = meshes[3].castShadow = alt < SHADOW_ALT;
+      leash.visible = show && alt < POP_LO + 0.5;
+      const nightNow = ctx.uniforms.lbNight.value;
+      const nightT = nightAt(ctx.time.t);
+      if (!show) {
+        thinAll(nightT); // nobody is in view: the crowd follows the hour at once
+        return;
+      }
+      const a = ctx.time.alpha;
+      const fwd = v.forward;
+      const rm = ctx.reducedMotion;
+      // draw radius: out to where a person's head drops below the horizon (planet and plateau curve)
+      const visR = Math.sqrt(2 * GROUND_R * (Math.max(0, alt) + 0.3)) + 30;
+      const street = alt < 2.6;
+      // LOD distances follow the screen size: a narrower FOV draws people bigger
+      const lodK = Math.tan((v.fov * Math.PI) / 360) / Math.tan((35 * Math.PI) / 180);
+      // near-eye fade: a short band ending at nearR (further when looking down: a head poking up
+      // into the bottom of the frame)
+      const nearR = 1.0 + 0.5 * smooth(-0.15, -0.35, v.pitch);
+      // plan-space pre-cull (no world mapping for people far off or well behind the camera): the
+      // camera's plan position and level forward
+      const pcx = v.cityX;
+      const pcz = v.cityZ;
+      planFrame(pcx, pcz, fr);
+      let pfx = fwd.x * fr.ax.x + fwd.y * fr.ax.y + fwd.z * fr.ax.z;
+      let pfz = fwd.x * fr.az.x + fwd.y * fr.az.y + fwd.z * fr.az.z;
+      const pfl = Math.sqrt(pfx * pfx + pfz * pfz);
+      const cone = v.pitch > -0.6 && pfl > 0.5;
+      pfx /= pfl || 1;
+      pfz /= pfl || 1;
+      const preR2 = (visR + alt + 8) * (visR + alt + 8);
+      kk.fill(0);
+      const s = sim;
+      const n = s.n;
+      for (let i = 0; i < looks.length; i++) {
+        const walker = i < n;
+        const p = walker ? null : s.idlers[i - n];
+        const l = looks[i];
+        let x: number;
+        let z: number;
+        let h: number;
+        let fx: number;
+        let fz: number;
+        let phase = 0;
+        let amp = 0;
+        if (walker) {
+          slot[i] = -1;
+          x = s.px[i] + (s.x[i] - s.px[i]) * a;
+          z = s.pz[i] + (s.z[i] - s.pz[i]) * a;
+          h = s.ph[i] + (s.h[i] - s.ph[i]) * a;
+          fx = s.phx[i] + (s.hx[i] - s.phx[i]) * a;
+          fz = s.phz[i] + (s.hz[i] - s.phz[i]) * a;
+          const g = s.pgait[i] + (s.gait[i] - s.pgait[i]) * a;
+          phase = ((g / (1.15 * l.scale)) % 1) * Math.PI * 2;
+          amp = Math.min(1, Math.max(0, (Math.sqrt(s.vx[i] * s.vx[i] + s.vz[i] * s.vz[i]) - 0.05) / 1.05));
+        } else {
+          x = p!.x;
+          z = p!.z;
+          fx = p!.fx;
+          fz = p!.fz;
+          h = p!.pose === Pose.Sit || p!.pose === Pose.Cafe ? p!.h - (J.hipY - J.thighR) * l.scale : p!.h;
+        }
+        const want = hash3(walker ? i : i - n, walker ? 91 : 92, SEED) >= nightT * (walker ? THIN_WALK : THIN_IDLE) ? 1 : 0;
+        const onArr = walker ? s.on : idleOn;
+        const oi = walker ? i : i - n;
+        const qx0 = x - pcx;
+        const qz0 = z - pcz;
+        const dp2 = qx0 * qx0 + qz0 * qz0;
+        if (dp2 > preR2 || (cone && qx0 * pfx + qz0 * pfz < 0.3 * Math.sqrt(dp2) - 6)) {
+          if (onArr[oi] !== want) onArr[oi] = want; // out of view: the crowd follows the hour
+          continue;
+        }
+        // toSphere(x, z, h), inline (world/sphere chartToDir: the city chart's exponential map)
+        {
+          const dd = Math.sqrt(x * x + z * z) || 1e-9;
+          const th = dd / CC.radius;
+          const sn = Math.sin(th) / dd;
+          const co = Math.cos(th);
+          const wx = CC.origin.x * co + (CC.east.x * x + CC.south.x * z) * sn;
+          const wy = CC.origin.y * co + (CC.east.y * x + CC.south.y * z) * sn;
+          const wz = CC.origin.z * co + (CC.east.z * x + CC.south.z * z) * sn;
+          const r = (CITY_SURFACE_R + h) / Math.sqrt(wx * wx + wy * wy + wz * wz);
+          pos.x = wx * r;
+          pos.y = wy * r;
+          pos.z = wz * r;
+        }
+        const ex = pos.x - eye.x;
+        const ey = pos.y - eye.y;
+        const ez = pos.z - eye.z;
+        const d2 = ex * ex + ey * ey + ez * ez;
+        const dist = Math.sqrt(d2);
+        const along = ex * fwd.x + ey * fwd.y + ez * fwd.z;
+        // in view: inside the draw radius and a generous cone (room for bodies and shadows at its edges)
+        const inView = dist < visR && along > 0.3 * dist - 2.5;
+        // the crowd follows the hour, but only where nobody is looking
+        if (onArr[oi] !== want && !inView) onArr[oi] = want;
+        if (!inView || !onArr[oi]) continue;
+        // in by altitude (each at their own) and out at the edge of the draw radius
+        const fade = Math.min(1, Math.max(0, popAt[i] - alt)) * Math.min(1, Math.max(0, (visR - dist) / 6));
+        const grow = rm ? 1 : ctx.reveal.spring(fade);
+        if (grow < 0.01 || fade <= 0) continue;
+        const sc = l.scale * grow;
+        // Personal space: someone right at a street-level eye dithers out over a 0.2 m band and
+        // is skipped below it; measured to the nearest point of the body (feet to head top).
+        const pl = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+        const up = Math.min(1.7 * sc, Math.max(0, -(ex * pos.x + ey * pos.y + ez * pos.z) / pl));
+        const qx = ex + (pos.x / pl) * up;
+        const qy = ey + (pos.y / pl) * up;
+        const qz = ez + (pos.z / pl) * up;
+        const ps = Math.min(1, Math.max(0, (Math.sqrt(qx * qx + qy * qy + qz * qz) - nearR + 0.2) / 0.2));
+        if (ps < 0.15) continue;
+        // the first visible step is a coarse one (a 1/16 dot screen never lingers)
+        const vis = (ps < 1 ? 0.35 + (0.65 * (ps - 0.15)) / 0.85 : 1) * (rm ? fade : 1);
+        if (vis < 0.03) continue;
+        const dEff = dist * lodK;
+        const m = dEff < NEAR_R ? 0 : dEff < FAR_R ? 1 : 2;
+        const k = kk[m]++;
+        W[0] = fx;
+        W[1] = fz;
+        W[2] = sc;
+        writeMatrix(arr[m], k);
+        // glance at a nearby player: continuous in distance and angle, so it never snaps
+        let look = 0;
+        if (street && d2 < 64 && (l.seed & 3) !== 0) {
+          const o = k * 16;
+          const A = arr[m];
+          const ang = Math.atan2(-(A[o] * ex + A[o + 1] * ey + A[o + 2] * ez), -(A[o + 8] * ex + A[o + 9] * ey + A[o + 10] * ez));
+          look = Math.max(-1.1, Math.min(1.1, ang)) * smooth(7.5, 3.5, dist) * smooth(2.0, 1.3, Math.abs(ang));
+        }
+        const lit = nightNow > 0.02 ? Math.round(31 * nightNow * lampLight(x, z)) : 0;
+        const A4 = anim[m];
+        A4[k * 4] = i + 0.9 * (1 - vis);
+        A4[k * 4 + 1] = phase;
+        A4[k * 4 + 2] = amp + 2 * lit;
+        A4[k * 4 + 3] = look;
+        if (walker) {
+          slot[i] = m * 100000 + k;
+          gs[i] = grow;
+          gv[i] = rm ? fade : 1;
+        }
+      }
+
+      // dogs and leashes
+      const dArr = arr[3];
+      const la = leash.geometry.getAttribute('position') as BufferAttribute;
+      const L = la.array as Float32Array;
+      let q = 0;
+      for (let d = 0; d < s.dOwner.length; d++) {
+        const own = s.dOwner[d];
+        if (slot[own] < 0) continue;
+        const x = s.dpx[d] + (s.dx[d] - s.dpx[d]) * a;
+        const z = s.dpz[d] + (s.dz[d] - s.dpz[d]) * a;
+        const sc = (0.8 + hash3(d, 3, SEED) * 0.45) * gs[own];
+        // on the owner's walking surface (no ground query per frame)
+        toSphere(x, z, s.ph[own] + (s.h[own] - s.ph[own]) * a, pos);
+        W[0] = s.dhx[d];
+        W[1] = s.dhz[d];
+        W[2] = sc;
+        writeMatrix(dArr, q);
+        const ex = pos.x - eye.x;
+        const ey = pos.y - eye.y;
+        const ez = pos.z - eye.z;
+        const ps = Math.min(1, Math.max(0, (Math.sqrt(ex * ex + ey * ey + ez * ez) - 0.55) / 0.3));
+        if (ps < 0.15) continue;
+        const vis = (ps < 1 ? 0.35 + (0.65 * (ps - 0.15)) / 0.85 : 1) * gv[own];
+        const g = s.dpg[d] + (s.dg[d] - s.dpg[d]) * a;
+        const D4 = anim[3];
+        D4[q * 4] = looks.length + d + 0.9 * (1 - vis);
+        D4[q * 4 + 1] = ((g / (0.62 * sc)) % 1) * Math.PI * 2;
+        D4[q * 4 + 2] = Math.min(1, s.dsp[d]);
+        D4[q * 4 + 3] = 0;
+        // leash: owner's left hand → collar, with a little sag
+        const om = (slot[own] / 100000) | 0;
+        apply(arr[om], slot[own] - om * 100000, hand, tmp);
+        const o = q * 12;
+        L[o] = tmp.x;
+        L[o + 1] = tmp.y;
+        L[o + 2] = tmp.z;
+        apply(dArr, q, collar, tmp);
+        L[o + 9] = tmp.x;
+        L[o + 10] = tmp.y;
+        L[o + 11] = tmp.z;
+        const mx = (L[o] + tmp.x) / 2;
+        const my = (L[o + 1] + tmp.y) / 2;
+        const mz = (L[o + 2] + tmp.z) / 2;
+        const sag = 1 - 0.12 / Math.sqrt(mx * mx + my * my + mz * mz);
+        L[o + 3] = L[o + 6] = mx * sag;
+        L[o + 4] = L[o + 7] = my * sag;
+        L[o + 5] = L[o + 8] = mz * sag;
+        q++;
+      }
+      kk[3] = q;
+      for (let m = 0; m < 4; m++) {
+        const mesh = meshes[m];
+        mesh.count = kk[m];
+        upload(mesh.instanceMatrix, kk[m] * 16);
+        upload(mesh.geometry.getAttribute('aAnim') as InstancedBufferAttribute, kk[m] * 4);
+      }
+      leash.geometry.setDrawRange(0, q * 4);
+      upload(la, q * 12);
+    },
+
+    dispose() {
+      for (const m of meshes) {
+        m.geometry.dispose();
+        m.dispose();
+      }
+      leash?.geometry.dispose();
+      (leash?.material as LineBasicMaterial | undefined)?.dispose();
+      meshes = [];
+      leash = null;
+      sim = null;
+      ready = false;
+    },
   };
 }

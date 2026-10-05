@@ -1,8 +1,9 @@
 // Sight lines for the plan's viewpoints (pure, boot-time). A coarse "skyline" of everything that
 // stands up in the city — roofs (plus their props), tree crowns, lamp heads, flags, shelters — so a
 // viewpoint can be tested for what it will actually show:
-//   - dusk: a clear line to the visible horizon within ±4° of the setting sun (terrain beyond the
-//     plateau included), so the disc really touches the horizon in frame;
+//   - dusk: a clear line to the visible horizon within ±1.5° of the setting sun (terrain beyond the
+//     plateau included), so the disc really touches the horizon in frame — trees and hills may
+//     stand beside it;
 //   - horizon / rooftops: no lamp head or crown beside the eye, the clock tower unoccluded.
 // Heights are metres above the plateau; elevations are seen from an eye on the curved plateau.
 
@@ -133,6 +134,29 @@ export class Skyline {
   }
 
   /**
+   * Lamp heads (posts at least `minTop` high and ≤ 0.7 m across) between minDeg and maxDeg off plan
+   * direction (dx, dz), dMin–dMax m away: a lamp standing in the frame but off its middle.
+   */
+  lampsInView(x: number, z: number, dx: number, dz: number, minDeg: number, maxDeg: number, dMin: number, dMax: number, minTop: number): number {
+    let n = 0;
+    const cMin = Math.cos(maxDeg * DEG);
+    const cMax = Math.cos(minDeg * DEG);
+    this.span(x, z, dMax, (k) => {
+      for (const id of this.pCells[k]) {
+        const p = this.posts[id];
+        if (p[3] < minTop || p[3] > 6 || p[2] > 0.7) continue;
+        const ox = p[0] - x;
+        const oz = p[1] - z;
+        const d = Math.hypot(ox, oz);
+        if (d < dMin || d > dMax) continue;
+        const c = (ox * dx + oz * dz) / d;
+        if (c >= cMin && c <= cMax) n++;
+      }
+    });
+    return n;
+  }
+
+  /**
    * Building mass framing a view along (dx, dz), per side: Σ h / (6 + d) for buildings 8–40° off
    * its axis, 3–50 m away; writes { left, right }.
    */
@@ -243,12 +267,16 @@ export interface WalkSpot {
   tz: number;
   /** On a straight sidewalk (not a corner round a junction or turning circle). */
   straight: boolean;
+  /** Distance to the nearest dead end's turning circle centre (m). */
+  endDist?: number;
 }
 
 /**
  * The dusk viewpoint: a sidewalk spot whose view toward the setting sun (at the shot's own time
- * there) has an unbroken horizon within ±4°, framed with the disc within ±10° of the centre (30–70 %
- * of the frame width) and turned toward the street's run so it recedes into the sunset.
+ * there) has an unbroken horizon within ±1.5° (the disc itself; silhouettes may frame it), framed with the disc within ±10° of the centre (30–70 %
+ * of the frame width) and turned toward the street's run so it recedes into the sunset. Preferred:
+ * a straight sidewalk along a street that runs into the sunset (not the rim of a turning circle),
+ * a building line on at least one side and a streetlight in the frame, off its middle.
  */
 export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[], planR: number, roomy: (x: number, z: number) => boolean): Viewpoint | null {
   const sun = { x: 0, z: 0 };
@@ -256,24 +284,28 @@ export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[],
   const ranked: Array<{ s: WalkSpot; score: number; sx: number; sz: number }> = [];
   for (const s of spots) {
     duskSunDir(s.x, s.z, sun);
-    // quick reject: a building or crown within 40 m on the sun's own line
+    // quick reject: a building or crown within 40 m on the sun's own line (horizonClear's limit)
     let open = true;
     for (let d = 1; d < 40 && open; d += 1) {
       const h = sky.topAt(s.x + sun.x * d, s.z + sun.z * d);
-      if (h > 0.3 && elevation(h, d) > -DUSK_DIP) open = false;
+      if (h > 0.3 && elevation(h, d) > -DUSK_DIP + 0.25 * DEG) open = false;
     }
     if (!open) continue;
     // a street running into the sunset, framed by buildings on BOTH sides
     const align = Math.abs(s.tx * sun.x + s.tz * sun.z);
     sky.frameMass(s.x, s.z, sun.x, sun.z, mass);
-    const frame = Math.min(1.5, Math.min(mass.left, mass.right)) * 3 + Math.min(2, mass.left + mass.right);
-    ranked.push({ s, score: align * 2 + frame + (s.straight ? 0.8 : 0) + Math.min(2, sky.postClearance(s.x, s.z, 4, 1)) * 0.15, sx: sun.x, sz: sun.z });
+    const frame = Math.min(1.5, Math.max(mass.left, mass.right)) * 2 + Math.min(1.5, Math.min(mass.left, mass.right)) * 1.5;
+    const lamp = sky.lampsInView(s.x, s.z, sun.x, sun.z, 7, 30, 5, 28, 4) > 0;
+    const street = s.straight && align > 0.7;
+    // back from a turning circle, so its asphalt disc doesn't fill the foreground
+    const back = Math.max(0, Math.min(1, ((s.endDist ?? 99) - 7) / 7)) * 3;
+    ranked.push({ s, score: (street ? 4 : 0) + (lamp ? 1.5 : 0) + back + align * 2 + frame + Math.min(2, sky.postClearance(s.x, s.z, 4, 1)) * 0.15, sx: sun.x, sz: sun.z });
   }
   ranked.sort((a, b) => b.score - a.score);
   for (const r of ranked) {
     const { s, sx, sz } = r;
     if (!roomy(s.x, s.z)) continue;
-    if (!horizonClear(sky, planet, s.x, s.z, sx, sz, 4, planR)) continue;
+    if (!horizonClear(sky, planet, s.x, s.z, sx, sz, 1.5, planR)) continue;
     // turn the view up to 10° toward the street's run (whichever way along it faces the sun)
     const sign = s.tx * sx + s.tz * sz >= 0 ? 1 : -1;
     const tx = s.tx * sign;
@@ -284,6 +316,8 @@ export function pickDusk(sky: Skyline, planet: Planet | null, spots: WalkSpot[],
     const sn = Math.sin(off);
     const vx = sx * c - sz * sn;
     const vz = sx * sn + sz * c;
+    // nothing standing in the middle of the view close by (a lamp pole a metre ahead splits it)
+    if (sky.coneClearance(s.x, s.z, vx, vz, 14, 8, 1.5) < 8) continue;
     return { x: s.x, z: s.z, heading: Math.atan2(vx, -vz) };
   }
   return null;

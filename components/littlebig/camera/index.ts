@@ -71,6 +71,8 @@ const CLIMB = 12;
 const TURN_RATE = 1.7;
 /** Body radius against the countryside's trunks and boulders (a little wider than the city's: trunks are fat). */
 const NATURE_R = 0.55;
+/** A pedestrian pushes the FPV body back by at most the step plus this (m). */
+const PEOPLE_PUSH = 0.05;
 /** The zoom anchor holds fully above ANCHOR_HI m and lets go by ANCHOR_LO m (smoothly in between). */
 const ANCHOR_HI = 24;
 const ANCHOR_LO = 13;
@@ -698,6 +700,17 @@ export function createCameraSystem(): System {
     fromSphere(s.focus, plan);
     if (plan.x * plan.x + plan.z * plan.z < (CITY_PLAN_RADIUS + 5) ** 2 && ctx.world.cityIndex.collide(plan.x, plan.z, BODY_R, planOut)) {
       moveFocusToPlan(planOut.x, planOut.z);
+      fromSphere(s.focus, plan);
+    }
+    // Pedestrians: a soft body (slide round them, pushed back at most the step plus PEOPLE_PUSH,
+    // so a walker who steps into the player nudges instead of shoving); then the walls again.
+    if (ctx.services.people?.pushOut(plan.x, plan.z, BODY_R, planOut)) {
+      const dx = planOut.x - plan.x;
+      const dz = planOut.z - plan.z;
+      const k = Math.min(1, (dist + PEOPLE_PUSH) / (Math.sqrt(dx * dx + dz * dz) || 1));
+      plan.x += dx * k;
+      plan.z += dz * k;
+      if (!ctx.world.cityIndex.collide(plan.x, plan.z, BODY_R, planOut)) moveFocusToPlan(plan.x, plan.z);
     }
     // The countryside's trunks and boulders (A1's scatter; city trees are CityIndex obstacles).
     if (ctx.services.nature?.collide(s.focus, NATURE_R, s.focus)) orthonormalizeTangent(s.fwd, s.focus);

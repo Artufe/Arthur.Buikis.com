@@ -23,6 +23,7 @@ import { extendToon, grazingShadowsWithOptOut, LOW_LIGHT_GRADE } from '../terrai
 import type { ToonMaterial, ToonPatch } from '../render/toon';
 import { blobTreeGeometry, bushGeometry, coniferGeometry, lighthouseGeometry, palmGeometry, rockGeometry, WINDMILL_HUB, windmillGeometry } from './geometry';
 import { createBeam, type Beam } from './beam';
+import { createBoats, findBoatLoops, type Boats } from './boats';
 import { findLandmarks } from './landmarks';
 import { composeUp } from './frame';
 import { createGroundCover, type GroundCover } from './ground-cover';
@@ -41,9 +42,12 @@ const SMALL_SHADOW_TO = 110;
 export const NATURE_PATCH_VERTEX_PARS = /* glsl */ `
 attribute float aTint;
 attribute float aSway;
-varying float vLbNoShadow;`;
+attribute vec3 aSmoothN;
+varying float vLbNoShadow;
+varying float vLbGlow;`;
 export const NATURE_PATCH_VERTEX = /* glsl */ `
 vLbNoShadow = aSway < -0.5 ? 1.0 : 0.0;
+vLbGlow = aTint < -0.5 ? 1.0 : 0.0;
 #ifdef USE_INSTANCING
   {
     vec3 lbIp = instanceMatrix[3].xyz;
@@ -56,7 +60,7 @@ vLbNoShadow = aSway < -0.5 ? 1.0 : 0.0;
         float lbK = 1.0;
       #endif
       vec2 lbHub = vec2(${WINDMILL_HUB[0].toFixed(3)}, ${WINDMILL_HUB[1].toFixed(3)}) * lbK;
-      float lbA = lbTime * 0.8 + lbPh * 7.0;
+      float lbA = lbTime * (0.62 + 0.3 * fract(lbPh * 3.7)) + lbPh * 7.0;
       vec2 lbD = transformed.xy - lbHub;
       transformed.xy = lbHub + vec2(lbD.x * cos(lbA) - lbD.y * sin(lbA), lbD.x * sin(lbA) + lbD.y * cos(lbA));
     } else {
@@ -64,14 +68,23 @@ vLbNoShadow = aSway < -0.5 ? 1.0 : 0.0;
       transformed.x += (sin(lbTime * 1.4 + lbPh) * 0.6 + sin(lbTime * 2.3 + lbPh * 1.7) * 0.4) * lbS * 0.024;
       transformed.z += cos(lbTime * 1.1 + lbPh * 1.3) * lbS * 0.017;
     }
+    #ifdef LB_NATURE_COLOR
+      float lbSm = 0.92 * (1.0 - smoothstep(35.0, 70.0, distance(lbIp, lbCamPos)));
+      if (lbSm > 0.0) {
+        mat3 lbIm = mat3(instanceMatrix);
+        vec3 lbSn = aSmoothN / vec3(dot(lbIm[0], lbIm[0]), dot(lbIm[1], lbIm[1]), dot(lbIm[2], lbIm[2]));
+        vNormal = normalize(mix(vNormal, normalize(normalMatrix * (lbIm * lbSn)), lbSm));
+      }
+    #endif
   }
 #endif
 #if defined(USE_COLOR) && defined(USE_INSTANCING_COLOR)
-  vColor.rgb = color * mix(vec3(1.0), instanceColor.rgb, aTint);
+  vColor.rgb = color * mix(vec3(1.0), instanceColor.rgb, max(aTint, 0.0));
 #endif`;
 
 const NATURE_FRAGMENT_PARS = /* glsl */ `
 varying float vLbNoShadow;
+varying float vLbGlow;
 uniform vec3 uLod;
 uniform vec2 uShFade;
 // LOD cross-fade (uLod: from, to, mode 1 = near mesh, 2 = far mesh): complementary dither, so a
@@ -93,7 +106,8 @@ const NATURE_FRAGMENT = /* glsl */ `
     float lbDown = clamp(-dot(lbNw, lbUpN) * 0.7 + 0.3, 0.0, 1.0);
     outgoingLight += diffuseColor.rgb * lbGroundFill * (0.55 * lbDown) * smoothstep(0.05, 0.3, dot(lbUpN, lbSunDir));
   }
-  ${LOW_LIGHT_GRADE}`;
+  ${LOW_LIGHT_GRADE}
+  outgoingLight += vLbGlow * vec3(1.0, 0.66, 0.32) * 1.4 * smoothstep(0.35, 0.8, lbNightAt(vLbWorld));`;
 const NATURE_DEPTH = /* glsl */ `
   if (lbLodCull()) discard;
   if (uShFade.y > uShFade.x && 1.0 - lbSmooth01((lbCamAlt - uShFade.x) / (uShFade.y - uShFade.x)) < lbBayer4(gl_FragCoord.xy)) discard;`;
@@ -122,6 +136,9 @@ const BUSH = pal('#4FAE4A', '#62BD4E', '#3E9E48', '#77C552');
 const BLOOM = pal('#F7A8C8', '#FFD9E6', '#FFE7A0');
 const HEDGE = pal('#3E9443', '#4A9E46', '#358C40', '#52A94B');
 const ROCK = pal('#A39A92', '#948E8B', '#B3AAA1', '#8A8480');
+/** Windmill caps (the palette's roofs) and heights relative to 9 m. */
+const MILL_ROOF = pal('#D9483B', '#5B6B8C', '#5BA35B');
+const MILL_SCALE = [1, 0.86, 1.14];
 
 function pick(list: Color[], t: number): Color {
   return list[Math.min(list.length - 1, Math.floor(t * list.length))];
@@ -165,6 +182,7 @@ export function createNatureSystem(): System {
   const lastCam = new Float64Array(18);
   let cover: GroundCover | null = null;
   let beam: Beam | null = null;
+  let boats: Boats | null = null;
 
   function compactAll() {
     for (const k of kinds) {
@@ -186,6 +204,11 @@ export function createNatureSystem(): System {
     async init(ctx: LBContext) {
       const t = terrainData(ctx.world.planet, ctx.q.terrainDetail);
       const marks = findLandmarks(ctx.world.planet, t);
+      const lh = marks.find((m) => m.kind === 'lighthouse');
+      const boatLoops = findBoatLoops(ctx.world.planet, [
+        { dir: ctx.world.planet.cityDir, dists: [96, 104, 112, 122, 134, 148], count: 3 },
+        ...(lh ? [{ dir: lh.dir, dists: [16, 22, 30, 40, 52], count: 2, fish: true }] : []),
+      ]);
       await ctx.yield();
       const avoid = marks.map((m) => ({ x: m.dir.x * (R + m.h), y: m.dir.y * (R + m.h), z: m.dir.z * (R + m.h), r: m.kind === 'windmill' ? 11 : 5 }));
       const steps = scatterNatureSteps({ terrain: t, city: ctx.world.city, cityIndex: ctx.world.cityIndex, cityDir: ctx.world.planet.cityDir, density: ctx.q.density, avoid });
@@ -203,6 +226,8 @@ export function createNatureSystem(): System {
       const mk = (name: string, lod: Vector3, sh: Vector2): ToonMaterial => {
         const m = ctx.toon.material({ name, vertexColors: true, reveal: 'instance', revealDuration: 0.65, rim: 0.3, patch: naturePatch(lod, sh) });
         extendToon(m, grazingShadowsWithOptOut);
+        // Colour pass only (the shadow depth twin has no vNormal): the smooth-normal blend.
+        m.defines = { ...m.defines, LB_NATURE_COLOR: '' };
         return m;
       };
       const matBase = mk('nature', new Vector3(0, 1, 0), new Vector2(0, 0));
@@ -349,9 +374,11 @@ export function createNatureSystem(): System {
         const wave: number[] = [];
         list.forEach((m, j) => {
           const r = R + m.h - 0.15;
-          composeUp(_m, m.dir.x * r, m.dir.y * r, m.dir.z * r, m.dir.x, m.dir.y, m.dir.z, m.yaw, height, height);
+          // Windmills are siblings, not clones: ±15 % in height, each its own roof colour.
+          const hj = m.kind === 'windmill' ? height * MILL_SCALE[j % 3] : height;
+          composeUp(_m, m.dir.x * r, m.dir.y * r, m.dir.z * r, m.dir.x, m.dir.y, m.dir.z, m.yaw, hj, hj);
           mesh.setMatrixAt(j, _m);
-          mesh.setColorAt(j, _c.setRGB(1, 1, 1));
+          mesh.setColorAt(j, m.kind === 'windmill' ? MILL_ROOF[j % 3] : _c.setRGB(1, 1, 1));
           wave.push(0.1 + 0.05 * j);
         });
         mesh.geometry.setAttribute('aReveal', new InstancedBufferAttribute(new Float32Array(list.length).fill(1e6), 1));
@@ -366,6 +393,9 @@ export function createNatureSystem(): System {
         const r = R + lighthouse.h + 11 * 0.8;
         beam = createBeam(ctx, lighthouse.dir.x * r, lighthouse.dir.y * r, lighthouse.dir.z * r, lighthouse.dir);
       }
+      // Boats: three sailboats off the city's coast, a sailboat and a fishing boat by the lighthouse
+      // (loops found before anything entered the scene: no frame may draw it before ctx.compile()).
+      boats = createBoats(ctx, matBase, boatLoops);
 
       // Trunk and boulder discs of the countryside scatter for FPV collision (city trees are
       // CityIndex obstacles already).
@@ -407,6 +437,7 @@ export function createNatureSystem(): System {
         attr.needsUpdate = true;
       }
       beam?.reveal(start + 0.5);
+      boats?.reveal(start + 0.6);
       cover?.reveal(start + 0.4);
       ctx.services.nature = collider;
     },
@@ -459,6 +490,7 @@ export function createNatureSystem(): System {
       const cast = alt < SMALL_SHADOW_TO;
       for (let i = 0; i < smallCasters.length; i++) smallCasters[i].castShadow = cast;
       cover?.update(ctx);
+      boats?.update(ctx);
     },
     dispose(ctx: LBContext) {
       if (ctx.services.nature) ctx.services.nature = undefined;
@@ -476,6 +508,8 @@ export function createNatureSystem(): System {
       cover = null;
       beam?.dispose();
       beam = null;
+      boats?.dispose();
+      boats = null;
     },
   };
 }

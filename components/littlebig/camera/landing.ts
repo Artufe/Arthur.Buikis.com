@@ -23,6 +23,12 @@ import type { Building, CityIndex, CityPlan } from '../world/city/types';
 import { v3, type Vec3 } from '../world/sphere';
 
 const DEG = Math.PI / 180;
+/** The dive's landing: no pole within this half-angle of the view axis (rad). */
+const POLE_HALF = 8 * DEG;
+/** The dive's landing: the eye at least this far from the kerb (m; the middle of a 2.2 m sidewalk is 1.1). */
+const KERB_MIN = 0.95;
+/** The dive's landing: this far (m) from either end of a zebra crossing. */
+const CROSS_CLEAR = 5;
 /** Stride of the solids array. */
 export const SOLID = 5;
 
@@ -210,7 +216,21 @@ export interface Landing {
   score: number;
 }
 
+interface Kerb {
+  cd: number;
+  queue: number;
+  rx: number;
+  rz: number;
+}
+
 const WALK_KINDS_DIVE: Record<string, number> = { sidewalk: 1, corner: 1, plaza: 1 };
+const PAVED: Record<string, number> = { sidewalk: 1, plaza: 1 };
+/** The dive's view turns off the pavement line: toward the road (+) and away from it (−). */
+const DIVE_TURNS = [0, 7 * DEG, 13 * DEG];
+const NO_TURN = [0];
+const ZONE_W: Partial<Record<string, number>> = { residential: 0.5, downtown: 1.2 };
+/** Where the dive stands across a pavement: share of the way from its centre line to the building side. */
+const ACROSS_DIVE = [0.55, 1];
 const WALK_KINDS_LIVE: Record<string, number> = { sidewalk: 1, corner: 1, plaza: 1 };
 
 /** Everything the scorer needs, with scratch (one per caller, reused). */
@@ -230,6 +250,18 @@ export class LandingFinder {
     readonly solids: Float64Array = cameraSolids(plan),
   ) {
     this.tower = plan.buildings.find((b) => b.landmark === 'clocktower') ?? null;
+    const poles: number[] = [];
+    for (let i = 0; i < solids.length; i += SOLID) {
+      if (solids[i + 2] <= 0.3 && solids[i + 3] <= 0.5 && solids[i + 4] >= 3.4) for (let k = 0; k < SOLID; k++) poles.push(solids[i + k]);
+    }
+    this.poles = Float64Array.from(poles);
+    const ends: number[] = [];
+    for (const w of plan.walkEdges) {
+      if (w.kind !== 'crossing') continue;
+      const n = w.path.pts.length;
+      ends.push(w.path.pts[0], w.path.pts[1], w.path.pts[n - 2], w.path.pts[n - 1]);
+    }
+    this.crossEnds = Float64Array.from(ends);
     const n = plan.buildings.length;
     this.bb = new Float64Array(n * 7);
     plan.buildings.forEach((b, i) => {
@@ -237,6 +269,10 @@ export class LandingFinder {
     });
   }
 
+  /** Both ends of every zebra crossing (x, z interleaved). */
+  private readonly crossEnds: Float64Array;
+  /** Thin solids taller than the eye (streetlight, lamp and flag poles). */
+  private readonly poles: Float64Array;
   /** Buildings as [x, z, cos, sin, half w, half d, h] (ray tests without trig). */
   private readonly bb: Float64Array;
 
@@ -317,6 +353,112 @@ export class LandingFinder {
     return this.ray(x, z, hx, hz, max);
   }
 
+  /**
+   * The near carriageway at (x, z), into this.kerb: `cd` = distance (m) from the kerb (nearest road
+   * centreline minus half its width; 9 with no road within 8 m), (rx, rz) the road's nearest
+   * centreline point, and `queue` 0..1 = how deep the spot sits in the zone where the lanes on its
+   * side queue for their stop line (vehicles parked beside the lens for a minute). Heading-free, so
+   * one call serves every heading and every offset across the pavement (cd grows by the offset).
+   */
+  private kerbAt(x: number, z: number): void {
+    const k = this.kerb;
+    k.cd = 9;
+    k.queue = 0;
+    k.rx = x;
+    k.rz = z;
+    if (this.index.nearestRoad(x, z, 8, this.road) < 0) return;
+    const e = this.plan.edges[this.road.edge];
+    k.cd = this.road.dist - e.width / 2;
+    sampleAt(e.centre, this.road.s, this.rs);
+    k.rx = this.rs.x;
+    k.rz = this.rs.z;
+    // Right of a→b ⇒ the lanes on our side run a→b (right-hand traffic), else b→a.
+    const ab = (x - this.rs.x) * -this.rs.tz + (z - this.rs.z) * this.rs.tx > 0;
+    const lanes = ab ? e.lanesAB : e.lanesBA;
+    const sL = ab ? this.road.s : e.centre.length - this.road.s;
+    for (let i = 0; i < lanes.length; i++) {
+      // The outermost lane (next to the kerb) counts fully.
+      const d = this.plan.lanes[lanes[i]].stopS - sL;
+      const w = d < -4 || d > 34 ? 0 : d < 0 ? (d + 4) / 4 : d < 22 ? 1 : 1 - (d - 22) / 12;
+      k.queue = Math.max(k.queue, w * (i === lanes.length - 1 ? 1 : 0.6));
+    }
+  }
+  private readonly kerb: Kerb = { cd: 9, queue: 0, rx: 0, rz: 0 };
+  private diveBonus = 0;
+  /** The dive spot being scored (prepDive): its kerb, and the poles within 23 m of it. */
+  private readonly dk: Kerb = { cd: 9, queue: 0, rx: 0, rz: 0 };
+  private lPoles = new Float64Array(SOLID * 16);
+  private nPoles = 0;
+
+  /**
+   * Per-spot part of the dive's rules (heading-free, so once per spot): the kerb (`hint`: a walk
+   * sample's kerb with cd already offset, else measured here) at least KERB_MIN away, clear of
+   * both ends of every zebra (people wait there and cross at the lens), and the poles near it
+   * gathered for poleOnAxis. False if the spot is unusable.
+   */
+  private prepDive(x: number, z: number, hint: Kerb | null): boolean {
+    if (hint) Object.assign(this.dk, hint);
+    else {
+      this.kerbAt(x, z);
+      Object.assign(this.dk, this.kerb);
+    }
+    if (this.dk.cd < KERB_MIN) return false;
+    const ce = this.crossEnds;
+    for (let i = 0; i < ce.length; i += 2) if ((ce[i] - x) ** 2 + (ce[i + 1] - z) ** 2 < CROSS_CLEAR * CROSS_CLEAR) return false;
+    const s = this.poles;
+    let n = 0;
+    for (let i = 0; i < s.length; i += SOLID) {
+      if (Math.abs(s[i] - x) > 23 || Math.abs(s[i + 1] - z) > 23) continue;
+      if (n + SOLID > this.lPoles.length) {
+        const g = new Float64Array(this.lPoles.length * 2);
+        g.set(this.lPoles);
+        this.lPoles = g;
+      }
+      for (let k = 0; k < SOLID; k++) this.lPoles[n + k] = s[i + k];
+      n += SOLID;
+    }
+    this.nPoles = n;
+    return true;
+  }
+
+  /**
+   * True if a pole (streetlight, lamp, flag: thin and taller than the eye) stands within `max` m
+   * ahead inside ±`half` of the view axis: a dark bar splitting the frame.
+   */
+  poleOnAxis(x: number, z: number, hx: number, hz: number, half: number, max = 22, s = this.poles, len = s.length): boolean {
+    for (let i = 0; i < len; i += SOLID) {
+      const r = s[i + 2];
+      const dx = s[i] - x;
+      const dz = s[i + 1] - z;
+      const along = dx * hx + dz * hz;
+      if (along < 0.5 || along > max) continue;
+      const ang = Math.atan2(Math.abs(-dx * hz + dz * hx), along) - Math.asin(Math.min(1, r / Math.hypot(dx, dz)));
+      if (ang < half) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Distance (m, ≤ max) from (x, z) to the nearest carriageway or junction patch, marched along 12
+   * rays (exact near corners, where the nearest centreline says little). Stage 2 only: ~150
+   * classify calls.
+   */
+  kerbDist(x: number, z: number, max = 3.2): number {
+    let best = max;
+    for (let k = 0; k < 12; k++) {
+      const dx = Math.cos((k * Math.PI) / 6);
+      const dz = Math.sin((k * Math.PI) / 6);
+      for (let d = 0.25; d < best; d += 0.25) {
+        const c = this.index.classify(x + dx * d, z + dz * d);
+        if (c === 'road' || c === 'intersection') {
+          best = d;
+          break;
+        }
+      }
+    }
+    return best;
+  }
+
   /** Nearest facade (m, ≤ 8) to plan (x, z). */
   private sideRoom(x: number, z: number): number {
     const B = this.bb;
@@ -340,6 +482,16 @@ export class LandingFinder {
   private coarse(x: number, z: number, heading: number, q: LandingQuery, side: number, litSpot: number): number {
     const hx = Math.sin(heading);
     const hz = -Math.cos(heading);
+    if (q.dive) {
+      // The poster frame (prepDive ran for this spot): no pole splitting the centre, not looking
+      // out over a junction's empty asphalt; the road on the left (the kerb lane's cars drive away
+      // down the street, oncoming ones keep to the far lane; B2's walkers keep right, so oncoming
+      // ones pass out along the kerb), standing well off the kerb lane and away from its queue.
+      const kb = this.dk;
+      if (this.poleOnAxis(x, z, hx, hz, POLE_HALF, 22, this.lPoles, this.nPoles)) return -Infinity;
+      const left = -(kb.rx - x) * hz + (kb.rz - z) * hx < 0;
+      this.diveBonus = Math.min(1, (kb.cd - KERB_MIN) / 1.2) * 1.2 - kb.queue * 3 + (left ? 0.6 : 0);
+    }
     const L = this.viewLength(x, z, hx, hz, q.dive ? 90 : 60);
     if (L < (q.dive ? 26 : 6)) return q.dive ? -Infinity : -6 + L * 0.2;
     // The frame's sides: a facade close ahead-left or ahead-right fills half the first frame.
@@ -359,6 +511,9 @@ export class LandingFinder {
       if (q.dive) return -Infinity;
       sc -= 8;
     }
+    if (q.dive && (this.index.classify(x + hx * 4, z + hz * 4) === 'intersection' || this.index.classify(x + hx * 8, z + hz * 8) === 'intersection')) return -Infinity;
+    // (The dive's clock tower is scored here, so views of it make the cut for the full score.)
+    if (q.dive) sc += this.diveBonus + (this.tower && this.towerVisible(x, z, hx, hz) ? 1.3 : 0);
     if (!q.dive) {
       const gl = Math.hypot(x - q.cx, z - q.cz);
       sc -= gl * 0.07;
@@ -422,21 +577,37 @@ export class LandingFinder {
     sc += litAhead * (q.dive ? 1.2 : 0.5);
     {
       let mass = 0;
+      let massL = 0;
       for (const b of this.plan.buildings) {
         const dx = b.x - x;
         const dz = b.z - z;
         const dist = Math.hypot(dx, dz);
         if (dist < 6 || dist > 95) continue;
-        const ang = Math.atan2(Math.abs(-dx * hz + dz * hx), dx * hx + dz * hz);
+        const lat = -dx * hz + dz * hx;
+        const ang = Math.atan2(Math.abs(lat), dx * hx + dz * hz);
         if (ang > 36 * DEG) continue;
-        mass += (Math.min(b.h, 28) / 12) * Math.min(1.2, (b.w + b.d) / 2 / dist);
+        // (The dive: town, not the suburbs: houses count half, downtown a little more.)
+        const m = (Math.min(b.h, 28) / 12) * Math.min(1.2, (b.w + b.d) / 2 / dist) * (q.dive ? ZONE_W[b.zone] ?? 1 : 1);
+        mass += m;
+        if (lat < 0) massL += m;
       }
-      sc += Math.min(1, mass / 2.5) * (q.dive ? 1.6 : 0.8);
-      if (this.tower && this.towerVisible(x, z, hx, hz)) sc += q.dive ? 1.3 : 0.5;
+      // The dive wants a street canyon: town on both sides of the frame, not half meadow.
+      if (q.dive) sc += Math.min(1, mass / 2.5) * 1.6 + Math.min(1, Math.min(massL, mass - massL) / 0.7) * 1.6;
+      else sc += Math.min(1, mass / 2.5) * 0.8;
+      if (!q.dive && this.tower && this.towerVisible(x, z, hx, hz)) sc += 0.5;
     }
     if (q.dive) {
       // The street receding diagonally: turned 7–13° toward the carriageway.
       sc += toward > 5 * DEG && toward < 15 * DEG ? 0.5 : 0;
+      // Lawn and verge in the lower frame read as the edge of town.
+      for (let k = 0; k < 6; k++) {
+        const a = ((k % 3) - 1) * 24 * DEG;
+        const d = k < 3 ? 7 : 15;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        const c = this.index.classify(x + (hx * ca - hz * sa) * d, z + (hz * ca + hx * sa) * d);
+        if (c === 'free' || c === 'garden' || c === 'outside' || c === 'park') sc -= 0.3;
+      }
     } else {
       // Unpaved ground ahead may hold the nature scatter's trees (they are not in the plan).
       const c = this.index.classify(x + hx * 3, z + hz * 3);
@@ -468,6 +639,7 @@ export class LandingFinder {
     const side = this.sideRoom(x, z);
     if (side < 0.9) return -Infinity;
     this.gatherLocal(x, z);
+    if (q.dive && !this.prepDive(x, z, null)) return -Infinity;
     const c = this.coarse(x, z, heading, q, side, this.lit(q.sun, x, z, EYE_HEIGHT + 0.2) ? 1 : 0);
     return c === -Infinity ? c : c + this.fine(x, z, heading, q, toward);
   }
@@ -482,8 +654,24 @@ export class LandingFinder {
     if (ang > 22 * DEG) return false;
     const top = t.h - 3; // the clock faces
     // A sight line climbing from the eye to the clock faces: blocked by any roof above it.
-    const hit = this.ray(x, z, dx / D, dz / D, D - Math.max(t.w, t.d) / 2 - 0.5, EYE_HEIGHT, (top - EYE_HEIGHT) / D);
-    return hit >= D - Math.max(t.w, t.d) / 2 - 0.5;
+    // (Stop short of the tower's own box, corners included: it used to hide itself.)
+    const len = D - Math.hypot(t.w, t.d) / 2 - 0.2;
+    const rise = (top - EYE_HEIGHT) / D;
+    if (this.ray(x, z, dx / D, dz / D, len, EYE_HEIGHT, rise) < len) return false;
+    // ...or by a tree crown (the park's canopy hid it from a "tower view" at the park's edge).
+    const s = this.solids;
+    const ux = dx / D;
+    const uz = dz / D;
+    for (let i = 0; i < s.length; i += SOLID) {
+      const ox = s[i] - x;
+      const oz = s[i + 1] - z;
+      const a = ox * ux + oz * uz;
+      // (Crowns only: a thin pole in front of it hides a sliver, not the tower.)
+      if (s[i + 2] < 0.5 || a < 0 || a > len || Math.abs(-ox * uz + oz * ux) > s[i + 2] * 0.8) continue;
+      const hh = EYE_HEIGHT + a * rise;
+      if (hh > s[i + 3] && hh < s[i + 4]) return false;
+    }
+    return true;
   }
 
   /**
@@ -509,37 +697,87 @@ export class LandingFinder {
       let next = 0;
       for (let i = 0; i < np - 1; i++) {
         if (p.s[i + 1] < next) continue;
-        const x = p.pts[i * 2];
-        const z = p.pts[i * 2 + 1];
+        const x0 = p.pts[i * 2];
+        const z0 = p.pts[i * 2 + 1];
         next = p.s[i] + step;
-        if ((x - q.cx) ** 2 + (z - q.cz) ** 2 > r2) continue;
-        if (this.index.collide(x, z, 0.55, _o)) continue;
-        const side = this.sideRoom(x, z);
-        if (side < 0.9) continue;
-        const tl = Math.hypot(p.pts[i * 2 + 2] - x, p.pts[i * 2 + 3] - z) || 1;
-        const tx = (p.pts[i * 2 + 2] - x) / tl;
-        const tz = (p.pts[i * 2 + 3] - z) / tl;
-        const lit = this.lit(q.sun, x, z, eye) ? 1 : 0;
-        this.gatherLocal(x, z);
-        for (const dir of [1, -1]) {
-          const h = Math.atan2(tx * dir, -tz * dir);
-          if (!q.dive && Number.isFinite(q.heading)) {
-            let d = h - q.heading;
-            d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
-            if (Math.abs(d) > Math.PI * 0.6) continue;
+        if ((x0 - q.cx) ** 2 + (z0 - q.cz) ** 2 > r2) continue;
+        const tl = Math.hypot(p.pts[i * 2 + 2] - x0, p.pts[i * 2 + 3] - z0) || 1;
+        const tx = (p.pts[i * 2 + 2] - x0) / tl;
+        const tz = (p.pts[i * 2 + 3] - z0) / tl;
+        // The dive also stands across the pavement, toward its building side (away from the road).
+        let away = 0;
+        const hint = this.kerb;
+        if (q.dive) {
+          this.kerbAt(x0, z0);
+          if (hint.cd < 9) away = (x0 - hint.rx) * -tz + (z0 - hint.rz) * tx > 0 ? 1 : -1;
+        }
+        const cd0 = hint.cd;
+        const across = Math.max(0, w.width / 2 - 0.35);
+        for (const o of away ? ACROSS_DIVE : NO_TURN) {
+          const x = x0 - tz * away * across * o;
+          const z = z0 + tx * away * across * o;
+          if (q.dive) {
+            // Along a sidewalk the kerb is parallel: the offset adds to the sample's distance;
+            // corners and plazas measure it at the spot.
+            hint.cd = cd0 + across * o;
+            if (!this.prepDive(x, z, w.kind === 'sidewalk' ? hint : null)) continue;
           }
-          const sc = this.coarse(x, z, h, q, side, lit);
-          if (sc !== -Infinity) cand.push({ x, z, heading: h, score: sc, toward: 0, side, lit, tx, tz, dir });
+          if (o > 0 && !PAVED[this.index.classify(x, z)]) continue;
+          if (this.index.collide(x, z, 0.55, _o)) continue;
+          const side = this.sideRoom(x, z);
+          if (side < 0.9) continue;
+          const lit = this.lit(q.sun, x, z, eye) ? 1 : 0;
+          this.gatherLocal(x, z);
+          for (const dir of [1, -1]) {
+            const h0 = Math.atan2(tx * dir, -tz * dir);
+            if (!q.dive && Number.isFinite(q.heading)) {
+              let d = h0 - q.heading;
+              d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+              if (Math.abs(d) > Math.PI * 0.6) continue;
+            }
+            // The dive also tries the view turned toward the road (the street recedes diagonally,
+            // the kerb's poles cross off the centre) and a little away from it. Plan heading grows
+            // clockwise; the road is on the right of the view when −away·dir > 0.
+            for (const o of q.dive ? DIVE_TURNS : NO_TURN) {
+              const h = h0 - away * dir * o;
+              const sc = this.coarse(x, z, h, q, side, lit);
+              if (sc !== -Infinity) cand.push({ x, z, heading: h, score: sc, toward: o, side, lit, tx, tz, dir });
+            }
+            if (q.dive && this.tower) {
+              // ...and the view turned onto the clock tower when it stands within 28° of the line.
+              let d = Math.atan2(this.tower.x - x, -(this.tower.z - z)) - h0;
+              d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+              if (Math.abs(d) > 2 * DEG && Math.abs(d) < 28 * DEG) {
+                const sc = this.coarse(x, z, h0 + d, q, side, lit);
+                if (sc !== -Infinity) cand.push({ x, z, heading: h0 + d, score: sc, toward: Math.abs(d), side, lit, tx, tz, dir });
+              }
+            }
+          }
         }
       }
     }
     cand.sort((a, b) => b.score - a.score);
     // Stage 2: the best few, also turned toward the carriageway (the street recedes diagonally,
     // poles at the curb move off the view axis), with the full score.
-    const offs = q.dive ? [7 * DEG, 12 * DEG] : [9 * DEG, -9 * DEG];
+    const offs = q.dive ? NO_TURN.slice(1) : [9 * DEG, -9 * DEG];
     const top: Cand[] = [];
-    for (const c of cand.slice(0, q.dive ? 36 : 10)) {
+    // The best few distinct spots (variants of one spot and its neighbours would crowd them out).
+    const pool: Cand[] = [];
+    for (const c of cand) {
+      if (pool.length >= (q.dive ? 60 : 10)) break;
+      if (q.dive && pool.some((k) => (k.x - c.x) ** 2 + (k.z - c.z) ** 2 < 9 && Math.abs(Math.sin((k.heading - c.heading) / 2)) < 0.2)) continue;
+      pool.push(c);
+    }
+    for (const c of pool) {
+      if (q.dive) {
+        // Re-score with the kerb measured at the spot itself: near a junction the walk sample's
+        // nearest road (the stage-1 hint) can be another edge than the spot's.
+        this.gatherLocal(c.x, c.z);
+        c.score = this.prepDive(c.x, c.z, null) ? this.coarse(c.x, c.z, c.heading, q, c.side, c.lit) : -Infinity;
+        if (c.score === -Infinity) continue;
+      }
       top.push(c);
+      if (!offs.length && q.aimX === undefined) continue;
       let rs = 0;
       if (this.index.nearestRoad(c.x, c.z, 12, this.road) >= 0) {
         sampleAt(plan.edges[this.road.edge].centre, this.road.s, this.rs);
@@ -569,7 +807,9 @@ export class LandingFinder {
     // Keep spots spread out (not 20 variants of one corner).
     const keep: Landing[] = [];
     for (const c of top) {
-      if (keep.length >= max) break;
+      if (keep.length >= max || c.score === -Infinity) break;
+      // The kerb, measured properly (near a corner the nearest centreline says little).
+      if (q.dive && this.kerbDist(c.x, c.z, KERB_MIN) < KERB_MIN - 0.2) continue;
       if (keep.some((k) => Math.hypot(k.x - c.x, k.z - c.z) < (q.dive ? 3 : 1) && Math.abs(Math.sin((k.heading - c.heading) / 2)) < 0.2)) continue;
       keep.push({ x: c.x, z: c.z, heading: c.heading, score: c.score });
     }

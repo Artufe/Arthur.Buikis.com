@@ -281,6 +281,38 @@ export interface Services {
    * nature system has initialised; call through ctx.services.nature?.collide(...).
    */
   nature?: NatureService;
+  /**
+   * The pedestrians' bodies (B2), for the FPV player's soft collision (A4 calls it after the walls).
+   * Optional: install it once the people system has initialised; call through
+   * ctx.services.people?.pushOut(...).
+   */
+  people?: PeopleService;
+  /**
+   * The vehicles' bodies (B1), for the FPV player's collision (A4 calls it after the walls).
+   * Optional: installed once the traffic system has initialised; call through
+   * ctx.services.traffic?.collide(...).
+   */
+  traffic?: TrafficService;
+}
+
+/** The fleet as solid bodies the player cannot walk into (B1). Zero-alloc. */
+export interface TrafficService {
+  /**
+   * Push a body of radius r (m) standing at plan (x, z) out of every drawn vehicle's body box it
+   * overlaps (sliding along it). Writes the resolved plan position into out; returns true if it
+   * moved. (Vehicles also stop short of a player standing in their lane: traffic reads ctx.view.)
+   */
+  collide(x: number, z: number, r: number, out: { x: number; z: number }): boolean;
+}
+
+/** The pedestrians as bodies the player bumps into (B2). Zero-alloc. */
+export interface PeopleService {
+  /**
+   * Push a body of radius r (m) standing at plan (x, z) out of every shown walker's / idler's disc
+   * it overlaps (their body radius added to r), sliding round them. Writes the resolved plan
+   * position into out; returns true if it moved.
+   */
+  pushOut(x: number, z: number, r: number, out: { x: number; z: number }): boolean;
 }
 
 /** Collision against the countryside's trunks and boulders (A1, nature/collide.ts). Zero-alloc. */
