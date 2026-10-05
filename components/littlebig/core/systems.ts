@@ -38,6 +38,7 @@ import { createNatureSystem } from '../nature';
 import { createOceanSystem } from '../ocean';
 import { createPeopleSystem } from '../people';
 import { createSkySystem } from '../sky';
+import { createSpaceSystem } from '../space';
 import { createTerrainSystem } from '../terrain';
 import { createTrafficSystem } from '../traffic';
 import type { System } from './contracts';
@@ -55,5 +56,7 @@ export function createSystems(): System[] {
     createTrafficSystem(), // stage 2 (traffic/, B1)
     createPeopleSystem(), // stage 2 (people/, B2)
     createAirSystem(), // stage 2 (air/, B3)
+    // v2 (docs/littlebig/V2.md). Pre-registered slots: agents replace their own index.ts.
+    createSpaceSystem(), // stage 2 (space/, S1)
   ];
 }

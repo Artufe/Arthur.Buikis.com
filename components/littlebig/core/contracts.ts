@@ -134,6 +134,10 @@ export interface ViewState {
   cityX: number;
   cityZ: number;
   cityDist: number;
+  /** v2: what the camera is doing (D1). 'explore' is the v1 orbit ↔ street flow. */
+  mode: CameraMode;
+  /** v2: the Trackable id being ridden while mode === 'ride' (else null). */
+  ride: string | null;
 }
 
 /** A camera placement for setView (the shot tool and fly-to presets). Angles in DEGREES. */
@@ -248,6 +252,17 @@ export interface CameraService {
    * been seen. Optional: core's default service has none.
    */
   stick?(): { visible: boolean; active: boolean; x: number; y: number; ox: number; oy: number; touch: boolean };
+  // ── v2 (D1). Optional: core's default service has none; the UI hides what is missing. ──
+  /** Current mode, the ridden id, and the enter/exit transition's progress (0 → 1, 1 = settled). */
+  mode?(): { mode: CameraMode; ride: string | null; blend: number };
+  /** Ride a registered Trackable (smooth transition from the current pose). False if unknown / not shown. */
+  ride?(id: string): boolean;
+  /** Ride the next / previous Trackable of the ridden kind (UI arrows, [ ] keys). */
+  cycle?(dir: 1 | -1): void;
+  /** Bird flight from the current pose. */
+  fly?(): void;
+  /** Back to explore (orbit ↔ street) from wherever the camera is now, without a jump. */
+  exitMode?(): void;
 }
 
 /**
@@ -295,6 +310,10 @@ export interface Services {
    * ctx.services.traffic?.collide(...).
    */
   traffic?: TrafficService;
+  /** v2: everything the camera can ride or the player can click to follow (core/track.ts). */
+  track: TrackService;
+  /** v2: world-anchored name tags the UI draws (settlements, landmarks, the station). */
+  labels: LabelService;
 }
 
 /** The fleet as solid bodies the player cannot walk into (B1). Zero-alloc. */
@@ -325,6 +344,104 @@ export interface NatureService {
    * (out may be dir); returns true if it moved.
    */
   collide(dir: Vec3, r: number, out: Vec3): boolean;
+}
+
+// ── v2: rides, picking and labels (orchestrator, docs/littlebig/V2.md §4) ──
+//
+// A system that owns moving things (planes, cars, people, satellites…) registers each one the
+// player may follow as a Trackable in init() (unregister in dispose()). The camera (D1) rides them;
+// the UI (U1) lists them, shows the ridden one's card and lets a click pick one
+// (ctx.services.track.pick). Ids are stable across frames AND visits ('<kind>:<index>'), so a shot
+// or a handoff can name one.
+
+/** What the camera is doing (D1). */
+export type CameraMode = 'explore' | 'bird' | 'ride';
+
+export type TrackKind = 'plane' | 'balloon' | 'car' | 'bus' | 'truck' | 'train' | 'boat' | 'ferry' | 'person' | 'satellite' | 'station';
+
+/**
+ * How the camera rides a Trackable:
+ *   'chase'      third person, behind and above, looking past it along its travel (planes, cars);
+ *   'eyes'       first person from its eyes (a walker; a driver's seat);
+ *   'alongside'  beside it in space with the planet turning below (the station, satellites).
+ */
+export type RideView = 'chase' | 'eyes' | 'alongside';
+
+/** A Trackable's pose at render time. World space, metres; fwd and up are unit and orthogonal. */
+export interface TrackPose {
+  /** The anchor: body centre (vehicles, satellites) or the eyes ('eyes' view). */
+  pos: Vector3;
+  /** Direction of travel (or facing). */
+  fwd: Vector3;
+  /** Body up (banked for a plane; away from the planet for a walker). */
+  up: Vector3;
+  /** m/s. */
+  speed: number;
+}
+
+export interface Trackable {
+  /** Stable across frames and visits: '<kind>:<index>', e.g. 'plane:2', 'person:118'. */
+  readonly id: string;
+  readonly kind: TrackKind;
+  /** Card title, lowercase site voice: 'flight lb 204', 'bus 7', 'maya, out with her dog'. */
+  label: string;
+  /** Card subtitle: 'bigtown → far haven'. */
+  sub?: string;
+  readonly view: RideView;
+  /** Bounding radius (m): picking, chase distance, the cloud overlay's hole round it. */
+  readonly radius: number;
+  /** Write the pose at ctx.time.render. Zero allocations. False while it is not drawn (LOD, docked). */
+  pose(ctx: LBContext, out: TrackPose): boolean;
+  /** A live line for the card ('alt 72 m · 140 km/h'). The UI polls it at ≤ 4 Hz; may allocate. */
+  detail?(ctx: LBContext): string;
+  /** The camera tells the owner while it rides in 'eyes' view, so it can hide the body the eye is in. */
+  setRidden?(on: boolean): void;
+}
+
+export interface TrackService {
+  /** Returns the unregister function. */
+  register(t: Trackable): () => void;
+  /** Registered trackables (of one kind). The array is cached per version: do not mutate it. */
+  list(kind?: TrackKind): readonly Trackable[];
+  get(id: string): Trackable | undefined;
+  /**
+   * The trackable under canvas point (px, py) (CSS px from the canvas's top left): the nearest one
+   * whose bounding sphere, widened to at least `minPx` px on screen (default 14), the ray hits in
+   * front of the planet. Null if none. Calls every pose() once: for clicks and ≤ 10 Hz hover, not
+   * every frame.
+   */
+  pick(px: number, py: number, minPx?: number): Trackable | null;
+  /** Bumped on every register / unregister. */
+  readonly version: number;
+}
+
+export type LabelKind = 'capital' | 'city' | 'town' | 'village' | 'landmark' | 'airport' | 'harbour' | 'station';
+
+/** A world-anchored name tag (U1 draws them as DOM over the canvas; a click flies there). */
+export interface WorldLabel {
+  readonly id: string;
+  /** Lowercase site voice: 'bigtown', 'port pebble'. */
+  text: string;
+  /** Second line: 'pop. 1,204 · harbour'. */
+  sub?: string;
+  kind: LabelKind;
+  /** Unit direction of the anchor. */
+  dir: Vec3;
+  /** Anchor height above sea level (m). */
+  h: number;
+  /** Shown while ctx.view.altTerrain is inside [minAlt, maxAlt]. */
+  minAlt: number;
+  maxAlt: number;
+  /** A click flies the explore camera here at this altitude (default 60 m); 0 makes it unclickable. */
+  flyAlt?: number;
+  /** For moving anchors (the station): a Trackable id to read the position from instead of dir/h; a click rides it. */
+  track?: string;
+}
+
+export interface LabelService {
+  add(l: WorldLabel): () => void;
+  list(): readonly WorldLabel[];
+  readonly version: number;
 }
 
 export interface LBDebug {

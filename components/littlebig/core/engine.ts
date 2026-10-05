@@ -36,6 +36,7 @@ import { Perf } from './perf';
 import { detectQuality, qualitySettings } from './quality';
 import { createReveal } from './reveal';
 import { createSystems } from './systems';
+import { createLabelService, createTrackService } from './track';
 import { createSharedUniforms } from './uniforms';
 
 export class NoWebGLError extends Error {}
@@ -199,6 +200,8 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     cityX: 0,
     cityZ: 0,
     cityDist: 0,
+    mode: 'explore',
+    ride: null,
   };
   const services: Services = {
     // (`.stats` on the post render function: why the ¼-res pass ran last frame, for review tools.)
@@ -212,6 +215,9 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       lastInputAt: () => 0,
     },
     crossings: { busy: new Uint8Array(0), blocked: new Uint8Array(0) }, // sized once the plan exists
+    // v2 registries; the track service reads ctx (camera, canvas), so it is installed just below.
+    track: null as unknown as Services['track'],
+    labels: createLabelService(),
   };
   const timeScale = params.number('core.timeScale', { label: 'time scale', min: 0, max: 8, value: 1 });
   const exposure = params.number('core.exposure', { label: 'exposure', min: 0.3, max: 2, value: 1 });
@@ -260,6 +266,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     },
     prewarm: (objects) => prewarm(objects),
   };
+  services.track = createTrackService(ctx);
   camera.layers.enable(LAYER_NO_INK);
   ctx.time.render = ctx.time.t;
 

@@ -449,3 +449,12 @@ each section. Tag lines with the task id.
   past kerb + 0.1; the on-road auto-commit needs the walker 0.5 m clear of the far kerb; a turn-back
   only keeps a commitment it already had. Specs pass on x64 (Rosetta, Node 24) and arm64; the
   named shots are pixel-identical.
+
+## v2
+
+Spec: `V2.md`. Tag lines `[v2-<task>]`.
+
+- [v2-orch] Rides, picking and labels are contracts written up front (`core/contracts.ts` v2 block, `core/track.ts`), so five agents can build against them at once: `Trackable` / `TrackService` (`ctx.services.track`, a generic CPU ray-vs-bounding-sphere `pick` in front of the planet), `LabelService` (`ctx.services.labels`), optional `CameraService.mode / ride / cycle / fly / exitMode`, `ViewState.mode / ride`.
+- [v2-orch] The space layer is `SPACE_MIN`–`SPACE_MAX` = 110–300 m above sea level (`world/config.ts`): above the planes (≤ 80), below the orbit camera (≤ 420). `TALLEST` stays the planes' bound; D1 extends the far plane for the space layer.
+- [v2-orch] Outside the plateau, the region network is world space with its own sim (V1); the capital's tuned v1 sim is untouched. The two meet at gate plazas and never share a lane. One chart for the whole continent was rejected: the exponential map squeezes circumferential distance by sin θ/θ (−22 % at 1.2 rad), so towns planned in the capital's chart would overlap on the sphere.
+- [v2-orch] Size budget raised to ≤ 260 KB gzip for v2 (the user lifted the limit "somewhat"); still zero asset downloads and no new fonts.

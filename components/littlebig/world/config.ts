@@ -33,6 +33,14 @@ export const PLANE_MAX = 80;
 export const TALLEST = PLANE_MAX + 10;
 
 /**
+ * v2: the space layer (S1). Satellites and the station orbit between these heights above sea level
+ * (m), below the orbit camera (ALT_MAX) and well above the planes. The camera's far plane must cover
+ * SPACE_MAX from anywhere it can see it (D1); TALLEST stays the planes' bound for near-ground LOD.
+ */
+export const SPACE_MIN = 110;
+export const SPACE_MAX = 300;
+
+/**
  * The city plateau. A flat cap of the planet, `PLATEAU_HEIGHT` above sea level, centred on
  * (CITY_LAT, CITY_LON). Inside `PLATEAU_RADIUS` (an angle, radians) heightAt() is exactly
  * PLATEAU_HEIGHT; over the next `PLATEAU_BLEND` radians it eases into the natural terrain with no
