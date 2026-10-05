@@ -441,3 +441,11 @@ each section. Tag lines with the task id.
   into an identical video frame.
 - **Receipt time:** 17 hours wall clock, Oct 4 15:02 → Oct 5 ~08:30 EEST, overnight, including two
   usage-limit pauses.
+- **Crossing commit holes (found by CI on x86-64):** the 30-minute traffic + people spec failed only
+  on x86-64, where last-bit floating-point differences send the chaotic sims down another path. On that path a
+  waiting walker was shoved a little past a rounded kerb corner and then (a) counted as "already on
+  the road" and committed, or (b) turned back after ~17 s and gained a commitment from `onRoad`,
+  both while a car held the zebra. Fixes in `people/sim.ts`: an uncommitted walker cannot advance
+  past kerb + 0.1; the on-road auto-commit needs the walker 0.5 m clear of the far kerb; a turn-back
+  only keeps a commitment it already had. Specs pass on x64 (Rosetta, Node 24) and arm64; the
+  named shots are pixel-identical.

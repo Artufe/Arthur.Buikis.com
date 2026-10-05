@@ -902,7 +902,9 @@ export class PeopleSim {
         const open = !blocked[e] && (t + this.crossPhase[e]) % CROSS_CYCLE < CROSS_OPEN;
         if ((commit[i] && ui < kerbIn - 0.05 && !open) || ui > kerbOut + 0.15) commit[i] = 0;
         if (!commit[i] && ui < kerbOut - 0.2) {
-          if (ui > kerbIn + 0.3 || (ui >= waitU - 0.15 && open)) commit[i] = 1; // (the first: on the road after a placement)
+          // (the first: out on the road after a placement; not within 0.5 m of the far kerb, where
+          // someone who turned back at the kerb stands)
+          if ((ui > kerbIn + 0.3 && ui < kerbOut - 0.5) || (ui >= waitU - 0.15 && open)) commit[i] = 1;
           else {
             vDes = Math.min(vDes, Math.max(0, (waitU - ui) * 2.2));
             waiting = ui > waitU - 1.2;
@@ -1110,6 +1112,19 @@ export class PeopleSim {
         nxp = own ? sx : xi;
         nzp = own ? sz : zi;
       }
+      // An uncommitted walker at a crossing never advances past its kerb line. The paving check
+      // above can let crowd shoves carry it a little way off a rounded corner, and once past
+      // kerb + 0.3 it would count as already on the road and commit while a car holds the zebra.
+      // This only stops forward motion; it never pulls anyone back.
+      if (f.crossing && !commit[i]) {
+        const line = (d > 0 ? f.kerbA : f.kerbB) + 0.1;
+        const du = (nxp - xi) * tx + (nzp - zi) * tz;
+        if (ui <= line + 0.2 && du > 0 && ui + du > line) {
+          const over = Math.min(du, ui + du - line);
+          nxp -= tx * over;
+          nzp -= tz * over;
+        }
+      }
       ex = nxp - xi;
       ez = nzp - zi;
       const moved = Math.sqrt(ex * ex + ez * ez);
@@ -1153,7 +1168,8 @@ export class PeopleSim {
         stuck[i] = 0;
         dir[i] = -d as 1 | -1;
         u[i] = f.len - ui;
-        commit[i] = f.crossing && this.onRoad(i) ? 1 : 0;
+        // keeps a commitment it had (still out on the road); a waiter turning back never gains one
+        commit[i] = f.crossing && commit[i] && this.onRoad(i) ? 1 : 0;
         jam[i] = 0;
         this.next[i] = this.chooseNext(i);
         lat[i] = -lat[i];
