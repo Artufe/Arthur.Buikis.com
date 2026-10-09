@@ -11,10 +11,15 @@ async function home(page: Page) {
 const BOOT = 90_000;
 
 test('the palette command "visit planet" opens the window and mounts the canvas', async ({ page }) => {
+  test.setTimeout(BOOT);
   await home(page);
-  await page.keyboard.press('ControlOrMeta+k');
+  // (A key pressed before hydration has no listener to hear it: press again while the palette is
+  // not up, never once it is, so a slow first mount is not toggled shut.)
   const input = page.locator('input[aria-label="Command palette"]');
-  await expect(input).toBeVisible({ timeout: 10_000 });
+  await expect(async () => {
+    if (!(await input.isVisible())) await page.keyboard.press('ControlOrMeta+k');
+    await expect(input).toBeVisible({ timeout: 8_000 });
+  }).toPass({ timeout: 60_000 });
   await input.fill('visit planet');
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'littlebig' });
@@ -23,6 +28,7 @@ test('the palette command "visit planet" opens the window and mounts the canvas'
 });
 
 test('↗ expands the window to /planet/, with the nav hidden and a back link', async ({ page }) => {
+  test.setTimeout(BOOT);
   await home(page);
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('planet:open')));
   await expect(page.getByRole('dialog', { name: 'littlebig' })).toBeVisible({ timeout: 20_000 });

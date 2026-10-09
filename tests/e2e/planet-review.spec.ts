@@ -1,6 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 test.setTimeout(120_000);
+// Software WebGL in headless CI renders a few frames a second: a ride's ~2 s blend takes far longer.
+const SETTLE = { timeout: 60_000 };
 const ready = (page: Page) => page.waitForFunction(() => window.__littlebig?.ready, null, { timeout: 90_000 });
 async function open(page: Page) {
   await page.goto('/planet/');
@@ -43,7 +45,7 @@ test('planet smoke: expanding a window preserves the selected ride and framing',
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('planet:open')));
   await ready(page);
   await page.getByRole('button', { name: 'follow a plane', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().blend)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().blend), SETTLE).toBe(1);
   const before = await page.evaluate(() => window.__littlebig!.ctx.services.camera.snapshot!());
   await page.getByRole('button', { name: 'open in full page' }).click();
   await expect(page).toHaveURL(/\/planet\/?$/);
@@ -55,7 +57,7 @@ test('planet smoke: expanding a window preserves the selected ride and framing',
 test('planet smoke: context recovery preserves a ride on a fresh canvas', async ({ page }) => {
   await open(page);
   await page.getByRole('button', { name: 'follow a plane', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().blend)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().blend), SETTLE).toBe(1);
   const before = await page.evaluate(() => window.__littlebig!.ctx.services.camera.snapshot!());
   await page.evaluate(() => {
     const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-littlebig]')!;
@@ -104,6 +106,7 @@ test.describe('touch', () => {
 });
 
 test('planet smoke: all six modes, cycling rides and leaving them remain usable', async ({ page }) => {
+  test.setTimeout(300_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await open(page);
@@ -117,12 +120,12 @@ test('planet smoke: all six modes, cycling rides and leaving them remain usable'
     const next = page.getByRole('button', { name: 'next ride', exact: true });
     if (await next.count()) await next.click();
     await page.getByRole('button', { name: 'stop riding (esc)', exact: true }).click();
-    await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode)).toBe('explore');
+    await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), SETTLE).toBe('explore');
     await page.evaluate(() => { window.__littlebig!.shot('street'); window.__littlebig!.ctx.debug.cameraLocked = false; });
   }
   await page.getByRole('button', { name: 'fly like a bird', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode)).toBe('bird');
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), SETTLE).toBe('bird');
   await page.getByRole('button', { name: 'explore the planet', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode)).toBe('explore');
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), SETTLE).toBe('explore');
   expect(errors).toEqual([]);
 });
