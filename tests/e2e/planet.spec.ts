@@ -98,10 +98,17 @@ test('the dock stands beside the planet in landscape and under it in portrait; t
   expect(order).toBe(true);
   // Portrait: along the bottom.
   await page.setViewportSize({ width: 390, height: 844 });
-  // (Software WebGL in headless CI keeps the main thread busy: the resize can take a while to land.)
-  await expect.poll(async () => (await dock.boundingBox())!.width, { timeout: 30_000 }).toBeGreaterThan(200);
-  r = (await dock.boundingBox())!;
-  expect(844 - (r.y + r.height)).toBeLessThan(30);
+  // (Software WebGL in headless CI keeps the main thread busy: the resize can take a while to land,
+  // and the HUD settles in two steps, the bottom row first and then its touch layout: poll for both.)
+  await expect
+    .poll(
+      async () => {
+        const b = (await dock.boundingBox())!;
+        return b.width > 200 ? 844 - (b.y + b.height) : Infinity;
+      },
+      { timeout: 30_000 },
+    )
+    .toBeLessThan(30);
 });
 
 test('the floating window gets the compact icon dock', async ({ page }) => {

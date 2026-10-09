@@ -201,9 +201,10 @@ export function getPlanet(seed: number = SEED): Planet {
 
 /**
  * `region: false` builds no region (heightAt = baseHeightAt); `regionBake` overrides the region's baked
- * searches (null: none, compute everything; world/region/bake.ts).
+ * searches (null: none, compute everything; world/region/bake.ts); `regionVerify` also recomputes each
+ * replayed search and records any drift (bake.spec.ts).
  */
-export function createPlanet(seed: number, opts: { region?: boolean; regionBake?: string | null } = {}): Planet {
+export function createPlanet(seed: number, opts: { region?: boolean; regionBake?: string | null; regionVerify?: boolean } = {}): Planet {
   const nContinent = createNoise3(seed ^ 0x1001);
   const nDetail = createNoise3(seed ^ 0x2002);
   const nMountain = createNoise3(seed ^ 0x3003);
@@ -471,7 +472,7 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     if (!region) {
       building = true;
       try {
-        region = buildRegion(self, opts.regionBake === undefined ? {} : { bake: opts.regionBake });
+        region = buildRegion(self, { ...(opts.regionBake === undefined ? {} : { bake: opts.regionBake }), verify: opts.regionVerify });
       } finally {
         building = false;
       }

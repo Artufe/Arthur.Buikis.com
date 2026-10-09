@@ -32,9 +32,21 @@ export interface Memo {
   get(key: string, inputs: ArrayLike<number>, compute: (() => ArrayLike<number>) | null, enc?: Enc): Float64Array;
   /** The bake string for what this build used (every entry, replayed or fresh). */
   dump(): string;
-  readonly stats: { hits: number; misses: number; stale: string[] };
+  readonly stats: { hits: number; misses: number; stale: string[]; drift: Drift[] };
   /** This terrain's fingerprint and the bake's (0: none, or unreadable). */
   readonly fp: { terrain: number; baked: number };
+}
+
+/**
+ * Verify mode (bake.spec.ts): a replayed entry also recomputed from the same inputs, where the two
+ * differ — `len` the baked value count, `got` the recomputed one, `max` their largest difference.
+ */
+export interface Drift {
+  key: string;
+  enc: Enc;
+  len: number;
+  got: number;
+  max: number;
 }
 
 interface Entry {
@@ -241,13 +253,17 @@ function decodeAll(s: string): { fp: number; entries: Map<number, Entry> } | nul
   }
 }
 
-/** A memo for one build: `fingerprint` of the terrain it runs on, `baked` the stored string (if any). */
-export function createMemo(fingerprint: number, baked?: string): Memo {
+/**
+ * A memo for one build: `fingerprint` of the terrain it runs on, `baked` the stored string (if any).
+ * `verify` (bake.spec.ts) also recomputes every replayed entry from the same inputs and records where
+ * the two differ (stats.drift): the replay still decides, so every later input stays the bake's.
+ */
+export function createMemo(fingerprint: number, baked?: string, verify = false): Memo {
   const dec = baked ? decodeAll(baked) : null;
   const store = dec && dec.fp === fingerprint ? dec.entries : null;
   const used: Entry[] = [];
   const seen = new Set<number>();
-  const stats = { hits: 0, misses: 0, stale: [] as string[] };
+  const stats = { hits: 0, misses: 0, stale: [] as string[], drift: [] as Drift[] };
   return {
     stats,
     fp: { terrain: fingerprint, baked: dec?.fp ?? 0 },
@@ -261,6 +277,12 @@ export function createMemo(fingerprint: number, baked?: string): Memo {
       if (hit && hit.enc === enc && (hit.inputs === ih || !compute)) {
         values = hit.values;
         stats.hits++;
+        if (verify && compute) {
+          const got = through(compute(), enc);
+          let max = got.length === values.length ? 0 : Infinity;
+          for (let i = 0; i < got.length && i < values.length; i++) max = Math.max(max, Math.abs(got[i] - values[i]));
+          if (max > 0) stats.drift.push({ key, enc, len: values.length, got: got.length, max });
+        }
       } else if (!compute) {
         throw new Error(`region: no baked ${key} (regenerate world/region/baked.ts)`);
       } else {

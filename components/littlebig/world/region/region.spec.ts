@@ -7,6 +7,7 @@
 // determinism and the build budget.
 
 import { describe, expect, it } from 'vitest';
+import { withNativeMath } from '../../../../tests/deterministic-math';
 import { terrainData } from '../../terrain/data';
 import { icoHeights } from '../ico-heights';
 import { icosphere } from '../icosphere';
@@ -627,7 +628,7 @@ describe('region: town plans', () => {
     }
   });
 
-  it('lays every town out organically: never its own mirror image, no two blocks or two towns alike', () => {
+  it('lays every town out organically: never its own mirror image, no two blocks or two towns alike', { timeout: 30000 }, () => {
     for (const s of towns) {
       const plan = plans.get(s.id)!;
       // reflected about any axis through its centroid, the street network lies ≥ 4 m from itself somewhere
@@ -1075,7 +1076,7 @@ describe('region: keep-out', () => {
     expect(kept).toBeGreaterThan(2000);
   });
 
-  it('agrees with a brute-force pass over every primitive for margins up to KEEP_MARGIN_MAX (larger ones clamped)', () => {
+  it('agrees with a brute-force pass over every primitive for margins up to KEEP_MARGIN_MAX (larger ones clamped)', { timeout: 30000 }, () => {
     for (const m of [0.5, 2, 4, 6, KEEP_MARGIN_MAX]) {
       for (const mask of [KEEP_ALL, KEEP.road, KEEP.pad, KEEP.plaza, KEEP.runway, KEEP.pier]) {
         let diff = 0;
@@ -1090,9 +1091,12 @@ describe('region: keep-out', () => {
     const slack = Number(process.env.LB_PERF_SLACK ?? 2);
     let n = 0;
     for (const d of pts) if (region.keepOut(d, 3)) n++;
-    const t0 = performance.now();
-    for (let r = 0; r < 5; r++) for (const d of pts) if (region.keepOut(d, 3)) n++;
-    const us = ((performance.now() - t0) * 1000) / (5 * pts.length);
+    // (timed on the engine's own Math, what the game runs on; tests/deterministic-math.ts)
+    const us = withNativeMath(() => {
+      const t0 = performance.now();
+      for (let r = 0; r < 5; r++) for (const d of pts) if (region.keepOut(d, 3)) n++;
+      return ((performance.now() - t0) * 1000) / (5 * pts.length);
+    });
     expect(n).toBeGreaterThan(0);
     expect(us).toBeLessThan(1 * slack);
   });
@@ -1121,13 +1125,16 @@ describe('region: build', () => {
     expect(r.stats.samples).toBeLessThan(10);
     // The timing half (LB_PERF_SLACK scales it for slow or loaded machines; CI runners are ~2× an M3).
     const slack = Number(process.env.LB_PERF_SLACK ?? 2);
+    // (timed on the engine's own Math, what the game runs on; tests/deterministic-math.ts)
     const times: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const p = createPlanet(SEED);
-      const t0 = performance.now();
-      void p.region;
-      times.push(performance.now() - t0);
-    }
+    withNativeMath(() => {
+      for (let i = 0; i < 5; i++) {
+        const p = createPlanet(SEED);
+        const t0 = performance.now();
+        void p.region;
+        times.push(performance.now() - t0);
+      }
+    });
     expect(Math.min(...times)).toBeLessThan(20 * slack);
   });
 

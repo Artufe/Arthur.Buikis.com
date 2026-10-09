@@ -2702,12 +2702,15 @@ export class PeopleSim {
       // An uncommitted walker at a crossing never advances past its kerb line. The paving check
       // above can let crowd shoves carry it a little way off a rounded corner, and once past
       // kerb + 0.3 it would count as already on the road and commit while a car holds the zebra.
-      // This only stops forward motion; it never pulls anyone back.
+      // The line is just short of the kerb, and one a shove already carried past it eases back
+      // (0.5 m/s): a waiter standing on the kerb's edge was on the carriageway (onRoad) for its
+      // whole wait, 11 s under a held zebra on x86-64's float path (the 20-minute freeze spec).
       if (f.crossing && !commit[i]) {
-        const line = (d > 0 ? f.kerbA : f.kerbB) + 0.1;
+        const line = Math.max(0, (d > 0 ? f.kerbA : f.kerbB) - 0.02);
         const du = (nxp - xi) * tx + (nzp - zi) * tz;
-        if (ui <= line + 0.2 && du > 0 && ui + du > line) {
-          const over = Math.min(du, ui + du - line);
+        const to = ui > line ? Math.max(line, Math.min(ui + du, ui - 0.5 * dt)) : line;
+        if (ui <= line + 0.4 && ui + du > to) {
+          const over = ui + du - to;
           nxp -= tx * over;
           nzp -= tz * over;
         }

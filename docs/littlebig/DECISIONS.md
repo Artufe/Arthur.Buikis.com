@@ -774,3 +774,30 @@ Spec: `V2.md`. Tag lines `[v2-<task>]`.
 - Touch controls retain the POP styling, show the active mode, allow details to collapse, and
   use 44px action targets. Below 380px height the dock uses two columns. Page chrome accounts
   for safe-area insets without changing the projected world-label coordinate system.
+
+## CI determinism (2026-10-09)
+
+- **Specs run on deterministic Math.** PR #49's CI (x86-64, Node 24) failed three specs that pass
+  on an arm64 Mac. V8's `Math.sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `log`
+  and `pow` (also `log10`, `log1p`, `expm1`, `sinh`, `cosh`, `asinh`, `acosh`, `atanh`) differ in
+  the last bits between the two architectures, and `pow` between Node 22 and 24 on one machine.
+  The traffic and people sims are chaotic, so a last-bit difference sends a 20-minute spec down
+  another path, and the region bake's searches take another turn. This was the third CI-only
+  failure of this kind (see 2618b1d). `tests/deterministic-math.ts` (a vitest setup file)
+  replaces those functions under vitest with Cephes ports that use only + − × ÷ and sqrt. Every
+  spec now computes the same bits on every machine (`tests/lib/deterministic-math.test.ts`
+  checks a fingerprint and the accuracy, a few ulp). A spec that passes locally passes on CI,
+  and a CI failure reproduces locally. The game keeps the engine's own functions. Specs that time
+  the game's cost wrap the timed part in `withNativeMath`.
+- **The region bake** was regenerated under that Math. Puffin bay's site moved about 1.5 m, and
+  the downs, lighthouse, cove and isle roads moved by up to 1 m. `baked.ts` also records the
+  Math signature it was written with. Where a spec's Math differs from it (another Node major, or
+  the native functions), `bake.spec.ts` checks the bake differently. Instead of demanding bit
+  equality with a fresh build, it replays the bake, recomputes each search from the bake's own
+  inputs (`createPlanet(seed, { regionVerify: true })`, `Memo.stats.drift`), and allows one
+  encoding step of noise.
+- **Kerb waiters stay behind the kerb.** The 2618b1d fix let an uncommitted walker stand up to
+  kerb + 0.1. That band counts as the carriageway (`onRoad`), so a waiter at a zebra held by
+  cars was "on the road" for its whole wait: 16.6 s on x86-64, failing the 20-minute freeze spec.
+  Uncommitted walkers now stop 2 cm short of the kerb line, and one a shove carried past it eases
+  back at 0.5 m/s.

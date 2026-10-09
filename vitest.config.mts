@@ -7,6 +7,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // the same Math results on every machine, so the chaotic sims' specs replay identically (see the file)
+    setupFiles: ['./tests/deterministic-math.ts'],
     exclude: ['**/node_modules/**', 'tests/e2e/**', '.next', 'out'],
   },
   resolve: { alias: { '@': fileURLToPath(new URL('./', import.meta.url)) } },

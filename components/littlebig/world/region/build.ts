@@ -182,11 +182,11 @@ function fingerprint(base: BaseTerrain): number {
   return hashNums(vals);
 }
 
-export function buildRegion(base: BaseTerrain, opts: { bake?: string | null } = {}): Region {
+export function buildRegion(base: BaseTerrain, opts: { bake?: string | null; verify?: boolean } = {}): Region {
   const t0 = performance.now();
   const seed = base.seed;
   const noBake = typeof process !== 'undefined' && process.env.LB_REGION_NOBAKE === '1';
-  const memo: Memo = createMemo(fingerprint(base), opts.bake === undefined ? (seed === SEED && !noBake ? REGION_BAKE : undefined) : opts.bake ?? undefined);
+  const memo: Memo = createMemo(fingerprint(base), opts.bake === undefined ? (seed === SEED && !noBake ? REGION_BAKE : undefined) : opts.bake ?? undefined, opts.verify);
   /** Each memo entry depends on everything cached before it (a stale entry invalidates the rest). */
   let chain = 0x9e3779b9;
   // (v2 R2 refine 2: in a production build every compute below is compiled out — `process.env.NODE_ENV
