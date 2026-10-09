@@ -362,6 +362,14 @@ export interface Services {
    * Optional: installed once the towns system has built its sites; call through ctx.services.towns?.
    */
   towns?: TownsService;
+  /**
+   * v2 (V1): the region's vehicles (transit/: cars, trucks, buses on the region network and the town
+   * streets, the ferries) and their crossings with the townsfolk (T2). Optional: installed once the
+   * transit system has built its crossings; call through ctx.services.transit?.
+   */
+  transit?: TransitService;
+  /** v2 (T2): the townsfolk as bodies (townsfolk/). Optional; call through ctx.services.townsfolk?. */
+  townsfolk?: TownsfolkService;
   /** v2: everything the camera can ride or the player can click to follow (core/track.ts). */
   track: TrackService;
   /** v2: world-anchored name tags the UI draws (settlements, landmarks, the station). */
@@ -417,6 +425,52 @@ export interface TownsService {
    * sidewalk's slab CURB_H over that, if at most h; else (or off the streets) −Infinity.
    */
   pavingAt(dir: Vec3, h: number): number;
+}
+
+/**
+ * v2 (V1 ⇄ T2): a place in a town where a footpath crosses a carriageway (a street end by a junction,
+ * a square's entrance), placed by transit/ from the region network (Region.edges with settlement ≥ 0).
+ * World space: unit directions, arc lengths in true metres along RLane.path.
+ */
+export interface TownCrossing {
+  readonly id: number;
+  /** Region settlement index. */
+  readonly settlement: number;
+  /** The two kerb points (unit directions, on the sidewalk edge either side) and the walk width (m). */
+  readonly a: Vec3;
+  readonly b: Vec3;
+  readonly width: number;
+  /** The lanes it crosses (RLane ids) and where on each (arc length of the crossing's centre line). */
+  readonly lanes: readonly number[];
+  readonly laneS: readonly number[];
+}
+
+/**
+ * The region's vehicles (V1, transit/) and the town crossings they share with the townsfolk (T2), the
+ * way the capital's traffic and people share CrossingState: indexed by TownCrossing.id, written in
+ * fixedUpdate (transit is registered before townsfolk in systems.ts), writers clear their array each
+ * step before setting it.
+ *   - busy: townsfolk write it, transit reads it. 1 while someone is on the crossing or has committed
+ *     to stepping onto it; vehicles then stop short of it (laneS − ~3 m on each of its lanes).
+ *   - blocked: transit writes it, townsfolk read it. 1 while a vehicle is past its stopping point and
+ *     will cross it; people wait at the kerb.
+ */
+export interface TransitService {
+  readonly crossings: readonly TownCrossing[];
+  readonly busy: Uint8Array;
+  readonly blocked: Uint8Array;
+  /**
+   * Push a body of radius r (m) at unit surface `dir` out of every vehicle's body box it overlaps (the
+   * walking player, a townsperson stepping off the kerb). Writes the resolved unit dir into out (may
+   * be dir); true if it moved. Zero-alloc.
+   */
+  collide(dir: Vec3, r: number, out: Vec3): boolean;
+}
+
+/** The townsfolk as bodies the walking player bumps into (T2). Zero-alloc. */
+export interface TownsfolkService {
+  /** As PeopleService.pushOut, in world space: unit `dir` in, the resolved unit dir out. */
+  pushOut(dir: Vec3, r: number, out: Vec3): boolean;
 }
 
 /** Collision against the countryside's trunks and boulders (A1, nature/collide.ts). Zero-alloc. */

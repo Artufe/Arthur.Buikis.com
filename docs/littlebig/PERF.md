@@ -332,6 +332,14 @@ towns' collision service and the jointed wing, leg and tail animation measure **
 537.5 KiB total**, +9.3 KiB on the towns-and-roads tree. The ceilings are now **381 / 550**.
 The bird stays one draw call plus its shadow, and its step costs about 4 µs a frame.
 
+**v2 town life (2026-10-09).** The region's traffic (transit/: 55 vehicles, a city bus loop, three
+ferries) and the townsfolk (townsfolk/: 204 walkers, sitters and stall keepers in the eight towns)
+measure **415.0 KiB own / 579.5 KiB total**, +42 KiB (transit about 23.5, townsfolk about 19). The
+ceilings are now **423 / 592**. No new shader programs; Far Haven's street draws 84 calls at about
+2.9 ms; stage 2 completes at 1.6–1.7 s (transit's sliced init about 450 ms). The own JS has grown
+from 321 to 415 KiB over v2's phase 2; a size pass (or loading the region's life as its own chunk)
+is the open item.
+
 The engine now owns HUD, touch detection and stick presentation subscriptions. They run after
 its render, pause when its loop is suspended and are released on disposal. Deterministic sim,
 instanced rendering, staged shader warmup and adaptive resolution remain in place.

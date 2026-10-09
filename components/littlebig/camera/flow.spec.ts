@@ -9,7 +9,7 @@ import type { LBContext } from '../core/contracts';
 import { getCityIndex, getCityPlan } from '../world/city';
 import { fromSphere, planHeadingToWorld, planToDir } from '../world/city/frame';
 import { latLonFromDir } from '../world/sphere';
-import { EYE_HEIGHT, PLATEAU_HEIGHT, SEED } from '../world/config';
+import { EYE_HEIGHT, PLATEAU_HEIGHT, R, SEED } from '../world/config';
 import { getPlanet } from '../world/planet';
 import { sunDirection } from '../world/sun';
 import { createCameraSystem } from './index';
@@ -131,6 +131,51 @@ describe('interactive descent (camera system, 30 fps)', () => {
     canvas.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', bubbles: true }));
     // Never inside the walker, and slid past (not stuck behind it).
     expect(closest).toBeGreaterThan(reach - 0.1);
+    const along = (plan.x - wx) * Math.sin(vp.heading) - (plan.z - wz) * Math.cos(vp.heading);
+    expect(along).toBeGreaterThan(0.5);
+    sys.dispose!(ctx);
+    canvas.remove();
+  });
+
+  it('the FPV body slides round a townsperson too (v2 T2: the townsfolk service, in world space)', () => {
+    const { ctx, sys, step, canvas } = setup();
+    const cam = ctx.services.camera!;
+    const vp = ctx.world.city.viewpoints.street;
+    const ll = latLonFromDir(planToDir(vp.x, vp.z));
+    cam.setView({ lat: ll.lat, lon: ll.lon, alt: EYE_HEIGHT, heading: (planHeadingToWorld(vp.x, vp.z, vp.heading) * 180) / Math.PI });
+    step();
+    // One standing 2.5 m ahead, 0.1 m off the line (body radius 0.22 m), as a unit direction.
+    const wx = vp.x + Math.sin(vp.heading) * 2.5 + Math.cos(vp.heading) * 0.1;
+    const wz = vp.z - Math.cos(vp.heading) * 2.5 + Math.sin(vp.heading) * 0.1;
+    const w = planToDir(wx, wz);
+    ctx.services.townsfolk = {
+      pushOut(dir, r, out) {
+        // (on the tangent plane at the body: out along the chord, then back onto the sphere)
+        const dx = dir.x - w.x, dy = dir.y - w.y, dz = dir.z - w.z, d = Math.hypot(dx, dy, dz) * (R + PLATEAU_HEIGHT), need = r + 0.22;
+        if (d >= need || d < 1e-9) return false;
+        const k = need / d;
+        out.x = w.x + dx * k;
+        out.y = w.y + dy * k;
+        out.z = w.z + dz * k;
+        const l = Math.hypot(out.x, out.y, out.z);
+        out.x /= l;
+        out.y /= l;
+        out.z /= l;
+        return true;
+      },
+    };
+    canvas.tabIndex = 0;
+    canvas.focus();
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true }));
+    const plan = { x: 0, z: 0 };
+    let closest = Infinity;
+    for (let k = 0; k < 90; k++) {
+      step();
+      fromSphere(ctx.view.focus, plan);
+      closest = Math.min(closest, Math.hypot(plan.x - wx, plan.z - wz));
+    }
+    canvas.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', bubbles: true }));
+    expect(closest).toBeGreaterThan(0.35 + 0.22 - 0.1);
     const along = (plan.x - wx) * Math.sin(vp.heading) - (plan.z - wz) * Math.cos(vp.heading);
     expect(along).toBeGreaterThan(0.5);
     sys.dispose!(ctx);

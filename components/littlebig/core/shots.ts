@@ -217,8 +217,54 @@ export const SHOTS: Record<string, ShotDef> = {
   'lift-snowberry': { about: 'v2 T1: the chairlift from the village beside its line, 14 m up: the pylons and the chairs climbing the peak to the summit station', view: (ctx) => liftView(ctx), t: AFTERNOON },
   'airport3d-lbx': { about: "v2 T1: the capital's airport from 45 m across the apron: terminal, tower, hangar, windsock", view: (ctx) => siteView(ctx, ctx.world.region.airports[0]?.apron ?? null, 45, 60, 135), t: AFTERNOON },
   'airport3d-fhv': { about: "v2 T1: far haven's airport from 45 m across the apron", view: (ctx) => siteView(ctx, ctx.world.region.airports[1]?.apron ?? null, 45, 60, 300), t: 220 },
+  // ── v2 T2 (townsfolk): the towns' people at eye level and from just above (towneye-* are the squares) ──
+  'folk-street-far-haven': { about: "v2 T2: far haven's longest street at eye level on its walk: shoppers and office workers, the crossings", view: (ctx) => townStreetView(ctx, 'far-haven', 0, 0.35, 1.6, -4), t: AFTERNOON },
+  'folk-high-far-haven': { about: "v2 T2: far haven's middle from 22 m: the square and the streets round it busy", view: (ctx) => townObliqueView(ctx, 'far-haven', 22, 34, 200, -32), t: AFTERNOON },
+  'folk-street-port-pebble': { about: "v2 T2: port pebble's main street at eye level", view: (ctx) => townStreetView(ctx, 'port-pebble', 0, 0.4, 1.6, -4), t: AFTERNOON },
+  'folk-quay-driftwood': { about: "v2 T2: driftwood's quay by its pier from 5 m: net-menders, fishermen, walkers out on the pier", view: (ctx) => pierView(ctx, 'driftwood'), t: AFTERNOON },
+  'folk-quay-port-pebble': { about: "v2 T2: port pebble's quay by its pier from 5 m", view: (ctx) => pierView(ctx, 'port-pebble'), t: AFTERNOON },
+  'folk-beach-coral-cove': { about: "v2 T2: coral cove's beach from over the bay, 6 m up: sunbathers on the loungers, the bars", view: (ctx) => quayView(ctx, 'coral-cove', 14, 6, -12), t: AFTERNOON },
+  'folk-pool-coral-cove': { about: "v2 T2: coral cove's pool square from 9 m: loungers, the bar, people about", view: (ctx) => townObliqueView(ctx, 'coral-cove', 9, 22, 300, -24), t: AFTERNOON },
+  'folk-yard-millbrook': { about: "v2 T2: millbrook's farmyard from 15 m off, 6 m up: the farmhands at the barns", view: (ctx) => offView(ctx, (r) => yardAt(r, 'millbrook', 'farm'), 110, 15, 6, -18), t: AFTERNOON },
+  'folk-green-clover': { about: "v2 T2: clover's green from 6 m: by the pond or the maypole", view: (ctx) => townObliqueView(ctx, 'clover', 6, 14, 160, -18), t: (v: ViewSpec) => timeAtHourAngle(0, v.lon) },
+  'folk-snowberry': { about: 'v2 T2: snowberry from 8 m over its square: people in winter colours, the lift station', view: (ctx) => townObliqueView(ctx, 'snowberry', 8, 26, null, -16), t: AFTERNOON },
+  'folk-night-far-haven': { about: "v2 T2: far haven's street at night: thinner, people under the lamps", view: (ctx) => townStreetView(ctx, 'far-haven', 0, 0.35, 1.6, -4), t: (v: ViewSpec) => timeAtHourAngle(150, v.lon) },
+  'folk-dusk-port-pebble': { about: 'v2 T2: port pebble from 12 m at dusk: heading home', view: (ctx) => townObliqueView(ctx, 'port-pebble', 12, 30, null, -14), t: (v: ViewSpec) => eveningTimeAt(v.lat, v.lon, -4) },
+  // v2 V1: the region's traffic and the ferries
+  'transit-far-haven': { about: "v2 V1: far haven's streets from 30 m: its traffic, the city bus round its block, the trucks", view: (ctx) => townObliqueView(ctx, 'far-haven', 30, 46, 250, -30), t: AFTERNOON },
+  'transit-eye-far-haven': { about: 'v2 V1: on a far haven street 2.4 m up, looking down it: cars at the junctions, the crossings', view: (ctx) => townStreetView(ctx, 'far-haven', 1, 0.3, 2.4, -6), t: AFTERNOON },
+  'transit-port-pebble': { about: "v2 V1: port pebble's streets from 26 m: the harbour town's traffic", view: (ctx) => townObliqueView(ctx, 'port-pebble', 26, 40, null, -30), t: AFTERNOON },
+  'transit-highway': { about: 'v2 V1: the clover highway from 9 m beside it: through traffic between far haven and the villages', view: (ctx) => roadView(ctx, 'clover highway', 0.35, 9, 9, -16), t: AFTERNOON },
+  'transit-clover': { about: "v2 V1: clover's way in from 12 m over the highway's end: the village entry flowing, a car or two in its lanes", view: (ctx) => roadView(ctx, 'clover highway', 0.8, 7, 12, -24), t: AFTERNOON },
+  'transit-roundabout': { about: 'v2 V1: a gate roundabout from 24 m: vehicles yielding to the ring', view: (ctx) => offView(ctx, (r) => ringAt(r), 210, 26, 24, -40), t: AFTERNOON },
+  'transit-ferry': { about: "v2 V1: the far haven ferry docked end-on at its pier, from 10 m off the quay", view: (ctx) => ferryDockView(ctx, 0, 1), t: () => ferryShotT },
+  'transit-ferry-sea': { about: 'v2 V1: a ferry crossing, from 14 m off its bow, its wake behind', view: (ctx) => ferrySeaView(ctx, 2), t: () => ferryShotT },
+  'transit-night': { about: "v2 V1: far haven's streets at night from 30 m: head and tail lights, the beams on the asphalt", view: (ctx) => townObliqueView(ctx, 'far-haven', 30, 46, 250, -30), t: (v: ViewSpec) => timeAtHourAngle(160, v.lon) },
+  'transit-ride': { about: 'v2 V1: riding the first region car (chase view)', view: (ctx) => townObliqueView(ctx, 'far-haven', 30, 46, 250, -30), t: AFTERNOON, ride: 'car:200' },
+  'transit-ride-bus': { about: 'v2 V1: riding the city loop bus round its block (chase view)', view: (ctx) => townObliqueView(ctx, 'far-haven', 30, 46, 250, -30), t: AFTERNOON, ride: 'bus:200' },
+  'transit-bus-stop': { about: "v2 V1: the city loop's stop on far haven's park row from 12 m behind it, 8 m up over the street (the bus comes round every couple of minutes: --seq 8 --interval 1.5)", view: (ctx) => busStopView(ctx, 0, 0), t: AFTERNOON },
 };
 
+/** v2 T2: on town `id`'s k-th longest street (with walks), at fraction f, on its right walk, `alt` m up, looking along it. */
+function townStreetView(ctx: LBContext, id: string, k: number, f: number, alt: number, pitch: number): ViewSpec {
+  const r = ctx.world.region;
+  const s = r.settlements.find((x) => x.id === id);
+  const e = r.edges.filter((x) => s && x.settlement === s.index && x.sidewalk > 0).sort((a, b) => b.centre.length - a.centre.length)[k];
+  if (!e) return regionView(ctx, () => null, 60);
+  const n = e.centre.h.length, i = Math.min(n - 4, Math.floor(f * (n - 1))), a = roadAt(e.centre, i, i + 3);
+  const at = shift(a.ll, a.cos, a.heading + 90, e.width / 2 + e.sidewalk * 0.5);
+  return { lat: at.lat, lon: at.lon, alt, heading: a.heading, pitch };
+}
+/** v2 T2: beside town `id`'s first pier, 5 m up over the quay, looking along the waterfront past it. */
+function pierView(ctx: LBContext, id: string): ViewSpec {
+  const r = ctx.world.region;
+  const s = r.settlements.find((x) => x.id === id);
+  const p = s ? r.piers[s.piers[0]] : undefined;
+  if (!s || !p) return regionView(ctx, () => null, 60);
+  const ll = latLonFromDir(p.root), cos = Math.cos((ll.lat * Math.PI) / 180), hd = p.heading * DEG;
+  const at = shift(shift(ll, cos, hd + 180, 5), cos, hd + 90, 9);
+  return { lat: at.lat, lon: at.lon, alt: 5, heading: hd - 120, pitch: -22 };
+}
 /** v2 T1: the town shots, two per town (55 m across it, 12 m low over it). */
 function townShots(): Record<string, ShotDef> {
   const out: Record<string, ShotDef> = {};
@@ -605,4 +651,61 @@ function skyView(ctx: LBContext, id: string, t: number): ViewSpec {
   const rc = CITY_SURFACE_R + 6;
   const v = aim({ x: dir.x * rc, y: dir.y * rc, z: dir.z * rc }, p ? p.pos : { x: 0, y: 0, z: 0 });
   return { lat: v.lat, lon: v.lon, alt: 6, heading: v.heading, pitch: Math.min(70, v.pitch - 12) };
+}
+
+// ── v2 (V1): the transit shots' helpers (poses through the track service: no transit/ import) ──
+/** The first roundabout ring the network has (a node of a 'ring' edge). */
+function ringAt(r: RegionData): Dir | null {
+  const e = r.edges.find((x) => x.kind === 'ring');
+  return e ? r.nodes[e.a].dir : null;
+}
+/** The time the transit ferry shots are taken at (set when their view resolves). */
+let ferryShotT = 0;
+/** First time from an afternoon at `lon` when ferry k's live line starts with `prefix` (its closed-form timetable). */
+function ferryTimeWhen(ctx: LBContext, k: number, lon: number, ok: (line: string) => boolean): number {
+  const t0 = timeAtHourAngle(20, lon);
+  const tr = ctx.services.track.get(`ferry:${k}`);
+  if (!tr?.detail) return t0;
+  // (the nearest such moment either side of it, so the light stays the afternoon's)
+  for (let d = 0; d < 200; d += 1) for (const t of [t0 + d, t0 - d]) if (ok(tr.detail({ ...ctx, time: { ...ctx.time, render: t } }))) return t;
+  return t0;
+}
+/** Ferry k docked at its berth `b` (1: the far side), seen from the pier's root side, 10 m off the quay. */
+function ferryDockView(ctx: LBContext, k: number, b: number): ViewSpec {
+  const r = ctx.world.region;
+  const f = r.ferries[k];
+  if (!f) return regionView(ctx, () => null, 60);
+  const p = r.piers[b ? f.b : f.a];
+  const ll = latLonFromDir(p.root);
+  const name = r.settlements[p.settlement].name;
+  ferryShotT = ferryTimeWhen(ctx, k, ll.lon, (l) => l.startsWith(`docked at ${name}`));
+  const cos = Math.cos((ll.lat * Math.PI) / 180);
+  const hd = p.heading * DEG;
+  const at = shift(shift(ll, cos, hd + 90, 14), cos, hd + 180, 6);
+  return { lat: at.lat, lon: at.lon, alt: 8, heading: hd - 30, pitch: -18 };
+}
+/** Ferry k under way mid-crossing, from 16 m off its bow and 6 m up. */
+function ferrySeaView(ctx: LBContext, k: number): ViewSpec {
+  const mid = ferryMid(ctx.world.region, k);
+  const lon = mid ? latLonFromDir(mid).lon : CITY_LON;
+  ferryShotT = ferryTimeWhen(ctx, k, lon, (l) => /^\d+ km\/h/.test(l) && parseInt(l, 10) > 15);
+  const p = poseAt(ctx, `ferry:${k}`, ferryShotT);
+  if (!p) return regionView(ctx, () => mid, 60);
+  const c = p.pos.clone().addScaledVector(p.fwd, 18).addScaledVector(p.up, 5).addScaledVector(p.fwd.clone().cross(p.up), 6);
+  const v = aim(c, p.pos);
+  return { lat: v.lat, lon: v.lon, alt: 5, heading: v.heading, pitch: v.pitch };
+}
+/** Line `li`'s stop `k` (transit's sim, read through the scene in shot mode) from 9 m behind it on its kerb side, 6 m up. */
+function busStopView(ctx: LBContext, li: number, k: number): ViewSpec {
+  type Sim = { routes: { lines: Array<{ stops: Array<{ lane: number; s: number }> }> } };
+  const sim = ctx.scene.getObjectByName('transit:car')?.userData.transitSim as Sim | undefined;
+  const st = sim?.routes.lines[li]?.stops[k];
+  if (!st) return regionView(ctx, () => null, 60);
+  const p = ctx.world.region.lanes[st.lane].path;
+  let i = 0;
+  while (i < p.s.length - 2 && p.s[i + 1] < st.s - 4) i++;
+  const a = roadAt(p, i, Math.min(p.s.length - 1, i + 2));
+  // (from behind the stop over the middle of the street, high enough to see its doors' side past the bus)
+  const at = shift(shift(a.ll, a.cos, a.heading + 180, 12), a.cos, a.heading + 90, -1.5);
+  return { lat: at.lat, lon: at.lon, alt: 8, heading: a.heading + 8, pitch: -30 };
 }

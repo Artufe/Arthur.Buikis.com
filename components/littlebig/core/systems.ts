@@ -44,7 +44,9 @@ import { createSkySystem } from '../sky';
 import { createSpaceSystem } from '../space';
 import { createTerrainSystem } from '../terrain';
 import { createTownsSystem } from '../towns';
+import { createTownsfolkSystem } from '../townsfolk';
 import { createTrafficSystem } from '../traffic';
+import { createTransitSystem } from '../transit';
 import type { System } from './contracts';
 
 export function createSystems(): System[] {
@@ -66,5 +68,7 @@ export function createSystems(): System[] {
     createRegionSystem(), // stage 2 (region/, R1): settlement labels; the network debug overlay (?p.region.debug=1)
     createTownsSystem(), // stage 2 (towns/, v2 T1): the towns' and airports' buildings, gardens, trees, boats, the chairlift
     createRoadsSystem(), // stage 2 (roads/, v2 H1): every region road, junction, plaza, bridge, quay, pier, runway, streetlight (after the towns: the other cities, the headline, show first)
+    createTransitSystem(), // stage 2 (transit/, v2 V1): the region's cars, trucks, buses and ferries (before townsfolk: it writes services.transit.blocked, reads .busy)
+    createTownsfolkSystem(), // stage 2 (townsfolk/, v2 T2): the towns' people (after transit/: it writes services.transit.blocked, townsfolk .busy)
   ];
 }

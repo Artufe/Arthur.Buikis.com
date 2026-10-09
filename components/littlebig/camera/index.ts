@@ -825,6 +825,10 @@ export function createCameraSystem(): System {
       plan.z += dz * k;
       if (!ctx.world.cityIndex.collide(plan.x, plan.z, BODY_R, planOut)) moveFocusToPlan(plan.x, plan.z);
     }
+    // v2 (T2): the towns' people, the same soft body, in world space (the capital's plan stretches
+    // far from it: near its antipode a metre across is ~9 plan units, so a push limited there would
+    // let the player walk through them).
+    if (ctx.services.townsfolk?.pushOut(s.focus, BODY_R, tB)) rotateState(axis, Math.min(arc(s.focus, tB, axis), (dist + PEOPLE_PUSH) / (R + s.ground)));
     // The countryside's trunks and boulders (A1's scatter; city trees are CityIndex obstacles).
     if (ctx.services.nature?.collide(s.focus, NATURE_R, s.focus)) orthonormalizeTangent(s.fwd, s.focus);
     // Never walk from the land into the sea.

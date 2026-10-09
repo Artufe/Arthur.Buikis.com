@@ -25,6 +25,8 @@ import { type Item, planSteps, type Site, T } from './plan';
 import { townSolids } from './solids';
 
 const SPREAD = 1.6;
+/** v2 (T2): the planned sites per region (the plan is deterministic and shared), for the townsfolk's places and walks. */
+export const townSites = new WeakMap<object, Site[]>();
 /** Boat tints (pastels): the hull is mid grey in the geometry, so it comes out a deep shade of the tint, the cabin and the gunwale the pastel itself. */
 const HULL = ['#9CC8FF', '#FF9C8C', '#FFE07A', '#8EE6C8', '#FFFFFF', '#C9B8FF', '#FFB86B'].map((h) => new Color(h));
 const CHAIRS = ['#E2543F', '#3D78C8', '#F2A93B'].map((h) => new Color(h));
@@ -73,6 +75,7 @@ export function createTownsSystem(): System {
         step = job.next();
       }
       const sites = step.value;
+      townSites.set(ctx.world.region, sites);
       const opts = { vertexColors: true, reveal: 'instance', revealDuration: 0.8, rim: 0.32, patch: cityPatch(false, late) } as const;
       const mat = ctx.toon.material({ name: 'towns', ...opts });
       mat.shadowSide = DoubleSide;

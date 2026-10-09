@@ -162,10 +162,26 @@ if(lbTrafficCull()||1.0-lbSmooth01((lbCamAlt-${SH_FROM.toFixed(1)})/${(SH_TO - S
 `;
 
 /**
+ * The vehicle patch with its LOD uniforms (uLodM 1 near, 2 far). v2 (V1): transit/ draws the region's
+ * fleet and the ferries through it too — the same key and text, so the same program.
+ */
+export function vehiclePatch(lodR: { value: Vector2 }, m: number): ToonPatch {
+  return {
+    key: 'traffic',
+    vertexPars: PATCH_VERT_PARS,
+    vertex: PATCH_VERT,
+    fragmentPars: PATCH_FRAG_PARS,
+    fragment: PATCH_FRAG,
+    depthFragment: PATCH_DEPTH,
+    uniforms: { uLodR: lodR, uLodM: { value: m } },
+  };
+}
+
+/**
  * Write a rigid instance matrix (columns: left, up, forward, position p) at offset o. (Position as
  * a Vec3: doubles passed to a call V8 does not inline are boxed, i.e. allocated, per call.)
  */
-function basis(m: Float32Array, o: number, l: Vec3, u: Vec3, f: Vec3, p: Vec3) {
+export function basis(m: Float32Array, o: number, l: Vec3, u: Vec3, f: Vec3, p: Vec3) {
   const x = p.x;
   const y = p.y;
   const z = p.z;
@@ -464,15 +480,7 @@ export function createTrafficSystem(): System {
       }
 
       const opts = { vertexColors: true, reveal: 'instance', revealDuration: 0.55, rim: 0.42 } as const;
-      const patch = (m: number): ToonPatch => ({
-        key: 'traffic',
-        vertexPars: PATCH_VERT_PARS,
-        vertex: PATCH_VERT,
-        fragmentPars: PATCH_FRAG_PARS,
-        fragment: PATCH_FRAG,
-        depthFragment: PATCH_DEPTH,
-        uniforms: { uLodR: lodR, uLodM: { value: m } },
-      });
+      const patch = (m: number) => vehiclePatch(lodR, m);
       const mats = [ctx.toon.material({ name: 'traffic', patch: patch(1), ...opts }), ctx.toon.material({ name: 'traffic:far', patch: patch(2), ...opts })];
       for (let k = 0; k < KINDS.length; k++) {
         const cnt = Math.max(1, count[k]);

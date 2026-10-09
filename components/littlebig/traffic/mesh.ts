@@ -32,7 +32,8 @@ interface BoxOpt {
 type Body = readonly [number, number, number, number];
 
 const hex = (h: string) => new Color(h);
-const GLASS = hex('#2f4170');
+/** (Exported for transit/'s ferry: glass is recognised by this colour, aTint −1.) */
+export const GLASS = hex('#2f4170');
 const TYRE = hex('#2a2438');
 const ARCH = hex('#3a3350');
 const TRIM = hex('#4b4f66');
@@ -51,7 +52,8 @@ const SCOOP = hex('#ff9ec4');
 const NONE = [0, 0, 0] as const;
 const T = { tint: 1 };
 
-class VehicleBuilder {
+/** v2 (V1): exported for transit/ (the ferry, the bus's open doors): the same attributes, so the same patch. */
+export class VehicleBuilder {
   /** The far LOD: every box plain (flat faces), parts under 0.45 m left out, octagonal wheels, no arches. */
   constructor(private lo: boolean) {}
   private P: number[] = [];
