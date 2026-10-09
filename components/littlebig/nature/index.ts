@@ -212,7 +212,7 @@ export function createNatureSystem(): System {
       ]);
       await ctx.yield();
       const avoid = marks.map((m) => ({ x: m.dir.x * (R + m.h), y: m.dir.y * (R + m.h), z: m.dir.z * (R + m.h), r: m.kind === 'windmill' ? 11 : 5 }));
-      const steps = scatterNatureSteps({ terrain: t, city: ctx.world.city, cityIndex: ctx.world.cityIndex, cityDir: ctx.world.planet.cityDir, density: ctx.q.density, avoid });
+      const steps = scatterNatureSteps({ terrain: t, city: ctx.world.city, cityIndex: ctx.world.cityIndex, cityDir: ctx.world.planet.cityDir, density: ctx.q.density, avoid, region: ctx.world.region });
       let s: NatureScatter;
       for (;;) {
         const r = steps.next();

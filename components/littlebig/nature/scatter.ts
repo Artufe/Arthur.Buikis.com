@@ -6,13 +6,16 @@
 // look for the whole world), and the scatter only adds a few bushes and trees on 'free' ground
 // (outside every road, sidewalk, building and area) where cityIndex.isClear says there is room.
 
-import { CITY_SURFACE_R } from '../world/config';
+import { CITY_SURFACE_R, R as R0 } from '../world/config';
 import { fromSphere, toSphere } from '../world/city/frame';
 import type { CityIndex, CityPlan } from '../world/city/types';
 import { Biome } from '../world/planet';
+import { KEEP_ALL, type Region } from '../world/region/types';
 import { hash3 } from '../world/rng';
 import { v3, type Vec3 } from '../world/sphere';
 import { yawAlong } from './frame';
+import { meshHeight } from '../roads/mesh';
+import { nearAirfield, nearForecourt } from '../roads/mask';
 import { facePoint, faceBiome, faceMinHeight, faceSlope, fieldCell, type TerrainData } from '../terrain/data';
 
 export const NatureKind = {
@@ -86,6 +89,17 @@ export interface ScatterInput {
   density?: number;
   /** Keep-out discs (world position + radius, m) around landmarks: no scatter inside them. */
   avoid?: ReadonlyArray<{ x: number; y: number; z: number; r: number }>;
+  /**
+   * v2 (H1): the region outside the plateau. Nothing grows on its carriageways and verges, town pads,
+   * plazas, runways or piers (Region.keepOut): a tree keeps its crown clear, a bush or a rock its body;
+   * nor in an airfield's clear zone (roads/mask.ts nearAirfield).
+   */
+  region?: Region;
+}
+
+/** v2 (H1): how far (m) a scattered thing keeps from the region's built ground (Region.keepOut margin). */
+export function keepMargin(kind: number, wide: number): number {
+  return kind === NatureKind.Rock ? 0.4 + wide * 0.3 : kind === NatureKind.Bush ? 0.3 + wide * 0.35 : 0.3 + CROWN_R[kind] * wide * 0.55;
 }
 
 /** scatterNature as a generator that yields every few thousand facets (time-sliced init). */
@@ -141,6 +155,54 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
     else grid.set(k, [i]);
   };
   const avoid = input.avoid ?? [];
+  const region = input.region;
+  const ud = v3();
+  const dirOf = (pt: Vec3) => {
+    const l = Math.hypot(pt.x, pt.y, pt.z);
+    ud.x = pt.x / l;
+    ud.y = pt.y / l;
+    ud.z = pt.z / l;
+    return ud;
+  };
+  // (v2 H1) move pt up to 6 times 2.5–10 m out (2.5–33 m from an airfield) in hashed directions until it
+  // is clear of the region and on dry, gentle, open ground; writes the new base (on the rendered facet)
+  // into pt, returns its face or −1
+  const mesh = region ? meshHeight(t) : null;
+  // (and out of the airfields' clear zones, the runways' strips and their approaches, and off the
+  // gate forecourts: the paving between each gate plaza and the capital's turning circle)
+  const kept = (d: Vec3, m: number) => region!.keepOut(d, m, KEEP_ALL) || nearAirfield(region!, d) || nearForecourt(region!, d, m);
+  const tq = v3();
+  const replant = (pt: Vec3, m: number, seed: number, far: boolean): number => {
+    const d = dirOf(pt);
+    const ax = Math.abs(d.y) < 0.9 ? 0 : 1;
+    let ex = ax ? 0 : d.z, ey = ax ? d.z : 0, ez = ax ? -d.y : -d.x;
+    const el = Math.hypot(ex, ey, ez);
+    ex /= el;
+    ey /= el;
+    ez /= el;
+    const nx = d.y * ez - d.z * ey, ny = d.z * ex - d.x * ez, nz = d.x * ey - d.y * ex;
+    for (let k = 0; k < 6; k++) {
+      const a = hash3(seed, k, 0x5e) * Math.PI * 2;
+      const r = (m + 2.5 + (far ? 6 : 1.5) * k) / R0;
+      tq.x = d.x + (ex * Math.cos(a) + nx * Math.sin(a)) * r;
+      tq.y = d.y + (ey * Math.cos(a) + ny * Math.sin(a)) * r;
+      tq.z = d.z + (ez * Math.cos(a) + nz * Math.sin(a)) * r;
+      const l = Math.hypot(tq.x, tq.y, tq.z);
+      tq.x /= l;
+      tq.y /= l;
+      tq.z /= l;
+      if (kept(tq, m)) continue;
+      const g = mesh!.face(tq);
+      const fb = faceBiome(t, g);
+      if (faceMinHeight(t, g) < 0.4 || faceSlope(t, g) > 0.25 || !(fb === Biome.Grass || fb === Biome.Meadow || fb === Biome.Forest)) continue;
+      const h = mesh!.at(tq);
+      pt.x = tq.x * (R0 + h);
+      pt.y = tq.y * (R0 + h);
+      pt.z = tq.z * (R0 + h);
+      return g;
+    }
+    return -1;
+  };
   const blocked = (pt: Vec3) => {
     for (let i = 0; i < avoid.length; i++) {
       const a = avoid[i];
@@ -306,11 +368,26 @@ export function* scatterNatureSteps(input: ScatterInput): Generator<void, Nature
       }
       const wide = kind === NatureKind.Bush ? size * 1.6 : kind === NatureKind.Rock ? size : kind === NatureKind.Conifer ? size * 0.82 : size * (0.85 + 0.3 * hash3(f, slot, 7));
       const cr = CROWN_R[kind] * wide;
+      // v2 (H1): off the region's roads, pads, plazas, runways and piers. A tree that would stand there
+      // is replanted a few metres out on open ground (a hedge of trees along a road, a wood round a
+      // town), so the countryside stays as lush as it was.
+      // (one on the capital's free ground keeps only off the gate forecourts, which its plan doesn't know)
+      let face = f;
+      if (region) {
+        const m = keepMargin(kind, wide);
+        const city = flags & NatureFlag.City;
+        if (city ? nearForecourt(region, dirOf(p), m) : kept(dirOf(p), m)) {
+          if (city || kind === NatureKind.Bush || kind === NatureKind.Rock) continue;
+          // (one in an airfield's clear zone goes further: past the zone's edge)
+          face = replant(p, m, f * 8 + slot, nearAirfield(region, dirOf(p)));
+          if (face < 0 || (avoid.length && blocked(p))) continue;
+        }
+      }
       if (cr > 0 && !crowdFree(p.x, p.y, p.z, cr, b === Biome.Forest ? CROWN_GAP_FOREST : CROWN_GAP)) continue;
       const ang = Math.acos(Math.max(-1, Math.min(1, (p.x * cityDir.x + p.y * cityDir.y + p.z * cityDir.z) / lenP)));
       const hedge = (flags & NatureFlag.Hedge) !== 0;
       const yaw = hedge ? hedgeYaw + (hash3(f, slot, 0x31) - 0.5) * 0.3 : hash3(f, slot, 0x31) * Math.PI * 2;
-      add(kind, p.x, p.y, p.z, yaw, wide, size, tone, flags, f, 0.12 + 0.88 * Math.min(1, ang / 2.2) + 0.05 * hash3(f, slot, 8));
+      add(kind, p.x, p.y, p.z, yaw, wide, size, tone, flags, face, 0.12 + 0.88 * Math.min(1, ang / 2.2) + 0.05 * hash3(f, slot, 8));
       if (hedge && out.count <= cap) out.stretch[out.count - 1] = 1.6 + 1.0 * hash3(f, slot, 0x3b);
       if (cr > 0 && out.count < cap) remember(out.count - 1, cr);
     }

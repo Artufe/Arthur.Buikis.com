@@ -39,9 +39,11 @@ import { createNatureSystem } from '../nature';
 import { createOceanSystem } from '../ocean';
 import { createPeopleSystem } from '../people';
 import { createRegionSystem } from '../region';
+import { createRoadsSystem } from '../roads';
 import { createSkySystem } from '../sky';
 import { createSpaceSystem } from '../space';
 import { createTerrainSystem } from '../terrain';
+import { createTownsSystem } from '../towns';
 import { createTrafficSystem } from '../traffic';
 import type { System } from './contracts';
 
@@ -62,5 +64,7 @@ export function createSystems(): System[] {
     createSpaceSystem(), // stage 2 (space/, S1)
     createBirdSystem(), // stage 2 (camera/bird/, D1): the bird the camera flies in bird mode
     createRegionSystem(), // stage 2 (region/, R1): settlement labels; the network debug overlay (?p.region.debug=1)
+    createTownsSystem(), // stage 2 (towns/, v2 T1): the towns' and airports' buildings, gardens, trees, boats, the chairlift
+    createRoadsSystem(), // stage 2 (roads/, v2 H1): every region road, junction, plaza, bridge, quay, pier, runway, streetlight (after the towns: the other cities, the headline, show first)
   ];
 }

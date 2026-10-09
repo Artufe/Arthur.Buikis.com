@@ -18,6 +18,8 @@ import { Biome } from '../world/planet';
 import { hash3 } from '../world/rng';
 import { isFlowerField, vertexColors } from '../terrain/colors';
 import { faceBiome, facePoint, faceMinHeight, faceSlope, type TerrainData } from '../terrain/data';
+import type { SurfaceHit } from '../world/region/types';
+import { nearForecourt } from '../roads/mask';
 import { flowerGeometry, pebbleGeometry, tuftGeometry } from './geometry';
 import { composeUp } from './frame';
 import { createPathMask } from './paths';
@@ -151,6 +153,23 @@ uniform vec2 uCoverFade;`,
   const index = ctx.world.cityIndex;
   const paths = createPathMask(ctx.world.city, index);
   let revealed = false;
+  // v2 (H1): the region's built ground (Region.keepOut / surface): no flower or pebble on a road, a
+  // verge, a town pad, a plaza, a runway; grass tufts only on open ground and on a verge's outer edge
+  const region = ctx.world.region;
+  const hit: SurfaceHit = { cls: 'free', roadDist: 0, edge: -1, settlement: -1 };
+  const ud = { x: 0, y: 0, z: 0 };
+  const unit = (v: { x: number; y: number; z: number }) => {
+    const l = Math.hypot(v.x, v.y, v.z);
+    ud.x = v.x / l;
+    ud.y = v.y / l;
+    ud.z = v.z / l;
+    return ud;
+  };
+  const builtOn = (kind: number) => {
+    region.surface(unit(p), hit);
+    if (hit.cls === 'free') return false;
+    return !(kind === 0 && hit.cls === 'verge' && hit.edge >= 0 && hit.roadDist > region.edges[hit.edge].width / 2 + 0.55);
+  };
 
   /**
    * One facet's cover, built once and cached (deterministic per facet): instance matrices and
@@ -189,6 +208,8 @@ uniform vec2 uCoverFade;`,
     const field = (t.flower[a] + t.flower[I[f * 3 + 1]] + t.flower[I[f * 3 + 2]]) / 3;
     // A farmland flower field (yellow from the air): thick with buttercup and white heads.
     const bloomField = isFlowerField(t.field[a]);
+    facePoint(t, f, 1 / 3, 1 / 3, p);
+    const nearBuilt = region.keepOut(unit(p), 3) || nearForecourt(region, unit(p), 3);
     const out: FacetCover = { tM: EMPTY, tC: EMPTY, tBase: 0, tAll: 0, fM: EMPTY, fC: EMPTY, nf: 0, pM: EMPTY, pC: EMPTY, np: 0 };
     let any = false;
     for (let kind = 0; kind < 3; kind++) {
@@ -208,6 +229,7 @@ uniform vec2 uCoverFade;`,
           v = 1 - v;
         }
         facePoint(t, f, u, v, p);
+        if (nearBuilt && (builtOn(kind) || nearForecourt(region, unit(p), 0.3))) continue;
         if (inCityFace) {
           fromSphere(p, q);
           if (Math.hypot(q.x, q.z) < planR) {

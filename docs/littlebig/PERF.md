@@ -320,6 +320,13 @@ existing shot tool's Three.js markers; the total ceiling also catches chunk-merg
 classification changes. Missing/incomplete loads fail. `LB_OWN_KIB` / `LB_TOTAL_KIB` override
 the ceilings for experiments; CI uses the checked-in defaults.
 
+**v2 towns and roads (2026-10-09).** The same measurement with T1 (towns) and H1 (roads)
+landed: **363.7 KiB own / 528.2 KiB total**. Stubbing each system out gives towns 24.7 KiB
+and roads 16.6 KiB (plus 1.4 KiB of keep-out wiring in nature/). The ceilings are now
+**372 / 540**, the same ~8 / 12 KiB of headroom the 330 / 500 ceilings had. The towns and
+roads add at most 14 draw calls and stay inside every frame budget (orbit 83 calls, region-west
+83, street 78); the world is complete at 1.2–1.7 s against 2.5 s.
+
 The engine now owns HUD, touch detection and stick presentation subscriptions. They run after
 its render, pause when its loop is suspended and are released on disposal. Deterministic sim,
 instanced rendering, staged shader warmup and adaptive resolution remain in place.

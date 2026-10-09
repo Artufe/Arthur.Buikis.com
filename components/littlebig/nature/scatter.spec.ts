@@ -3,14 +3,17 @@ import { getCityIndex, getCityPlan } from '../world/city';
 import { fromSphere } from '../world/city/frame';
 import { getPlanet } from '../world/planet';
 import { terrainData } from '../terrain/data';
-import { CROWN_GAP_FOREST, CROWN_R, NatureFlag, NatureKind, scatterNature } from './scatter';
+import { CROWN_GAP_FOREST, CROWN_R, keepMargin, NatureFlag, NatureKind, scatterNature } from './scatter';
+import { KEEP_ALL } from '../world/region/types';
+import { nearAirfield, nearForecourt } from '../roads/mask';
 
 describe('nature scatter', () => {
   const planet = getPlanet();
   const terrain = terrainData(planet, 6);
   const city = getCityPlan();
   const cityIndex = getCityIndex();
-  const input = { terrain, city, cityIndex, cityDir: planet.cityDir };
+  // (v2 H1: with the region, as the game scatters: nothing on its roads, pads, plazas, runways, piers)
+  const input = { terrain, city, cityIndex, cityDir: planet.cityDir, region: planet.region };
   const s = scatterNature(input);
 
   it('is deterministic (the same trees every visit)', () => {
@@ -77,6 +80,27 @@ describe('nature scatter', () => {
       }
     }
     expect(cityTrees).toBe(features);
+  });
+
+  it('keeps off the region: no tree, bush or rock on a road or its verge, a town pad, a plaza, a gate forecourt, a runway, a pier or an airfield', () => {
+    const d = { x: 0, y: 0, z: 0 };
+    let checked = 0;
+    for (let i = 0; i < s.count; i++) {
+      const x = s.pos[i * 3], y = s.pos[i * 3 + 1], z = s.pos[i * 3 + 2];
+      const l = Math.hypot(x, y, z);
+      d.x = x / l;
+      d.y = y / l;
+      d.z = z / l;
+      // nothing on a gate forecourt's paving (the capital's free ground included: its plan doesn't know it)
+      expect(nearForecourt(planet.region, d, keepMargin(s.kind[i], s.w[i]) - 0.01)).toBe(false);
+      if (s.flags[i] & NatureFlag.City) continue;
+      // its trunk or body clear by its own margin (a tree's crown overhangs a verge by no more than half its radius)
+      expect(planet.region.keepOut(d, keepMargin(s.kind[i], s.w[i]) - 0.01, KEEP_ALL)).toBe(false);
+      // ... nor in an airfield's clear zone (the runway's strip and its approaches)
+      expect(nearAirfield(planet.region, d)).toBe(false);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(3000);
   });
 
   it('never stands in the sea', () => {

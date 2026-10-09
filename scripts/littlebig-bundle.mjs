@@ -50,10 +50,11 @@ try {
     console.log(`${(gzip / 1024).toFixed(1)} KiB gzip ${threeOnly ? 'three' : 'own'} ${new URL(url).pathname}`);
   }
   if (!chunks || own < 100 * 1024) throw new Error('Incomplete planet load: refusing a false budget pass');
-  // Current feature-complete baseline 320.8 / 485.3 KiB. The historical 260 KiB own-JS
-  // aspiration remains documented in PERF.md; these are explicit no-regression ceilings.
-  const ownLimit = Number(process.env.LB_OWN_KIB ?? 330);
-  const totalLimit = Number(process.env.LB_TOTAL_KIB ?? 500);
+  // Current feature-complete baseline 363.7 / 528.2 KiB (v2 towns and roads added 43 KiB).
+  // The historical 260 KiB own-JS aspiration remains documented in PERF.md; these are
+  // explicit no-regression ceilings, raised only with a measured entry in DECISIONS.md.
+  const ownLimit = Number(process.env.LB_OWN_KIB ?? 372);
+  const totalLimit = Number(process.env.LB_TOTAL_KIB ?? 540);
   if (!(ownLimit > 0 && totalLimit > 0)) throw new Error('Budgets must be positive numbers');
   console.log(`Planet: ${(own / 1024).toFixed(1)} / ${ownLimit} KiB own; ${(total / 1024).toFixed(1)} / ${totalLimit} KiB total incremental gzip`);
   if (own > ownLimit * 1024 || total > totalLimit * 1024) throw new Error('Planet bundle budget exceeded');
