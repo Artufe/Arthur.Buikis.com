@@ -113,6 +113,7 @@ const MAX_STEPS = 8;
 /** Time-slice budget bounds for stage-2 init work per frame (ms); the live value follows the display. */
 const SLICE_MIN_MS = 2;
 const SLICE_MAX_MS = 8;
+const SLICE_SLOW_MS = 250;
 
 export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const t0 = performance.now();
@@ -186,7 +187,11 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // Slice budget: the display's frame interval minus the last frame's CPU cost and a margin.
   let frameInterval = 1000 / 60;
   let frameCpu = 3;
-  const sliceBudget = () => Math.max(SLICE_MIN_MS, Math.min(SLICE_MAX_MS, frameInterval - frameCpu - 2));
+  // Below 10 fps (software GL, a starved GPU) the frame is a slideshow anyway: slice for half a
+  // frame (≤ SLICE_SLOW_MS), or a boot that yields a few hundred times waits minutes on frames.
+  let rafInterval = 1000 / 60;
+  const sliceBudget = () =>
+    rafInterval > 100 ? Math.min(SLICE_SLOW_MS, rafInterval / 2) : Math.max(SLICE_MIN_MS, Math.min(SLICE_MAX_MS, frameInterval - frameCpu - 2));
   let disposed = false;
   let resolveDisposed: () => void = () => {};
   const disposedPromise = new Promise<void>((r) => (resolveDisposed = r));
@@ -773,6 +778,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     perf.push(interval, cpu);
     // Slice budget inputs (smoothed; vsync-quantised intervals jitter).
     if (interval > 4 && interval < 50) frameInterval += (interval - frameInterval) * 0.2;
+    if (!first) rafInterval += (Math.min(interval, 2000) - rafInterval) * 0.2;
     frameCpu += (cpu - frameCpu) * 0.2;
   };
   const shouldRun = () => running && !paused && visible && onScreen && !disposed && !contextLost;
