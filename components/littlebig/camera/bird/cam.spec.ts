@@ -1,6 +1,8 @@
-// The bird and its chase camera among towers (D1): random steering, dives and climbs into a grid of
-// tall blocks for a minute. The camera never snaps round when the bird meets a wall (pure,
-// synthetic world).
+// The bird and its chase camera among towers (D1, v2-BF): flown at the blocks it crashes into them
+// (nothing steers it off), bounces, tumbles and recovers (righted in the air, or down on the ground,
+// dazed, then standing); through all of it the camera never whips
+// round (it holds through the tumble and eases back behind), never goes inside a block or under the
+// floor, and keeps the bird in frame (pure, synthetic world).
 
 import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +12,7 @@ import type { RideEnv } from '../rides/rig';
 import { BirdCam } from './cam';
 import { BIRD, BirdFlight, type BirdEnv, type BirdInput } from './flight';
 
+const DEG = Math.PI / 180;
 const GROUND = 2;
 /** Blocks [x0, z0, x1, z1, top] in local metres (east x, north z) round (0, 0, R). */
 const BLOCKS: number[][] = [];
@@ -18,31 +21,30 @@ for (let i = -3; i <= 3; i++)
     const top = GROUND + 14 + ((i * 7 + j * 13 + 21) % 5) * 5; // 14 … 34 m tall
     BLOCKS.push([i * 18 - 5, j * 18 - 5, i * 18 + 5, j * 18 + 5, top]);
   }
+/** One tall tower (x 0…20, z 0…20, 60 m). */
+const TOWER: number[][] = [[0, 0, 20, 20, 62]];
 
 const toLocal = (d: Vector3) => ({ x: (d.x / d.z) * R, z: (d.y / d.z) * R });
-const fromLocal = (x: number, z: number, out: Vector3) => out.set(x / R, z / R, 1).normalize();
+const fromLocal = (x: number, z: number, out = new Vector3()) => out.set(x / R, z / R, 1).normalize();
 
-function roofAt(x: number, z: number, pad = 0): number {
+/** The highest top (m) over plan (x, z) among `blocks` (grown by pad), and the ground. */
+function roofAt(blocks: number[][], x: number, z: number, pad = 0, below = Infinity): number {
   let top = GROUND;
-  for (const [x0, z0, x1, z1, h] of BLOCKS) if (x > x0 - pad && x < x1 + pad && z > z0 - pad && z < z1 + pad) top = Math.max(top, h);
+  for (const [x0, z0, x1, z1, h] of blocks) if (h <= below && x > x0 - pad && x < x1 + pad && z > z0 - pad && z < z1 + pad) top = Math.max(top, h);
   return top;
 }
 
 /** Push a disc out of every block taller than h it overlaps (nearest face). */
-function wall(dir: Vector3, h: number, r: number, out: Vector3): boolean {
+function pushOut(blocks: number[][], dir: Vector3, h: number, r: number, out: Vector3): boolean {
   let { x, z } = toLocal(dir);
   let moved = false;
-  for (const [x0, z0, x1, z1, top] of BLOCKS) {
-    if (top <= h - 0.3) continue;
+  for (const [x0, z0, x1, z1, top] of blocks) {
+    if (top <= h) continue;
     if (x <= x0 - r || x >= x1 + r || z <= z0 - r || z >= z1 + r) continue;
-    const dl = x - (x0 - r);
-    const dr = x1 + r - x;
-    const dd = z - (z0 - r);
-    const du = z1 + r - z;
-    const m = Math.min(dl, dr, dd, du);
-    if (m === dl) x = x0 - r;
-    else if (m === dr) x = x1 + r;
-    else if (m === dd) z = z0 - r;
+    const m = Math.min(x - (x0 - r), x1 + r - x, z - (z0 - r), z1 + r - z);
+    if (m === x - (x0 - r)) x = x0 - r;
+    else if (m === x1 + r - x) x = x1 + r;
+    else if (m === z - (z0 - r)) z = z0 - r;
     else z = z1 + r;
     moved = true;
   }
@@ -51,266 +53,209 @@ function wall(dir: Vector3, h: number, r: number, out: Vector3): boolean {
 }
 
 const _f = new Vector3();
-const birdEnv: BirdEnv = {
-  floor: (d) => {
-    const { x, z } = toLocal(d);
-    return roofAt(x, z, 1);
-  },
-  hard: (d) => {
-    const { x, z } = toLocal(d);
-    return roofAt(x, z);
-  },
-  wall,
-  ceiling: 98,
-};
-const camEnv: RideEnv = {
-  floor: (d) => {
-    const { x, z } = toLocal(d);
-    return roofAt(x, z);
-  },
-  free: (a, b) => {
-    const n = 16;
-    for (let i = 1; i <= n; i++) {
-      _f.lerpVectors(a, b, i / n);
-      const h = _f.length() - R;
-      const { x, z } = toLocal(_f.normalize());
-      if (roofAt(x, z) > h - 0.4) return (i - 1) / n;
-    }
-    return 1;
-  },
-  wall,
-  reduced: false,
-};
+function envs(blocks: number[][]): { bird: BirdEnv; cam: RideEnv } {
+  return {
+    bird: {
+      floor: (d, h) => {
+        const { x, z } = toLocal(d);
+        return roofAt(blocks, x, z, 0, h + BIRD.step);
+      },
+      wall: (d, h, r, out) => pushOut(blocks, d, h + BIRD.step, r, out),
+      ceiling: 98,
+    },
+    cam: {
+      floor: (d) => {
+        const { x, z } = toLocal(d);
+        return roofAt(blocks, x, z);
+      },
+      free: (a, b) => {
+        const n = 16;
+        for (let i = 1; i <= n; i++) {
+          _f.lerpVectors(a, b, i / n);
+          const h = _f.length() - R;
+          const { x, z } = toLocal(_f.normalize());
+          if (roofAt(blocks, x, z) > h - 0.4) return (i - 1) / n;
+        }
+        return 1;
+      },
+      wall: (d, h, r, out) => pushOut(blocks, d, h - 0.3, r, out),
+      reduced: false,
+    },
+  };
+}
 
 function rng(seed: number) {
   let s = seed >>> 0;
   return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
 }
 
+/** Fly with the camera; the worst view turn per frame (rad), the bird's worst place in the frame, and checks on every frame. */
+function chase(blocks: number[][], b: BirdFlight, input: (i: number, b: BirdFlight) => BirdInput, frames: number) {
+  const { bird: be, cam: ce } = envs(blocks);
+  const cam = new BirdCam();
+  const o = createFramePose();
+  cam.settle(b, ce, o);
+  const lens = new PerspectiveCamera(58, 1.6, 0.05, 2000);
+  const prevQ = new Quaternion().copy(o.quat);
+  const prevP = o.pos.clone();
+  const prevB = b.pos.clone();
+  let worstTurn = 0;
+  let worstCrashTurn = 0;
+  let worstNdc = 0;
+  let worstRatio = 0;
+  let crashFrames = 0;
+  let worstAt = '';
+  let worstCrashJerk = 0;
+  let prevTurn = 0;
+  let jerkAt = '';
+  let outFrames = 0;
+  let ndcAt = '';
+  const dt = 1 / 60;
+  for (let i = 0; i < frames; i++) {
+    b.step(dt, input(i, b), be);
+    cam.update(dt, b, ce, o);
+    expect(Number.isFinite(o.pos.x + o.quat.w)).toBe(true);
+    const turn = prevQ.angleTo(o.quat);
+    if (turn > worstTurn) worstAt = `frame ${i} crash ${b.crash.toFixed(2)} touching ${b.touching} v ${b.speed.toFixed(1)} γ ${(b.gamma / DEG).toFixed(0)} bank ${(b.bank / DEG).toFixed(0)} turn ${(b.turn / DEG).toFixed(0)} occ ${cam.occ.toFixed(2)} d ${o.pos.distanceTo(b.pos).toFixed(2)} alt ${(b.pos.length() - R).toFixed(1)}`;
+    worstTurn = Math.max(worstTurn, turn);
+    if (b.crash > 0) {
+      crashFrames++;
+      worstCrashTurn = Math.max(worstCrashTurn, turn);
+      if (Math.abs(turn - prevTurn) > worstCrashJerk) jerkAt = `frame ${i} turn ${(prevTurn / DEG).toFixed(2)}→${(turn / DEG).toFixed(2)} crash ${b.crash.toFixed(2)} touching ${b.touching} bonks ${b.bonks} v ${b.speed.toFixed(1)} γ ${(b.gamma / DEG).toFixed(0)} occ ${cam.occ.toFixed(2)} d ${o.pos.distanceTo(b.pos).toFixed(2)} alt ${(b.pos.length() - R).toFixed(2)}`;
+      worstCrashJerk = Math.max(worstCrashJerk, Math.abs(turn - prevTurn));
+    }
+    prevTurn = turn;
+    lens.position.copy(o.pos);
+    lens.quaternion.copy(o.quat);
+    lens.fov = o.fov;
+    lens.updateProjectionMatrix();
+    lens.updateMatrixWorld();
+    const n = b.pos.clone().project(lens);
+    const nd = Math.max(Math.abs(n.x), Math.abs(n.y), n.z > 1 ? 9 : 0);
+    if (nd > worstNdc) ndcAt = `frame ${i} ndc ${n.x.toFixed(2)},${n.y.toFixed(2)},${n.z.toFixed(3)} crash ${b.crash.toFixed(2)} touching ${b.touching} v ${b.speed.toFixed(1)} γ ${(b.gamma / DEG).toFixed(0)} occ ${cam.occ.toFixed(2)} d ${o.pos.distanceTo(b.pos).toFixed(2)} turn ${(turn / DEG).toFixed(2)}`;
+    worstNdc = Math.max(worstNdc, nd);
+    if (nd > 1) outFrames++;
+    worstRatio = Math.max(worstRatio, o.pos.distanceTo(prevP) / Math.max(b.pos.distanceTo(prevB), 4 * dt));
+    // The bird: never inside a block nor under its roof; the camera: never inside a block, never under the floor.
+    const bl = toLocal(b.pos.clone().normalize());
+    expect(b.pos.length() - R).toBeGreaterThan(roofAt(blocks, bl.x, bl.z, -BIRD.bodyR + 0.02) - 0.05);
+    const cl = toLocal(o.pos.clone().normalize());
+    expect(o.pos.length() - R).toBeGreaterThan(roofAt(blocks, cl.x, cl.z, -0.05) - 0.01);
+    prevQ.copy(o.quat);
+    prevP.copy(o.pos);
+    prevB.copy(b.pos);
+  }
+  return { worstTurn, worstCrashTurn, worstCrashJerk, worstNdc, worstRatio, crashFrames, worstAt, ndcAt, jerkAt, outFrames };
+}
+
 describe('bird among towers', { timeout: 30_000 }, () => {
-  it('a minute of random steering into the blocks: the camera turns smoothly, never snaps', () => {
+  it('a minute of random flying at the blocks: it crashes and recovers, the camera never snaps', () => {
+    let crashes = 0;
     for (const seed of [3, 11, 29]) {
       const r = rng(seed);
       const b = new BirdFlight();
-      b.reset(fromLocal(9, 9, new Vector3()).multiplyScalar(R + GROUND + 9), fromLocal(10, 9, new Vector3()).sub(fromLocal(9, 9, new Vector3())));
-      const cam = new BirdCam();
-      const o = createFramePose();
-      cam.settle(b, camEnv, o);
+      b.reset(fromLocal(9, 9).multiplyScalar(R + GROUND + 9), fromLocal(10, 9).sub(fromLocal(9, 9)));
       const inp: BirdInput = { steer: 0, climb: 0, flap: false, dive: false };
-      const prevQ = new Quaternion().copy(o.quat);
-      const prevP = o.pos.clone();
-      const steps: number[] = [];
-      let worstTurn = 0;
-      let wallHits = 0;
-      const dt = 1 / 60;
-      for (let i = 0; i < 60 * 60; i++) {
+      const res = chase(BLOCKS, b, (i, bb) => {
         if (i % 30 === 0) {
           inp.steer = r() * 2 - 1;
-          inp.climb = r() < 0.5 ? -1 : r() * 2 - 1; // mostly low, among the blocks
-          inp.flap = r() < 0.2;
-          inp.dive = r() < 0.1;
+          inp.climb = r() < 0.4 ? -1 : r() * 2 - 1;
+          inp.flap = r() < 0.35;
+          inp.dive = r() < 0.08;
         }
         // (Out past the blocks it turns for home: the synthetic city is a flat patch round (0, 0, R).)
-        const here = toLocal(b.pos.clone().normalize());
-        const far = Math.hypot(here.x, here.z) > 50;
-        let steer = inp.steer;
-        if (far) {
-          const up = b.pos.clone().normalize();
+        const up = bb.pos.clone().normalize();
+        const here = toLocal(up);
+        if (Math.hypot(here.x, here.z) > 50) {
           const home = new Vector3(0, 0, 1).addScaledVector(up, -up.z).normalize();
-          const right = new Vector3().crossVectors(b.fwd, up);
-          steer = Math.max(-1, Math.min(1, home.dot(right) * 3 + (home.dot(b.fwd) < 0 ? 1 : 0)));
+          const right = new Vector3().crossVectors(bb.fwd, up);
+          return { ...inp, steer: Math.max(-1, Math.min(1, home.dot(right) * 3 + (home.dot(bb.fwd) < 0 ? 1 : 0))) };
         }
-        b.step(dt, { ...inp, steer }, birdEnv);
-        if (b.floorBusy) wallHits++;
-        cam.update(dt, b, camEnv, o);
-        worstTurn = Math.max(worstTurn, prevQ.angleTo(o.quat));
-        steps.push(o.pos.distanceTo(prevP));
-        prevQ.copy(o.quat);
-        prevP.copy(o.pos);
-        expect(Number.isFinite(o.pos.x + o.quat.w)).toBe(true);
-        // The bird itself stays out of the blocks.
-        const { x, z } = toLocal(b.pos.clone().normalize());
-        expect(b.pos.length() - R).toBeGreaterThan(roofAt(x, z, -BIRD.bodyR) - 0.05);
-      }
-      // It did meet the blocks (the test means something)…
-      expect(wallHits).toBeGreaterThan(60);
-      // …and the view never turned more than 4° in a frame (240°/s), nor stepped 3× its neighbours.
-      expect(worstTurn).toBeLessThan((4 * Math.PI) / 180);
-      for (let i = 1; i < steps.length - 1; i++) expect(steps[i]).toBeLessThan(3 * Math.max(steps[i - 1], steps[i + 1]) + 0.05);
+        return inp;
+      }, 60 * 60);
+      crashes += b.crashes;
+      // The view never turned more than 4° in a frame (240°/s); through a crash its turn never jumped
+      // by more than 2.5° from one frame to the next (in this dense grid a blocker may pull the boom
+      // in to ~1 m mid-tumble, where keeping the bird in frame asks for a quick turn; the director's
+      // turn follower eases that further).
+      expect(res.worstTurn, `seed ${seed}: ${res.worstAt}`).toBeLessThanOrEqual(4 * DEG + 1e-9);
+      expect(res.worstCrashJerk, `seed ${seed}: ${res.jerkAt}`).toBeLessThan(2.5 * DEG);
+      // The bird in frame (its centre at most a frame's edge out, for a frame or two, mid-tumble at a
+      // boom a blocker pulled in to ~0.9 m).
+      expect(res.worstNdc, `seed ${seed}: ${res.ndcAt}`).toBeLessThan(1.15);
+      expect(res.outFrames, `seed ${seed}`).toBeLessThanOrEqual(3);
     }
-  });
-});
-
-/** One tall tower (x 0…20, z 0…20, 60 m), ground at 2 m. */
-const TOWER = [0, 0, 20, 20, 62];
-function towerRoof(x: number, z: number, pad = 0): number {
-  const [x0, z0, x1, z1, h] = TOWER;
-  return x > x0 - pad && x < x1 + pad && z > z0 - pad && z < z1 + pad ? h : GROUND;
-}
-function towerWall(dir: Vector3, h: number, r: number, out: Vector3): boolean {
-  let { x, z } = toLocal(dir);
-  const [x0, z0, x1, z1, top] = TOWER;
-  if (top <= h - 0.3 || x <= x0 - r || x >= x1 + r || z <= z0 - r || z >= z1 + r) return false;
-  const dl = x - (x0 - r);
-  const dr = x1 + r - x;
-  const dd = z - (z0 - r);
-  const du = z1 + r - z;
-  const m = Math.min(dl, dr, dd, du);
-  if (m === dl) x = x0 - r;
-  else if (m === dr) x = x1 + r;
-  else if (m === dd) z = z0 - r;
-  else z = z1 + r;
-  fromLocal(x, z, out);
-  return true;
-}
-const towerBird: BirdEnv = {
-  floor: (d) => {
-    const { x, z } = toLocal(d);
-    return towerRoof(x, z, 1);
-  },
-  hard: (d) => {
-    const { x, z } = toLocal(d);
-    return towerRoof(x, z);
-  },
-  wall: towerWall,
-  ceiling: 98,
-};
-const towerCam: RideEnv = {
-  floor: (d) => {
-    const { x, z } = toLocal(d);
-    return towerRoof(x, z);
-  },
-  free: (a, b) => {
-    const n = 16;
-    for (let i = 1; i <= n; i++) {
-      _f.lerpVectors(a, b, i / n);
-      const h = _f.length() - R;
-      const { x, z } = toLocal(_f.normalize());
-      if (towerRoof(x, z) > h - 0.4) return (i - 1) / n;
-    }
-    return 1;
-  },
-  wall: towerWall,
-  reduced: false,
-};
-
-describe('bird into a tower', { timeout: 30_000 }, () => {
-  // Starts: [x, z, heading x, heading z, steer]: alongside it with the tower on the right, steering
-  // into it; head-on at its face, steering into the corner and straight; under its corner.
-  const starts = [
-    [-6, -14, 0, 1, 1],
-    [-6, -14, 0, 1, 0.6],
-    [-22, 8, 1, 0, 1],
-    [-22, 8, 1, 0, 0],
-    [-22, 17, 1, 0.15, -1],
-    [10, -24, 0.1, 1, 1],
-  ];
-  it('held low among the blocks, steering hard into them: in frame, never outrun, never whipped round', () => {
-    const cam3 = new PerspectiveCamera(58, 1.6, 0.1, 2000);
-    const report: string[] = [];
-    for (const [sx, sz, steer, climb] of [
-      [9, 9, 1, -1],
-      [9, 9, -1, -1],
-      [-9, 4, 1, -0.6],
-      [27, -9, -1, -1],
-      [0, 9, 0.7, -1],
-    ]) {
-      const b = new BirdFlight();
-      b.reset(fromLocal(sx, sz, new Vector3()).multiplyScalar(R + GROUND + 8), fromLocal(sx + 1, sz + 0.3, new Vector3()).sub(fromLocal(sx, sz, new Vector3())));
-      const cam = new BirdCam();
-      const o = createFramePose();
-      cam.settle(b, camEnv, o);
-      const prevQ = new Quaternion().copy(o.quat);
-      const prevP = o.pos.clone();
-      const prevB = b.pos.clone();
-      let worstNdc = 0;
-      let worstTurn = 0;
-      let worstRatio = 0;
-      let hits = 0;
-      const dt = 1 / 60;
-      for (let i = 0; i < 60 * 6; i++) {
-        b.step(dt, { steer: i % 180 < 120 ? steer : -steer, climb, flap: false, dive: false }, birdEnv);
-        if (b.floorBusy) hits++;
-        cam.update(dt, b, camEnv, o);
-        cam3.position.copy(o.pos);
-        cam3.quaternion.copy(o.quat);
-        cam3.fov = o.fov;
-        cam3.updateProjectionMatrix();
-        cam3.updateMatrixWorld();
-        const n = b.pos.clone().project(cam3);
-        worstNdc = Math.max(worstNdc, Math.abs(n.x), Math.abs(n.y));
-        worstTurn = Math.max(worstTurn, prevQ.angleTo(o.quat) / dt);
-        worstRatio = Math.max(worstRatio, o.pos.distanceTo(prevP) / Math.max(b.pos.distanceTo(prevB), 4 * dt));
-        prevQ.copy(o.quat);
-        prevP.copy(o.pos);
-        prevB.copy(b.pos);
-      }
-      report.push(`[${sx},${sz}] steer ${steer} climb ${climb}: hits ${hits} ndc ${worstNdc.toFixed(2)} ratio ${worstRatio.toFixed(2)} turn ${((worstTurn * 180) / Math.PI).toFixed(0)}°/s`);
-    }
-    for (const line of report) {
-      const m = /ndc ([\d.]+) ratio ([\d.]+) turn (\d+)/.exec(line)!;
-      expect(+m[1], line).toBeLessThan(0.8);
-      expect(+m[2], line).toBeLessThan(2);
-      expect(+m[3], line).toBeLessThan(120);
-    }
+    // It did meet the blocks (the test means something).
+    expect(crashes).toBeGreaterThan(2);
   });
 
-  it('3 s of steering into it: the bird stays well in frame, the camera never outruns it nor whips round', () => {
-    const cam3 = new PerspectiveCamera(58, 1.6, 0.1, 2000);
-    let hits = 0;
+  it('standing with a hedge behind it, the camera rises until it sees the bird over the hedge', () => {
+    // A hedge 1.25 m tall, 0.6 m thick, 1.5 m behind a bird standing at (0, 0) facing +x.
+    const HEDGE: number[][] = [[-2.1, -6, -1.5, 6, GROUND + 1.25]];
+    const { cam: ce } = envs(HEDGE);
+    const b = new BirdFlight();
+    const p = fromLocal(0, 0);
+    b.restore({ position: p.clone().multiplyScalar(R + GROUND + BIRD.belly).toArray(), heading: fromLocal(1, 0).sub(p).toArray(), speed: 0, gamma: 0, bank: 0, turn: 0, phase: 0, ground: true });
+    const env: BirdEnv = { floor: () => GROUND, ceiling: 98 };
+    const cam = new BirdCam();
+    const o = createFramePose();
+    cam.settle(b, ce, o);
+    const lens = new PerspectiveCamera(58, 1.6, 0.05, 2000);
+    for (let i = 0; i < 120; i++) {
+      b.step(1 / 60, { steer: 0, climb: 0, flap: false, dive: false }, env);
+      cam.update(1 / 60, b, ce, o);
+    }
+    expect(b.grounded).toBe(true);
+    const up = b.pos.clone().normalize();
+    const eye = b.pos.clone().addScaledVector(up, 0.25);
+    // The sight line from the bird's head to the lens is clear, the lens over the hedge, the bird framed.
+    expect(ce.free(eye, o.pos)).toBeGreaterThanOrEqual(0.999);
+    expect(o.pos.length() - R).toBeGreaterThan(GROUND + 1.25);
+    lens.position.copy(o.pos);
+    lens.quaternion.copy(o.quat);
+    lens.updateMatrixWorld();
+    const n = b.pos.clone().project(lens);
+    expect(Math.max(Math.abs(n.x), Math.abs(n.y))).toBeLessThan(0.8);
+    expect(n.z).toBeLessThan(1);
+  });
+
+  it('flown into a tower face (head on, at angles, along it): bonks, recovers, the camera holds and eases back', () => {
+    // [x, z, heading x, heading z, steer]: at its west face head on and 45° off, along its south face
+    // steering into it, under its corner.
+    const starts = [
+      [-14, 10, 1, 0, 0],
+      [-14, 2, 1, 1, 0],
+      [-6, -6, 0, 1, 1],
+      [10, -14, 0.3, 1, 0],
+    ];
     const report: string[] = [];
     for (const [x, z, hx, hz, steer] of starts) {
       const b = new BirdFlight();
-      const p0 = fromLocal(x, z, new Vector3()).multiplyScalar(R + GROUND + 10);
-      const h0 = fromLocal(x + hx, z + hz, new Vector3()).sub(fromLocal(x, z, new Vector3()));
-      b.reset(p0, h0);
-      const cam = new BirdCam();
-      const o = createFramePose();
-      cam.settle(b, towerCam, o);
-      const prevQ = new Quaternion().copy(o.quat);
-      const prevP = o.pos.clone();
-      const prevB = b.pos.clone();
-      let worstNdc = 0;
-      let worstTurn = 0;
-      let worstRatio = 0;
-      let wallHits = 0;
-      let closest = 99;
-      const dt = 1 / 60;
-      for (let i = 0; i < 180; i++) {
-        b.step(dt, { steer, climb: 0, flap: false, dive: false }, towerBird);
-        if (b.floorBusy) wallHits++;
-        cam.update(dt, b, towerCam, o);
-        cam3.position.copy(o.pos);
-        cam3.quaternion.copy(o.quat);
-        cam3.fov = o.fov;
-        cam3.updateProjectionMatrix();
-        cam3.updateMatrixWorld();
-        const n = b.pos.clone().project(cam3);
-        worstNdc = Math.max(worstNdc, Math.abs(n.x), Math.abs(n.y));
-        worstTurn = Math.max(worstTurn, prevQ.angleTo(o.quat) / dt);
-        const vc = o.pos.distanceTo(prevP) / dt;
-        const vb = b.pos.distanceTo(prevB) / dt;
-        worstRatio = Math.max(worstRatio, vc / Math.max(vb, 4));
-        prevQ.copy(o.quat);
-        prevP.copy(o.pos);
-        prevB.copy(b.pos);
-        // Never inside it.
-        const { x: bx, z: bz } = toLocal(b.pos.clone().normalize());
-        closest = Math.min(closest, Math.hypot(Math.max(0 - bx, 0, bx - 20), Math.max(0 - bz, 0, bz - 20)));
-        expect(b.pos.length() - R).toBeGreaterThan(towerRoof(bx, bz, -BIRD.bodyR) - 0.05);
-      }
-      hits += wallHits + (closest < 5 ? 100 : 0);
-      report.push(`[${x},${z}] steer ${steer}: closest ${closest.toFixed(1)} hits ${wallHits} ndc ${worstNdc.toFixed(2)} ratio ${worstRatio.toFixed(2)} turn ${((worstTurn * 180) / Math.PI).toFixed(0)}°/s`);
+      b.reset(fromLocal(x, z).multiplyScalar(R + GROUND + 10), fromLocal(x + hx, z + hz).sub(fromLocal(x, z)));
+      let crashAt = -1;
+      let endAt = -1;
+      let down = false;
+      const res = chase(TOWER, b, (i, bb) => {
+        if (bb.crashes > 0 && crashAt < 0) crashAt = i;
+        if (crashAt >= 0 && endAt < 0 && bb.crash === 0) {
+          endAt = i;
+          down = bb.grounded;
+        }
+        // (Steering into it until it hits; hands off after.)
+        return { steer: crashAt < 0 ? steer : 0, climb: 0, flap: false, dive: false };
+      }, 60 * 8);
+      const line = `[${x},${z}] crashes ${b.crashes} recovered ${((endAt - crashAt) / 60).toFixed(2)} s ${down ? 'standing' : 'flying'} ndc ${res.worstNdc.toFixed(2)} ratio ${res.worstRatio.toFixed(2)} turn ${(res.worstTurn / DEG * 60).toFixed(0)}°/s, in the crash ${(res.worstCrashTurn / DEG * 60).toFixed(0)}°/s, jerk ${(res.worstCrashJerk / DEG).toFixed(2)}° | worst framing: ${res.ndcAt} | worst turn: ${res.worstAt}`;
+      report.push(line);
+      expect(b.crashes, line).toBe(1);
+      expect(endAt - crashAt, line).toBeGreaterThan(0);
+      // Righted in the air: the tumble and the righting (~1.7 s). Too low for that, it falls, lands dazed
+      // and stands (~2.4 s).
+      expect((endAt - crashAt) / 60, line).toBeLessThan(down ? 2.8 : 2.2);
+      expect(res.worstNdc, line).toBeLessThan(0.85);
+      expect(res.worstRatio, line).toBeLessThan(2.5);
+      expect(res.worstCrashTurn * 60, line).toBeLessThan(155 * DEG);
+      expect(res.worstCrashJerk, line).toBeLessThan(0.5 * DEG);
+      expect(res.worstTurn * 60, line).toBeLessThan(155 * DEG);
     }
-    for (const line of report) {
-      const m = /ndc ([\d.]+) ratio ([\d.]+) turn (\d+)/.exec(line)!;
-      expect(+m[1], line).toBeLessThan(0.8);
-      expect(+m[2], line).toBeLessThan(2);
-      expect(+m[3], line).toBeLessThan(120);
-    }
-    // It did meet the tower, or pass within 5 m of it (the test means something). (D1f r4: the bird
-    // now turns off it without the floor or the wall push stepping in at all — 0 busy frames — and
-    // three of the six starts pass within 2.1–2.3 m of it: ≥ 300.)
-    expect(hits).toBeGreaterThanOrEqual(300);
   });
 });

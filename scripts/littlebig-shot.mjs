@@ -23,6 +23,12 @@
 //   node scripts/littlebig-shot.mjs --shot orbit --ride plane:1 --live --seq 40 --interval 0.05 --out t/   the transition itself
 //   node scripts/littlebig-shot.mjs --shot rooftops --bird --steer 0.5,0.2 --pre 2 --out b.png   bird flight: hold a steer
 //                                                    (steer,climb[,flap,dive]: −1…1, 0/1) for --pre seconds, then shoot
+//   node scripts/littlebig-shot.mjs --view 0,30,40,90,0 --bird-pose 'side:u=0.3,amp=1;front:u=0.3,amp=1,az=180' --out b/
+//                                                    v2-BA: the bird frozen at poses (label:key=value,…; keys in
+//                                                    core/debug.ts BirdPoseSpec: u|phase, amp, tuck, spread, turn, speed,
+//                                                    crash, stand, legs, hop, daze, clock, pitch, bank, ground=1 (on the
+//                                                    floor); turntable az, el, dist, fov), 3 m ahead of the view; one PNG
+//                                                    per pose
 //   node scripts/littlebig-shot.mjs --shot street --ride plane:1 --live --reduced --seq 20 --interval 0.05 --out rm/
 //                                                    the same with prefers-reduced-motion (a short direct move, dipped)
 //   node scripts/littlebig-shot.mjs --leak 10 --close-at 300,ready                    window open/close leak check
@@ -403,6 +409,21 @@ try {
 
   for (const name of flags.perf ? [] : names) {
     await apply(name);
+    if (flags['bird-pose']) {
+      // v2-BA: label:key=value,… poses separated by ';' (a spec without a label is pose_NN).
+      const specs = String(flags['bird-pose']).split(';').map((x) => x.trim()).filter(Boolean);
+      for (let i = 0; i < specs.length; i++) {
+        const c = specs[i].indexOf(':');
+        const named = c > 0 && !specs[i].slice(0, c).includes('=');
+        const lab = named ? specs[i].slice(0, c) : `pose_${String(i).padStart(2, '0')}`;
+        const pose = Object.fromEntries((named ? specs[i].slice(c + 1) : specs[i]).split(',').filter(Boolean).map((kv) => kv.split('=')).map(([k, v]) => [k.trim(), Number(v)]));
+        if (!(await page.evaluate((p) => window.__littlebig.birdPose(p), pose))) throw new Error('birdPose: the bird system is not up');
+        await rafs(warm);
+        await snap(outPath(names.length > 1 ? `${name}_${lab}` : lab, true));
+      }
+      await page.evaluate(() => window.__littlebig.birdPose(null));
+      continue;
+    }
     if (flags.seq) {
       const n = Number(flags.seq);
       const interval = Number(flags.interval ?? 0.25);

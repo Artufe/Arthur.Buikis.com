@@ -2,13 +2,22 @@
 // Owns its scratch vectors and spatial grid; queries allocate only when the solids change.
 import { Vector3 } from 'three';
 import type { LBContext } from '../core/contracts';
-import { CITY_PLAN_RADIUS, PLATEAU_HEIGHT, R } from '../world/config';
+import { AREA_H, CITY_PLAN_RADIUS, PLATEAU_HEIGHT, R, ROAD_H } from '../world/config';
+import type { SurfaceHit } from '../world/region/types';
 import { fromSphere, planToDir } from '../world/city/frame';
 import { footprintDistance } from '../world/city/index-grid';
 import type { Building } from '../world/city/types';
 import { v3 } from '../world/sphere';
 import { SOLID, solidsIn } from './landing';
-const TOWER_BERTH = 2.4;
+import { BIRD } from './bird/flight';
+/** (v2-BF) A solid whose top is within this (m) over the bird's body is under it. */
+const BIRD_STEP = BIRD.step;
+/** (v2-BF) The countryside's crowns to the bird: a column this wide round each trunk (m), under TREE_H over the ground. */
+const TREE_R = 0.9;
+const TREE_H = 7;
+/** (v2-BF) The capital's garden edges (hedges, picket fences, low walls; city/props.ts gardenEdge): their tallest top over the plateau, the band's half width round the run (m). */
+const HEDGE_TOP = AREA_H + 1.25;
+const HEDGE_BAND = 0.4;
 export function createClearance(solids: () => Float64Array | null) {
   const plan = { x: 0, z: 0 };
   const planOut = { x: 0, z: 0 };
@@ -124,11 +133,6 @@ export function createClearance(solids: () => Float64Array | null) {
     }
   }
 
-  /** (D1f r4) The extra berth (m) the bird keeps off a slender tall building: the clock tower, the church, a thin tower. */
-  function towerBerth(b: Building): number {
-    return b.landmark === 'clocktower' || b.landmark === 'church' || (b.h > 18 && Math.max(b.w, b.d) < 10) ? TOWER_BERTH : 0;
-  }
-
   /** (D1f r4) The highest roof top (m above the plateau) within r of plan (x, z), or 0. */
   function roofNear(ctx: LBContext, x: number, z: number, r: number): number {
     const idx = ctx.world.cityIndex;
@@ -138,47 +142,243 @@ export function createClearance(solids: () => Float64Array | null) {
     return top;
   }
 
-  /**
-   * (D1f r4) The bird's walls: wall() by the roofs' real tops, and for its look-ahead (r > 1.5 m) a
-   * slender tall building keeps TOWER_BERTH more — it flew at the clock tower's face 2 m off and
-   * skimmed its spire.
-   */
-  function birdWall(ctx: LBContext, dir: Vector3, h: number, r: number, o: Vector3): boolean {
-    const wide = r > 1.5;
-    if (!inCity(dir, 8 + (wide ? TOWER_BERTH : 0))) return false;
-    const px = plan.x;
-    const pz = plan.z;
-    const idx = ctx.world.cityIndex;
-    const B = idx.plan.buildings;
-    const n = idx.buildingsNear(px, pz, r + (wide ? TOWER_BERTH : 0), near);
-    let tall = false;
-    let tower = -1;
-    let push = 0;
-    for (let i = 0; i < n; i++) {
-      const b = B[near[i]];
-      if (PLATEAU_HEIGHT + roofTop(b) <= h - 0.3) continue;
-      const d = footprintDistance(b, px, pz);
-      if (d < r) tall = true;
-      else if (wide) {
-        const ex = towerBerth(b);
-        if (ex > 0 && d < r + ex && r + ex - d > push) {
-          push = r + ex - d;
-          tower = near[i];
-        }
+  // ── v2-BF: the capital's garden edges, for the bird camera (sight line and placement): each garden's
+  // four runs, 0.35 m in from its outline (city/props.ts gardenEdge), on a grid built on first use. ──
+  let hedgeSeg: Float64Array | null = null;
+  let hedgeStart: Int32Array | null = null;
+  let hedgeItems: Int32Array | null = null;
+
+  function buildHedges(ctx: LBContext) {
+    const segs: number[] = [];
+    for (const a of ctx.world.cityIndex.plan.areas) {
+      const o = a.outline;
+      if (a.kind !== 'garden' || o.length !== 8) continue;
+      for (let i = 0; i < 4; i++) {
+        const j = (i + 1) % 4;
+        const ax = o[i * 2], az = o[i * 2 + 1], bx = o[j * 2], bz = o[j * 2 + 1];
+        const L = Math.hypot(bx - ax, bz - az);
+        if (L < 0.5) continue;
+        const ix = (-(bz - az) / L) * 0.35;
+        const iz = ((bx - ax) / L) * 0.35;
+        segs.push(ax + ix, az + iz, bx + ix, bz + iz);
       }
     }
-    if (tall && idx.collide(px, pz, r, planOut)) {
-      planToDir(planOut.x, planOut.z, vA);
+    const all = Float64Array.from(segs);
+    const counts = new Int32Array(GRID_N * GRID_N + 1);
+    const each = (fn: (cell: number, k: number) => void) => {
+      for (let k = 0; k < all.length; k += 4) {
+        const m = HEDGE_BAND + 1;
+        const x0 = Math.max(0, Math.floor((Math.min(all[k], all[k + 2]) - m) / GRID) + GRID_HALF);
+        const x1 = Math.min(GRID_N - 1, Math.floor((Math.max(all[k], all[k + 2]) + m) / GRID) + GRID_HALF);
+        const z0 = Math.max(0, Math.floor((Math.min(all[k + 1], all[k + 3]) - m) / GRID) + GRID_HALF);
+        const z1 = Math.min(GRID_N - 1, Math.floor((Math.max(all[k + 1], all[k + 3]) + m) / GRID) + GRID_HALF);
+        for (let gz = z0; gz <= z1; gz++) for (let gx = x0; gx <= x1; gx++) fn(gz * GRID_N + gx, k);
+      }
+    };
+    each((c) => counts[c + 1]++);
+    for (let i = 1; i < counts.length; i++) counts[i] += counts[i - 1];
+    const items = new Int32Array(counts[counts.length - 1]);
+    const fill = counts.slice(0, GRID_N * GRID_N);
+    each((c, k) => (items[fill[c]++] = k));
+    hedgeSeg = all;
+    hedgeStart = counts;
+    hedgeItems = items;
+  }
+
+  /** A capital garden edge within r (≤ 1 m) of plan (x, z). */
+  function hedgeNear(ctx: LBContext, x: number, z: number, r: number): boolean {
+    if (!hedgeSeg) buildHedges(ctx);
+    const gx = Math.floor(x / GRID) + GRID_HALF;
+    const gz = Math.floor(z / GRID) + GRID_HALF;
+    if (gx < 0 || gz < 0 || gx >= GRID_N || gz >= GRID_N) return false;
+    const c = gz * GRID_N + gx;
+    const S = hedgeSeg!;
+    const rr = r + HEDGE_BAND;
+    for (let i = hedgeStart![c]; i < hedgeStart![c + 1]; i++) {
+      const k = hedgeItems![i];
+      const sx = S[k + 2] - S[k];
+      const sz = S[k + 3] - S[k + 1];
+      const t = Math.max(0, Math.min(1, ((x - S[k]) * sx + (z - S[k + 1]) * sz) / (sx * sx + sz * sz)));
+      const ex = S[k] + sx * t - x;
+      const ez = S[k + 1] + sz * t - z;
+      if (ex * ex + ez * ez < rr * rr) return true;
+    }
+    return false;
+  }
+
+  /**
+   * (v2-BF) The top (m above sea level) of the hedges, garden fences and paddock rails within r (≤ 1 m)
+   * of unit dir (the capital's gardens, the towns' gardens and paddocks), or −Infinity. Zero-alloc.
+   */
+  function hedgeTop(ctx: LBContext, dir: Vector3, r: number): number {
+    if (inCity(dir, 0)) return hedgeNear(ctx, plan.x, plan.z, r) ? PLATEAU_HEIGHT + HEDGE_TOP : -Infinity;
+    const towns = ctx.services.towns;
+    if (!towns) return -Infinity;
+    vA.x = dir.x;
+    vA.y = dir.y;
+    vA.z = dir.z;
+    return towns.fenceTop(vA, r);
+  }
+
+  // ── v2-BF: what the bird meets. A solid whose top is within BIRD_STEP over the body's height is under
+  // it (a floor it lands on, skims or bonks down onto); a taller one beside it is a wall. ──
+
+  /**
+   * (v2-BF) The top of a building as the bird meets it (m above the plateau): its walls and half its
+   * roof's rise (a gable is met half way up its slope); a spire's tower is its walls (the spire is let
+   * through).
+   */
+  function birdTop(b: Building): number {
+    return b.roof === 'spire' ? b.h + 0.6 : b.h + (roofTop(b) - b.h) * 0.5;
+  }
+
+  /**
+   * (v2-BF) The bird's floor (m above sea level) at unit dir for a body at height h: the terrain or the
+   * water, and the roofs (the capital's, the towns'), lamp heads and crowns within r of it whose tops are
+   * at most h + BIRD_STEP.
+   */
+  function birdFloor(ctx: LBContext, dir: Vector3, h: number, r: number): number {
+    let f = ctx.world.planet.surfaceAt(dir);
+    const top = h + BIRD_STEP;
+    if (inCity(dir, 20)) {
+      const px = plan.x;
+      const pz = plan.z;
+      const tp = top - PLATEAU_HEIGHT;
+      const idx = ctx.world.cityIndex;
+      // (The paving it stands on: the sidewalks are 0.2 m over the plateau, the road 5 cm. Standing on
+      // the bare plateau the bird sank to its belly in a sidewalk, its legs gone: it read as lying on its side.)
+      f = Math.max(f, PLATEAU_HEIGHT + idx.groundH(px, pz));
+      const n = idx.buildingsNear(px, pz, r, near);
+      for (let i = 0; i < n; i++) {
+        const t = birdTop(idx.plan.buildings[near[i]]);
+        if (t <= tp && PLATEAU_HEIGHT + t > f) f = PLATEAU_HEIGHT + t;
+      }
+      const all = solids();
+      if (all) {
+        if (gridSolids !== all) buildGrid(all);
+        const gx = Math.floor(px / GRID) + GRID_HALF;
+        const gz = Math.floor(pz / GRID) + GRID_HALF;
+        if (gx >= 0 && gz >= 0 && gx < GRID_N && gz < GRID_N) {
+          const c = gz * GRID_N + gx;
+          const S = gridSolids!;
+          for (let i = gridStart![c]; i < gridStart![c + 1]; i++) {
+            const k = gridItems![i];
+            const t = S[k + 4];
+            if (t > tp || PLATEAU_HEIGHT + t <= f) continue;
+            const rr = S[k + 2] + r;
+            const dx = S[k] - px;
+            const dz = S[k + 1] - pz;
+            if (dx * dx + dz * dz < rr * rr) f = PLATEAU_HEIGHT + t;
+          }
+        }
+      }
+    } else {
+      vA.x = dir.x;
+      vA.y = dir.y;
+      vA.z = dir.z;
+      // The paving: a town street's asphalt and its sidewalks CURB_H over it (roads/ground.ts); out on
+      // a country road, its asphalt ROAD_H over the ground. (On land only: a bridge's deck is not the
+      // bird's floor out there.)
+      const towns = ctx.services.towns;
+      const pave = towns ? towns.pavingAt(vA, top) : -Infinity;
+      if (pave > -Infinity) f = Math.max(f, pave);
+      else if (f > 0) {
+        const reg = ctx.world.planet.region;
+        reg.surface(vA, surf);
+        if (surf.cls === 'road' && surf.edge >= 0 && surf.roadDist <= reg.edges[surf.edge].width / 2) f += ROAD_H;
+      }
+      if (towns) f = Math.max(f, towns.roofAt(vA, top, r));
+    }
+    return f;
+  }
+  const surf: SurfaceHit = { cls: 'free', roadDist: 0, edge: -1, settlement: -1 };
+
+  /**
+   * (v2-BF) Push the bird's body (radius r, centre at h m above sea level) at unit dir out of what stands
+   * beside it: the capital's facades and its poles, lamp heads and crowns at its height, the towns'
+   * walls, the countryside's trunks and crowns low down (all taller than h + BIRD_STEP). Writes the
+   * resolved unit dir into o; true if it moved. Zero-alloc.
+   */
+  function birdSolid(ctx: LBContext, dir: Vector3, h: number, r: number, o: Vector3): boolean {
+    const top = h + BIRD_STEP;
+    if (inCity(dir, 8 + r)) {
+      let px = plan.x;
+      let pz = plan.z;
+      const tp = top - PLATEAU_HEIGHT;
+      const hp = h - PLATEAU_HEIGHT;
+      const idx = ctx.world.cityIndex;
+      const B = idx.plan.buildings;
+      let moved = false;
+      // Facades: out along the footprint's gradient (a few passes for a corner between two).
+      for (let pass = 0, any = true; pass < 3 && any; pass++) {
+        any = false;
+        const n = idx.buildingsNear(px, pz, r, near);
+        for (let i = 0; i < n; i++) {
+          const b = B[near[i]];
+          if (birdTop(b) <= tp) continue;
+          const d = footprintDistance(b, px, pz);
+          if (d >= r) continue;
+          const e = 0.05;
+          let gx = footprintDistance(b, px + e, pz) - footprintDistance(b, px - e, pz);
+          let gz = footprintDistance(b, px, pz + e) - footprintDistance(b, px, pz - e);
+          const gl = Math.hypot(gx, gz);
+          if (gl < 1e-9) {
+            gx = px - b.x;
+            gz = pz - b.z;
+          }
+          const k = (r - d) / (Math.hypot(gx, gz) || 1);
+          px += gx * k;
+          pz += gz * k;
+          moved = any = true;
+        }
+      }
+      // Poles, lamp heads and crowns: vertical cylinders, met where the body overlaps them in height.
+      const all = solids();
+      if (all) {
+        if (gridSolids !== all) buildGrid(all);
+        const gx = Math.floor(px / GRID) + GRID_HALF;
+        const gz = Math.floor(pz / GRID) + GRID_HALF;
+        if (gx >= 0 && gz >= 0 && gx < GRID_N && gz < GRID_N) {
+          const c = gz * GRID_N + gx;
+          const S = gridSolids!;
+          for (let i = gridStart![c]; i < gridStart![c + 1]; i++) {
+            const k = gridItems![i];
+            if (S[k + 4] <= tp || S[k + 3] >= hp + r) continue;
+            const rr = S[k + 2] + r;
+            const dx = px - S[k];
+            const dz = pz - S[k + 1];
+            const d2 = dx * dx + dz * dz;
+            if (d2 >= rr * rr) continue;
+            const d = Math.sqrt(d2);
+            if (d < 1e-6) {
+              px += rr;
+            } else {
+              px = S[k] + (dx / d) * rr;
+              pz = S[k + 1] + (dz / d) * rr;
+            }
+            moved = true;
+          }
+        }
+      }
+      if (!moved) return false;
+      planToDir(px, pz, vA);
       o.set(vA.x, vA.y, vA.z);
       return true;
     }
-    if (tower < 0) return false;
-    const b = B[tower];
-    const dx = px - b.x;
-    const dz = pz - b.z;
-    const L = Math.hypot(dx, dz);
-    if (L < 1e-6) return false;
-    planToDir(px + (dx / L) * push, pz + (dz / L) * push, vA);
+    vA.x = dir.x;
+    vA.y = dir.y;
+    vA.z = dir.z;
+    const towns = ctx.services.towns;
+    if (towns && towns.near(vA)) {
+      if (!towns.solid(vA, top, r, vA)) return false;
+      o.set(vA.x, vA.y, vA.z);
+      return true;
+    }
+    // The countryside's trees low down: a column round each trunk as wide as a crown (nature has no
+    // heights; under ~7 m over the ground a body that close is in the crown or at the trunk).
+    const nat = ctx.services.nature;
+    if (!nat || h - ctx.world.planet.surfaceAt(dir) > TREE_H) return false;
+    if (!nat.collide(vA, r + TREE_R, vA)) return false;
     o.set(vA.x, vA.y, vA.z);
     return true;
   }
@@ -235,6 +435,80 @@ export function createClearance(solids: () => Float64Array | null) {
   const localSolids = { a: new Float64Array(SOLID * 32), n: 0 };
 
   /**
+   * (v2-BF) The bird camera's occlusion: as free(), but only what truly stands between the bird and its
+   * lens pulls the boom in. Thin solids (poles, lamp posts, flagpoles, hydrants, trunks: proxies under
+   * 0.9 m across, drawn thinner) are looked past; the countryside's trees only where their crowns are
+   * (2.5 … 9.5 m over the ground, not their trunks); the towns' buildings count too, and the hedges and
+   * garden fences low down (the capital's gardens, the towns' gardens and paddocks). Zero-alloc.
+   */
+  function birdFree(ctx: LBContext, a: Vector3, b: Vector3): number {
+    const len = a.distanceTo(b);
+    if (len < 0.5) return 1;
+    // (Finer than free(): a hedge is 0.7 m thick.)
+    const n = Math.min(24, Math.max(6, Math.ceil(len / 0.4)));
+    let local = 0;
+    const all = solids();
+    const city = inCity(a, 12) || inCity(b, 12);
+    if (all && city) {
+      fromSphere(tD.copy(a).normalize(), plan);
+      const ax = plan.x;
+      const az = plan.z;
+      fromSphere(tD.copy(b).normalize(), plan);
+      solidsIn(all, Math.min(ax, plan.x) - 1, Math.min(az, plan.z) - 1, Math.max(ax, plan.x) + 1, Math.max(az, plan.z) + 1, localSolids);
+      local = localSolids.n;
+    }
+    const L = localSolids.a;
+    const nat = city ? undefined : ctx.services.nature;
+    const towns = city ? undefined : ctx.services.towns;
+    tJ.copy(a).normalize();
+    tD.copy(b).normalize();
+    const nearTowns = !!towns && (towns.near(tJ) || towns.near(tD));
+    // (The ground under the segment's low end, for the hedge test's reach.)
+    const hfl = Math.min(ctx.world.planet.surfaceAt(tJ), ctx.world.planet.surfaceAt(tD)) + (city ? AREA_H : 0);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      tD.lerpVectors(a, b, t);
+      const h = tD.length() - R;
+      tD.normalize();
+      // (A floor margin and a first stretch smaller than free()'s: the line starts on the bird, low.)
+      if (hardFloor(ctx, tD) > h - 0.25) return Math.max(0, (i - 1) / n);
+      if (t * len < 0.3) continue;
+      if (nat) {
+        const agl = h - ctx.world.planet.surfaceAt(tD);
+        if (agl > 2.5 && agl < 9.5) {
+          vA.x = tD.x;
+          vA.y = tD.y;
+          vA.z = tD.z;
+          if (nat.collide(vA, 1.6, vA)) return Math.max(0, (i - 1) / n);
+        }
+      }
+      if (nearTowns) {
+        vA.x = tD.x;
+        vA.y = tD.y;
+        vA.z = tD.z;
+        if (towns!.solid(vA, h, 0.2, vA)) return Math.max(0, (i - 1) / n);
+      }
+      // Hedges and garden fences (≤ 1.25 m), down where they can be in the way.
+      // (Cleared by 0.3 m: the line starts on the bird's back, and its body and feet are to be seen too;
+      // the lobes are uneven. Not within 0.35 m of the bird across the ground: standing against a
+      // hedge, a line up over its back is not through the hedge.)
+      if (h < hfl + 1.6 && tD.distanceTo(tJ) * R > 0.35 && hedgeTop(ctx, tD, 0) > h - 0.3) return Math.max(0, (i - 1) / n);
+      if (local === 0) continue;
+      fromSphere(tD, plan);
+      const hp = h - PLATEAU_HEIGHT;
+      for (let k = 0; k < local; k += SOLID) {
+        if (L[k + 2] < 0.45) continue;
+        if (hp < L[k + 3] - 0.2 || hp > L[k + 4] + 0.2) continue;
+        const r = L[k + 2] + 0.2;
+        const dx = L[k] - plan.x;
+        const dz = L[k + 1] - plan.z;
+        if (dx * dx + dz * dz < r * r) return Math.max(0, (i - 1) / n);
+      }
+    }
+    return 1;
+  }
+
+  /**
    * (D1f r2) True when a camera at world p would be within `berth` m of a building not 3.5 m under it,
    * inside (or within 0.45 m of) a pole, lamp head or crown — by their real heights: passing under a
    * crown is fine — or within 1 m of the terrain (outside the city).
@@ -285,5 +559,5 @@ export function createClearance(solids: () => Float64Array | null) {
   }
 
 
-  return { plan, inCity, solidTop, hardFloor, wall, roofTop, roofNear, birdWall, free, nearBlocked, sight };
+  return { plan, inCity, solidTop, hardFloor, wall, roofTop, roofNear, birdFloor, birdSolid, hedgeTop, free, birdFree, nearBlocked, sight };
 }

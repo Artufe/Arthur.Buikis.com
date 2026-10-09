@@ -4,8 +4,9 @@
 //            anything that moves rides it) and the hover (the cursor turns to a pointer over a
 //            pickable, ≤ 10 Hz).
 //   ride     camera/rides/rig.ts: chase / eyes / alongside a registered Trackable.
-//   bird     camera/bird/: an arcade bird (flight.ts) and its chase camera (cam.ts); the bird mesh
-//            is drawn by the stage-2 bird system from birdRender().
+//   bird     camera/bird/: a point-mass glider (flight.ts) and its chase camera (cam.ts); the bird
+//            mesh is drawn by the stage-2 bird system from birdRender(). Nothing flies it for the
+//            player but a short take-off after a launch from the street (v2-BF).
 //
 // Every switch is a transition from a coasting snapshot of the camera as it was (it carries on at its
 // own speed and bleeds it off: never a dead stop) to the live pose of the new mode.
@@ -38,7 +39,7 @@ import { horizonDistance, latLonFromDir, v3 } from '../world/sphere';
 import { hyp } from '../world/hyp';
 import { BIRD_CAM, BirdCam } from './bird/cam';
 import { BIRD, BirdFlight, type BirdEnv, type BirdInput } from './bird/flight';
-import { birdRender } from './bird/shared';
+import { BIRD_SIZE, birdRender } from './bird/shared';
 import type { CameraInput } from './input';
 import { createClearance } from './clearance';
 import { createPicking } from './picking';
@@ -138,11 +139,8 @@ const RIDE_FADE = 1.5;
 /** The near plane in someone's eyes (m): props closer to the lens are clipped. */
 const EYES_NEAR = 0.5;
 /** A bird launched from where the camera is starts this far ahead (m) and blends on this long (s). */
-const LAUNCH_DIST = 2;
+const LAUNCH_DIST = 2 * 0.68;
 const LAUNCH_BLEND = 0.4;
-/** A launch near the ground climbs out for this long (s), the climb easing off, and holds off the swerve for that and this much more (s). */
-const TAKEOFF = 1.1;
-const TAKEOFF_CALM = 0.6;
 /** (D1f r3) Once in frame, the ridden thing is held within this of the transition's axis (rad). */
 const KEEP_IN = 20 * DEG;
 /** (D1f r4) A transition's roll off a level horizon (beyond the end's own), under orbit heights (rad). */
@@ -152,18 +150,6 @@ const EYES_SLOPE = 32 * DEG;
 const EYES_APPROACH = 14;
 /** (D1f r5) Into someone's eyes the path keeps under this cone over them (tan of its slope): never high over them. */
 const EYES_CONE = 1;
-/** (D1f r3) Left alone after a launch near the ground, the bird is guided into the open this long (s). */
-const GUIDE = 3.2;
-/**
- * (D1f r4) Left alone at any time, the bird looks this far (m) down its heading; when less than
- * IDLE_ON of it is clear it turns for the clearest heading, until IDLE_OFF is clear again.
- */
-const IDLE_RUN = 34;
-const IDLE_ON = 26;
-const IDLE_OFF = 32;
-/** (D1f r4) Left alone in town, the bird climbs until it is this far (m) over the roofs within SKY_R m. */
-const SKY_OVER = 6;
-const SKY_R = 24;
 
 function smoothstep(e0: number, e1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -244,7 +230,7 @@ export interface BirdOverride {
 }
 
 /** Review: the last enter plan's slices (ms): (into someone's eyes, the approach), the path, its gaze and timing. */
-export const PT = { plan: 0, turns: 0, warm: 0, guide: 0, eyes: 0, path: 0 };
+export const PT = { plan: 0, turns: 0, warm: 0, eyes: 0, path: 0 };
 export function createDirector(host: DirectorHost) {
   let mode: CameraMode = 'explore';
   let rideId: string | null = null;
@@ -364,21 +350,6 @@ export function createDirector(host: DirectorHost) {
   let birdPop = 0; // 0 … 1 pop-in / pop-out progress
   let birdPopDir = 0;
   const birdIn: BirdInput = { steer: 0, climb: 0, flap: false, dive: false };
-  // a launch near the ground: seconds left of its take-off climb, and the input it flies meanwhile
-  let takeoff = 0;
-  const tkIn: BirdInput = { steer: 0, climb: 0, flap: false, dive: false };
-  /** (D1f r3) The take-off guide: seconds left, the next re-pick, the heading it steers for. */
-  let guide = 0;
-  let guideT = 0;
-  const guideH = new Vector3();
-  /** (D1f r4) The idle guide: turning for guideH (with weight guideW), the skyline it climbs to. */
-  let guideOn = false;
-  let guideW = 0;
-  let guideSky = -Infinity;
-  let guideRun = IDLE_RUN;
-  /** (D1f r5) 0 … 1: down or a dive held (eased over ~0.3 s): the take-off's climb gives way to it. */
-  let downK = 0;
-  const gIn: BirdInput = { steer: 0, climb: 0, flap: false, dive: false };
   let birdOverride: BirdOverride | null = null;
   let joyX = 0;
   let joyY = 0;
@@ -410,50 +381,11 @@ export function createDirector(host: DirectorHost) {
   const oQ2 = new Quaternion();
   const oQ3 = new Quaternion();
   const vA = v3();
-  const { plan, inCity, solidTop, hardFloor, wall, roofTop, roofNear, birdWall, free, nearBlocked, sight } = createClearance(host.solids);
+  const { plan, inCity, solidTop, hardFloor, wall, roofTop, birdFloor, birdSolid, hedgeTop, free, birdFree, nearBlocked, sight } = createClearance(host.solids);
   const near: number[] = [];
   const ll = { lat: 0, lon: 0 };
 
   // ── World queries (the floor, occlusion, walls) ──
-
-  /**
-   * The bird's soft floor: + roofs within 1 m (its body; the look-ahead samples see a building
-   * coming, the wall push keeps it off a facade), lamp heads and crowns in the city, the
-   * countryside's crowns.
-   */
-  function softFloor(ctx: LBContext, dir: Vector3): number {
-    let f = ctx.world.planet.surfaceAt(dir);
-    if (inCity(dir, 20)) {
-      const idx = ctx.world.cityIndex;
-      // (D1f r4) The roofs' real tops: the clock tower's spire stands 3 m over its walls.
-      const roof = roofNear(ctx, plan.x, plan.z, 1);
-      if (roof > 0) f = Math.max(f, PLATEAU_HEIGHT + roof);
-      // Lamp heads, crowns, poles: their real tops, widened by the bird's body; crowns + 1.5 m (a
-      // dive skimmed through the top of one).
-      const top = solidTop(plan.x, plan.z, 0.7, 1.5);
-      if (top > 0) f = Math.max(f, PLATEAU_HEIGHT + top);
-    } else if (ctx.services.nature) {
-      vA.x = dir.x;
-      vA.y = dir.y;
-      vA.z = dir.z;
-      if (ctx.services.nature.collide(vA, 2.6, vA)) f = Math.max(f, ctx.world.planet.surfaceAt(dir) + 9.5);
-    }
-    // Walkers near a low bird (their eyes + 0.75 m: over the head), within 1.1 m of the point; cars,
-    // buses and trucks (over the roof), within their half length.
-    for (let i = 0; i < crowdN; i++) {
-      const x = crowdXYZ[i * 3];
-      const y = crowdXYZ[i * 3 + 1];
-      const z = crowdXYZ[i * 3 + 2];
-      const r = Math.hypot(x, y, z);
-      const c = (dir.x * x + dir.y * y + dir.z * z) / r;
-      if (c < 0.9999) {
-        const d = Math.acos(Math.min(1, c)) * r;
-        if (d > crowdReach[i]) continue;
-      }
-      f = Math.max(f, r - R + crowdTop[i]);
-    }
-    return f;
-  }
 
   // (D1f r6) The cars, buses and trucks under a low enter transition into someone's eyes: where
   // they were (gathered at ≤ 10 Hz), their velocity, the height to clear over them (m above sea
@@ -627,31 +559,62 @@ export function createDirector(host: DirectorHost) {
     reduced: false,
   };
   /**
-   * (D1f r5) The bird's chase camera: as a ride's, but its floor is the roofs' real tops + 1.5 m (a
+   * (D1f r5) The bird's chase camera: as a ride's, but its floor is the roofs' real tops + 1 m (a
    * gable's ridge stands 2.5 m over its walls): steered low over a red gable, the lens skimmed the
-   * roof, its slope filling the lower half of the frame.
+   * roof, its slope filling the lower half of the frame. (v2-BF) The towns' roofs and walls too.
    */
   const birdCamEnv: RideEnv = {
-    floor: (d) => {
+    floor: (d, h = Infinity) => {
       const ctx = ctxRef!;
       let f = hardFloor(ctx, d);
+      // (v2-BF) Only the roofs it is coming over (their tops under it + 1.5 m): a taller facade beside
+      // it is the wall's to keep it off — counted as a floor, a held boom 1 m off one popped up 12 m.
+      const below = h + 1.5;
       if (inCity(d, 20)) {
-        const top = roofNear(ctx, plan.x, plan.z, 1.2);
-        if (top > 0) f = Math.max(f, PLATEAU_HEIGHT + top + 1.5);
+        const idx = ctx.world.cityIndex;
+        const n = idx.buildingsNear(plan.x, plan.z, 1.2, near);
+        for (let i = 0; i < n; i++) {
+          const t = PLATEAU_HEIGHT + roofTop(idx.plan.buildings[near[i]]);
+          if (t <= below) f = Math.max(f, t + 1);
+        }
+      } else if (ctx.services.towns) {
+        vA.x = d.x;
+        vA.y = d.y;
+        vA.z = d.z;
+        f = Math.max(f, ctx.services.towns.roofAt(vA, below, 1.2) + 1);
       }
-      return f;
+      // (v2-BF) Never in a hedge or a garden fence: the lens 0.2 m over one within 0.3 m (the camera
+      // keeps 0.5 m over its floor).
+      return Math.max(f, hedgeTop(ctx, d, 0.3) - 0.3);
     },
-    free: (a, b) => free(ctxRef!, a, b),
-    wall: (d, h, r, o) => wall(ctxRef!, d, h, r, o),
+    // (v2-BF) Only what truly stands between the bird and the lens pulls the boom in: not a pole.
+    free: (a, b) => birdFree(ctxRef!, a, b),
+    wall: (d, h, r, o) => {
+      const ctx = ctxRef!;
+      if (wall(ctx, d, h, r, o)) return true;
+      const towns = ctx.services.towns;
+      if (!towns || inCity(d, 8)) return false;
+      vA.x = d.x;
+      vA.y = d.y;
+      vA.z = d.z;
+      if (!towns.solid(vA, h - 0.3, r, vA)) return false;
+      o.set(vA.x, vA.y, vA.z);
+      return true;
+    },
     get reduced() {
       return rideEnv.reduced;
     },
   };
+  /** (v2-BF) What the bird meets: clearance.ts birdFloor / birdSolid (the capital, the towns, the countryside's trees). */
   const birdEnv: BirdEnv = {
-    floor: (d) => softFloor(ctxRef!, d),
-    hard: (d) => hardFloor(ctxRef!, d),
-    wall: (d, h, r, o) => birdWall(ctxRef!, d, h, r, o),
+    floor: (d, h) => birdFloor(ctxRef!, d, h, BIRD.bodyR * 0.5),
+    wall: (d, h, r, o) => birdSolid(ctxRef!, d, h, r, o),
     ceiling: BIRD_CEILING,
+    // (Righting itself in the air after a crash, it faces the open: in a street the way it faced was
+    // often a facade.)
+    clear: (p, f, o) => recoverHeading(ctxRef!, p, f, o),
+    // (It floats where the floor is the sea, a lake or a river.)
+    water: (d) => ctxRef!.world.planet.heightAt(d) < 0,
   };
 
   // ── Presenting a pose ──
@@ -2422,27 +2385,21 @@ export function createDirector(host: DirectorHost) {
     }
     tC.normalize(); // heading
     const takeBack = birdOn && bird.pos.distanceTo(cam.position) < 70;
-    guide = 0;
-    guideT = 0;
-    guideOn = false;
-    guideW = 0;
-    guideSky = -Infinity;
-    downK = 0;
     // In the air already (or on the street): a launch. The bird appears just ahead of and under the
-    // lens, where its chase camera, 2 m back, puts the camera about where it is now; the chase runs
-    // from the first frame and lets the bird pull out to its 3.5 m (it used to fly off to a speck
+    // lens, where its chase camera, LAUNCH_DIST back, puts the camera about where it is now; the chase
+    // runs from the first frame and lets the bird pull out to its boom (it used to fly off to a speck
     // while a 1 s transition caught up with it).
     const launch = !takeBack && h < BIRD_CEILING - 4;
     if (!takeBack) {
       if (launch) {
-        tD.copy(cam.position).addScaledVector(tC, LAUNCH_DIST * Math.cos(BIRD_CAM.el)).addScaledVector(tA, -LAUNCH_DIST * Math.sin(BIRD_CAM.el) - 0.25);
+        tD.copy(cam.position).addScaledVector(tC, LAUNCH_DIST * Math.cos(BIRD_CAM.el)).addScaledVector(tA, -LAUNCH_DIST * Math.sin(BIRD_CAM.el) - 0.17);
       } else {
         // From orbit: down under the view, in the open air above the town or the sea.
         tD.copy(tA).multiplyScalar(R + 72);
       }
       const dir = tB.copy(tD).normalize();
-      const fl = hardFloor(ctx, dir);
-      const hb = Math.min(BIRD_CEILING - 8, Math.max(tD.length() - R, fl + (launch ? 1.4 : 2.6)));
+      const fl = birdFloor(ctx, dir, tD.length() - R, BIRD.bodyR);
+      const hb = Math.min(BIRD_CEILING - 8, Math.max(tD.length() - R, fl + (launch ? 1.2 : 2.6)));
       tD.copy(dir).multiplyScalar(R + hb);
       // A launch heads for open space (D1f: along the lens it flew into the facade the camera was
       // looking at and slid up it for a second — a collision, not a take-off): the clearest of a
@@ -2450,17 +2407,11 @@ export function createDirector(host: DirectorHost) {
       // along the lens and swings round after the bird.
       if (launch) launchHeading(ctx, tD, tC, tH);
       else tH.copy(tC);
-      bird.reset(tD, tH, launch ? BIRD.min + 1.5 : BIRD.cruise);
-      // Near the ground: a take-off, nose up (it flaps on its own while slow and climbing), and
-      // for its first second it climbs out whatever is held (down included), easing off.
-      if (hb - fl < 8) {
-        bird.gamma = 15 * DEG;
-        takeoff = TAKEOFF + TAKEOFF_CALM;
-        guide = GUIDE;
-        guideT = 0;
-      } else takeoff = guide = 0;
-      // Its wall berth is on from the first frame (it used to ease in over a quarter second).
-      bird.primeWalls(birdEnv);
+      bird.reset(tD, tH, launch ? 6 : BIRD.trim);
+      // Near the ground: a take-off, beating hard up a ~16° climb along the clear heading until it is
+      // up to trim speed (v2-BF: the bird's own take-off; S or a stoop cancels it, the steer is the
+      // player's throughout).
+      if (hb - fl < 8) bird.takeOff();
       birdPop = 0;
     }
     birdOn = true;
@@ -2494,18 +2445,18 @@ export function createDirector(host: DirectorHost) {
 
   /**
    * The free metres (≤ span) from `p` along unit tangent `k`, climbing at `climb` (tan) but never
-   * under the ground + 1.4 m, before a facade (a berth growing to 3.4 m with the distance: down the
-   * middle of a street, not along a wall; a slender tower keeps TOWER_BERTH more); lamp heads and
-   * crowns cost only the metres they block (the soft floor lifts the bird over them).
+   * under the ground + 1.4 m, before a wall (a berth growing to 3.4 m with the distance: down the
+   * middle of a street, not along a wall); lamp heads, crowns and roofs under the line cost only the
+   * metres they come within 0.6 m of it.
    */
-  function freeRun(ctx: LBContext, p: Vector3, k: Vector3, climb: number, span: number): number {
+  function freeRun(ctx: LBContext, p: Vector3, k: Vector3, climb: number, span: number, berth = 0): number {
     const h0 = p.length() - R;
     let run = 0;
     for (let s = 2; s <= span; s += 2) {
       tL.copy(p).addScaledVector(k, s).normalize();
       const hs = Math.max(h0 + s * climb, ctx.world.planet.surfaceAt(tL) + 1.4);
-      if (birdWall(ctx, tL, hs, Math.min(3.4, 1.2 + s * 0.25), oV)) break;
-      if (softFloor(ctx, tL) <= hs - 0.6) run += 2;
+      if (birdSolid(ctx, tL, hs, berth || Math.min(3.4, 1.2 + s * 0.25), oV)) break;
+      if (birdFloor(ctx, tL, hs, 0.7) <= hs - 0.6) run += 2;
     }
     return run;
   }
@@ -2535,31 +2486,30 @@ export function createDirector(host: DirectorHost) {
     return bestRun;
   }
 
+  /**
+   * (v2-BF) A crash's recovery heading: of 24 round the whole circle, the one with the most free metres
+   * (a body's berth, climbing at 20°, over 16 m), preferring the way it faces. Righted against a facade
+   * every heading within a street's berth of it is blocked, and the way it faced was the facade.
+   */
+  function recoverHeading(ctx: LBContext, p: Vector3, look: Vector3, o: Vector3) {
+    tI.copy(p).normalize();
+    tJ.crossVectors(look, tI).normalize();
+    let best = -Infinity;
+    o.copy(look);
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      tK.copy(look).multiplyScalar(Math.cos(a)).addScaledVector(tJ, Math.sin(a));
+      const score = freeRun(ctx, p, tK, Math.tan(20 * DEG), 16, 0.7) + 2 * Math.cos(a);
+      if (score > best) {
+        best = score;
+        o.copy(tK);
+      }
+    }
+  }
+
   /** The launch heading: the clearest within ±90° of the lens, climbing at 15°, over 30 m. */
   function launchHeading(ctx: LBContext, p: Vector3, look: Vector3, o: Vector3) {
     clearHeading(ctx, p, look, Math.tan(15 * DEG), 30, o);
-  }
-
-  /**
-   * (D1f r4) The idle guide's 4 Hz look: is the way ahead clear (IDLE_ON / IDLE_OFF m of IDLE_RUN, at
-   * the climb it is flying), and if not, the clearest heading; and the skyline it climbs to in town.
-   */
-  function idleLook(ctx: LBContext, climbIn: number, dive = false) {
-    const t0 = performance.now();
-    idleLookBody(ctx, climbIn, dive);
-    PT.guide = Math.max(PT.guide, performance.now() - t0);
-  }
-  function idleLookBody(ctx: LBContext, climbIn: number, dive: boolean) {
-    tA.copy(bird.pos).normalize();
-    const h = bird.pos.length() - R;
-    guideSky = inCity(tA, 0) ? PLATEAU_HEIGHT + roofNear(ctx, plan.x, plan.z, SKY_R) + SKY_OVER : -Infinity;
-    // (D1f r5: diving, the way ahead is measured level — the soft floor holds it up off the street
-    // anyway, and measured diving every heading met the ground and the guide wandered.)
-    const climbing = dive ? 0 : climbIn < -0.05 ? -0.2 : climbIn > 0.05 || h < guideSky ? 0.22 : Math.tan(Math.max(-10 * DEG, Math.min(12 * DEG, bird.gamma)));
-    guideRun = freeRun(ctx, bird.pos, bird.fwd, climbing, IDLE_RUN);
-    if (guideRun < IDLE_ON) guideOn = true;
-    else if (guideRun >= IDLE_OFF) guideOn = false;
-    if (guideOn || guide > 0) clearHeading(ctx, bird.pos, bird.fwd, guide > 0 ? Math.tan(15 * DEG) : climbing, guide > 0 ? 30 : IDLE_RUN, guideH);
   }
 
   const dbgLaunch = new Array<number>(19).fill(0);
@@ -2917,14 +2867,7 @@ export function createDirector(host: DirectorHost) {
     PT.warm = performance.now() - t0;
   }
 
-  const CROWD_MAX = 32;
   const CROWD_KINDS = ['person', 'car', 'bus', 'truck'] as const;
-  const crowdXYZ = new Float64Array(CROWD_MAX * 3);
-  /** (D1f r4) Per crowd entry: the floor over its anchor (m) and its reach round it (m). */
-  const crowdTop = new Float64Array(CROWD_MAX);
-  const crowdReach = new Float64Array(CROWD_MAX);
-  let crowdN = 0;
-  let crowdT = 0;
   const cp: TrackPose = { pos: new Vector3(), fwd: new Vector3(0, 1, 0), up: new Vector3(0, 0, 1), speed: 0 };
 
   /** The bird: steered in bird mode, on autopilot once let go; its render state for the bird system. */
@@ -2933,92 +2876,17 @@ export function createDirector(host: DirectorHost) {
     if (!birdOn) {
       rs.show = false;
       rs.scale = 0;
-      crowdN = 0;
       return;
     }
-    // (D1f r2) Low over a street, the walkers near the bird join its soft floor (their heads + 0.6 m):
-    // a dive or a take-off among a crowd skimmed through their heads. Gathered at ≤ 10 Hz.
-    crowdT -= dt;
-    if (dt > 0 && crowdT <= 0) {
-      crowdT = 0.1;
-      crowdN = 0;
-      tA.copy(bird.pos).normalize();
-      if (bird.pos.length() - R - ctx.world.planet.surfaceAt(tA) < 7 && ctx.services.track) {
-        // (D1f r4) And the cars, buses and trucks: a dive down the street skimmed a taxi's roof.
-        for (let kk = 0; kk < CROWD_KINDS.length; kk++) {
-          const person = kk === 0;
-          for (const t of ctx.services.track.list(CROWD_KINDS[kk])) {
-            if (crowdN >= CROWD_MAX) break;
-            if (!t.pose(ctx, cp) || cp.pos.distanceToSquared(bird.pos) > 16 * 16) continue;
-            crowdXYZ[crowdN * 3] = cp.pos.x;
-            crowdXYZ[crowdN * 3 + 1] = cp.pos.y;
-            crowdXYZ[crowdN * 3 + 2] = cp.pos.z;
-            crowdTop[crowdN] = person ? 0.75 : 0.35 * t.radius + 0.75;
-            crowdReach[crowdN] = person ? 1.1 : 0.55 * t.radius + 1.3;
-            crowdN++;
-          }
-        }
-      }
-    }
     if (mode === 'bird') {
-      let src = birdOverride ?? birdIn;
-      // (D1f r3) For its first few seconds off the street, left alone, the bird heads for the open
-      // (the clearest heading, re-picked 4× a second) and keeps climbing: flying straight on, it met
-      // the tower across the plaza and climbed its face for 1.7 s, the facade filling the frame.
-      // (D1f r4) And left alone at any time after that, it looks IDLE_RUN m ahead 4× a second and
-      // turns for the clearest heading when the way is blocked (once the take-off guide ended it
-      // flew straight at the clock tower), and in town it climbs until it is over the roofs round it.
-      // A steer from the player (or a dive) hands over at once; down or up held is respected.
-      if (dt > 0) {
-        guide = Math.max(0, guide - dt);
-        // (D1f r5) Down or a dive held fades the take-off's climb out within ~0.3 s (it climbed on to
-        // 10 m for 2 s whatever was held).
-        downK = Math.max(0, Math.min(1, downK + (src.climb < -0.05 || src.dive ? dt : -dt) / 0.3));
-        // (D1f r5) A dive held with no steer still has the guide's heading: a dive changes the pitch,
-        // not who steers (Shift from the street pressed the bird against a glass facade for a second).
-        if (Math.abs(src.steer) < 0.05) {
-          guideT -= dt;
-          if (guideT <= 0) {
-            guideT = 0.25;
-            idleLook(ctx, src.climb, src.dive);
-          }
-          const want = guide > 0 ? Math.min(1, guide / 0.8) : guideOn ? 1 : 0;
-          guideW += Math.max(-2.5 * dt, Math.min(2.5 * dt, want - guideW));
-          tA.copy(bird.pos).normalize();
-          const a = Math.atan2(tB.crossVectors(bird.fwd, guideH).dot(tA), bird.fwd.dot(guideH));
-          gIn.steer = Math.max(-1, Math.min(1, -a / (35 * DEG))) * Math.max(guideW, guide > 0 ? Math.min(1, guide / 0.8) : 0);
-          const h = bird.pos.length() - R;
-          const lift = guide > 0 ? 0.5 * Math.min(1, guide / 0.8) : 0;
-          const sky = h < guideSky ? 0.45 * Math.min(1, (guideSky - h) / 3) : 0;
-          gIn.climb = src.climb < -0.05 || src.dive ? src.climb : Math.max(src.climb, lift, sky);
-          gIn.flap = src.flap;
-          gIn.dive = src.dive;
-          src = gIn;
-        } else {
-          guide = 0;
-          guideOn = false;
-          guideW = 0;
-          guideT = 0;
-        }
-      }
-      if (takeoff > 0 && dt > 0) {
-        // (The climb assist for the first TAKEOFF s; the swerve held off a little longer.)
-        const w = (Math.max(0, takeoff - TAKEOFF_CALM) / TAKEOFF) * (1 - downK);
-        tkIn.steer = src.steer * (1 - 0.5 * w);
-        tkIn.climb = Math.max(src.climb, 0.75 * w);
-        tkIn.flap = src.flap;
-        tkIn.dive = src.dive && w < 0.5;
-        src = tkIn;
-        bird.calm = Math.min(1, takeoff / TAKEOFF_CALM);
-        takeoff = Math.max(0, takeoff - dt);
-      } else if (dt > 0) bird.calm = 0;
-      bird.step(dt, src, birdEnv);
+      // (v2-BF) Nothing else flies the bird for the player: no guide, no floor, no swerve.
+      bird.step(dt, birdOverride ?? birdIn, birdEnv);
     } else {
-      // Let go: it flies on, climbing gently with a flap now and then, and pops away out there.
+      // Let go: it flies on (standing, it takes off), climbing gently (beating), and pops away out there.
       birdAway += dt;
       birdIn.steer = 0.15;
-      birdIn.climb = 0.35;
-      birdIn.flap = birdAway % 1.4 < 0.05;
+      birdIn.climb = 0.6;
+      birdIn.flap = false;
       birdIn.dive = false;
       bird.step(dt, birdIn, birdEnv);
       const far = bird.pos.distanceTo(ctx.camera.position);
@@ -3033,13 +2901,20 @@ export function createDirector(host: DirectorHost) {
     }
     rs.show = true;
     rs.pos.copy(bird.pos);
-    // Body frame: +Z along the flight, +Y the banked up, +X left.
-    tA.copy(bird.dir).negate();
-    lookQuat(tA, bird.up, 0, rs.quat); // camera-style basis looks down −Z: aim −Z backwards so +Z is forward
-    rs.scale = popScale(birdPop, birdPopDir > 0, ctx.reducedMotion);
+    // The body's attitude (+Z forward, +Y up, +X left): the path pitched by the angle of attack,
+    // banked, tumbling in a crash.
+    rs.quat.copy(bird.quat);
+    rs.scale = popScale(birdPop, birdPopDir > 0, ctx.reducedMotion) * BIRD_SIZE;
     rs.phase = bird.flapPhase;
     rs.amp = bird.flapAmp;
     rs.tuck = bird.tuck;
+    rs.spread = bird.spread;
+    rs.turn = bird.turnK;
+    rs.speed = bird.speed;
+    rs.crash = bird.crash;
+    rs.stand = bird.stand;
+    rs.legs = bird.legs;
+    rs.hop = bird.hop;
   }
 
   /** Cartoon pop: springs in with a little overshoot; shrinks away. Reduced motion: a plain ease. */
@@ -3070,7 +2945,6 @@ export function createDirector(host: DirectorHost) {
         birdCam.settle(bird, birdCamEnv, target);
         target.fov = fit(ctx, target.fov);
         launching = false;
-        takeoff = guide = 0;
         birdPop = 1;
       }
       return true;
@@ -3109,7 +2983,7 @@ export function createDirector(host: DirectorHost) {
     /** Review: the transition's pose and the new mode's live pose (read-only). */
     dbgPoses: { out, target },
     dbgLaunch,
-    /** Review (D1f r4): the nearest facade (m, footprint) taller than world point p, ≤ 20 m; and the idle guide. */
+    /** Review (D1f r4): the nearest facade (m, footprint) taller than world point p, ≤ 20 m. */
     probeFacade(p: Vector3): number {
       tA.copy(p).normalize();
       if (!ctxRef || !inCity(tA, 20)) return 99;
@@ -3126,14 +3000,15 @@ export function createDirector(host: DirectorHost) {
       }
       return best;
     },
-    /** Review (D1f r4): the bird's floors under world point p (m above sea level) and its plan point. */
+    /** Review (v2-BF): the bird's floor under world point p (m above sea level) and its plan point. */
     probeFloor(p: Vector3) {
       tA.copy(p).normalize();
       if (!ctxRef) return null;
-      const soft = softFloor(ctxRef, tA);
+      const h = p.length() - R;
+      const floor = birdFloor(ctxRef, tA, h, BIRD.bodyR * 0.5);
       const hard = hardFloor(ctxRef, tA);
       inCity(tA, 0);
-      return { soft, hard, x: plan.x, z: plan.z, solid: solidTop(plan.x, plan.z, 0.7, 1.5), h: p.length() - R, plateau: PLATEAU_HEIGHT };
+      return { floor, hard, x: plan.x, z: plan.z, solid: solidTop(plan.x, plan.z, 0.7, 1.5), h, plateau: PLATEAU_HEIGHT };
     },
     /** Review (D1f r4): the hold before the drop into someone's eyes (s used, on now). */
     get hold() {
@@ -3142,9 +3017,6 @@ export function createDirector(host: DirectorHost) {
     /** Review (D1f r4): the live approach's turn with the subject's heading (deg). */
     get livePsi() {
       return livePsi / DEG;
-    },
-    get guideState() {
-      return { guide, on: guideOn, w: guideW, sky: guideSky, run: guideRun };
     },
     /** Review (D1f r6): reduced motion's dip, how dimmed the canvas is now (0 … 1). */
     get dip() {

@@ -22,6 +22,7 @@ import { chartToDir, dirToChart, v3, type Vec3 } from '../world/sphere';
 import { nightFactor, sunDirection } from '../world/sun';
 import { buildSite, cables, chair, frameAt, hull, liftLoop } from './build';
 import { type Item, planSteps, type Site, T } from './plan';
+import { townSolids } from './solids';
 
 const SPREAD = 1.6;
 /** Boat tints (pastels): the hull is mid grey in the geometry, so it comes out a deep shade of the tint, the cabin and the gunwale the pastel itself. */
@@ -191,8 +192,12 @@ export function createTownsSystem(): System {
       const inner = ctx.services.nature, hit = walls(sites);
       wrapped = { collide: (dir, r, out) => (inner?.collide(dir, r, out) ? hit(out, r, out) || true : hit(dir, r, out)) };
       ctx.services.nature = wrapped;
+      // and walls and roofs to the bird, by their heights (v2-BF)
+      const solids = townSolids(sites, ctx.world.region);
+      ctx.services.towns = solids;
       restore = () => {
         if (ctx.services.nature === wrapped) ctx.services.nature = inner;
+        if (ctx.services.towns === solids) ctx.services.towns = undefined;
       };
     },
     update(ctx: LBContext) {

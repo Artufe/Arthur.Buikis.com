@@ -13,8 +13,9 @@ import { getPlanet } from '../../world/planet';
 import { dirFromLatLon } from '../../world/sphere';
 import { sunDirection } from '../../world/sun';
 import { createCameraSystem } from '../index';
-import { birdRender } from '../bird/shared';
+import { BIRD_SIZE, birdRender } from '../bird/shared';
 import { BIRD_CAM } from '../bird/cam';
+import { BIRD } from '../bird/flight';
 import type { Director } from '../director';
 
 const W = 1280;
@@ -468,7 +469,8 @@ describe('camera director (system, 60 fps)', { timeout: 30_000 }, () => {
     expect(fly.worstTurn).toBeLessThan(TURN_FRAME);
     const rs = birdRender(ctx);
     expect(rs.show).toBe(true);
-    expect(rs.scale).toBeGreaterThan(0.9);
+    expect(rs.scale).toBeGreaterThan(0.9 * BIRD_SIZE);
+    expect(rs.scale).toBeLessThan(1.1 * BIRD_SIZE);
     // The camera never dipped under the ground or a roof on the way.
     expect(ctx.view.altTerrain).toBeGreaterThan(0.5);
     cam.exitMode!();
@@ -1011,7 +1013,7 @@ describe('camera director (system, 60 fps)', { timeout: 30_000 }, () => {
     canvas.remove();
   });
 
-  it('a bird launched from the street with no input takes off into the open: never into a facade', () => {
+  it('a bird launched from the street with no input takes off into the open, then glides', () => {
     const { ctx, sys, step, canvas } = setup();
     const cam = ctx.services.camera;
     streetShot(ctx);
@@ -1019,23 +1021,30 @@ describe('camera director (system, 60 fps)', { timeout: 30_000 }, () => {
     cam.fly!();
     const dir = directorOf(ctx);
     dir.override = { steer: 0, climb: 0, flap: false, dive: false };
+    const alt0 = dir.bird.alt;
     let nearest = 99;
-    let later = 99;
-    let alt90 = 0;
-    // (D1f r4) Left alone for 10 s: once the take-off guide ends (3.2 s) the idle guide keeps it off
-    // the buildings — it flew straight at the clock tower's face at ~5 s and skimmed its spire.
-    for (let i = 0; i < 600; i++) {
+    let alt60 = 0;
+    let beat = 0;
+    let gMax = -1;
+    // (v2-BF) The take-off is ~1 s of hard flapping along the clear heading it launched on; then
+    // nothing flies it but the physics: hands off it glides down.
+    for (let i = 0; i < 60 * 4; i++) {
       step();
       const f = facadeDist(ctx, dir.bird.pos);
-      if (i < 90) nearest = Math.min(nearest, f);
-      if (i === 89) alt90 = dir.bird.alt;
-      if (i > 20) later = Math.min(later, f);
+      if (i < 120) nearest = Math.min(nearest, f);
+      if (i === 59) alt60 = dir.bird.alt;
+      if (i < 50) beat = Math.max(beat, dir.bird.flapAmp);
+      if (i > 150 && i < 200) gMax = Math.max(gMax, dir.bird.gamma);
+      expect(Number.isFinite(dir.bird.pos.x + ctx.camera.position.x)).toBe(true);
     }
-    // It keeps a bird's berth (the wall push never had to step in) and is climbing away.
-    expect(nearest).toBeGreaterThan(1.2);
-    expect(alt90 - PLATEAU_HEIGHT).toBeGreaterThan(4);
-    expect(later).toBeGreaterThan(3);
-    expect(dir.bird.wallHits).toBe(0);
+    // It beat its wings and climbed away clear of the facades: no crash on the way out.
+    expect(beat).toBeGreaterThan(0.8);
+    expect(alt60 - alt0).toBeGreaterThan(1.2);
+    expect(nearest).toBeGreaterThan(BIRD.bodyR - 0.05);
+    expect(dir.bird.crashes).toBe(0);
+    // Then, hands off, it glides down (or skims along the street it has come down to): no pitch-up.
+    expect(gMax).toBeLessThan(1e-6);
+    expect(dir.bird.flapAmp).toBe(0);
     sys.dispose!(ctx);
     canvas.remove();
   });
@@ -1097,32 +1106,68 @@ describe('camera director (system, 60 fps)', { timeout: 30_000 }, () => {
     canvas.remove();
   });
 
-  it('a bird launched from the street with a dive held, or steered into the blocks, keeps a bird\'s berth', () => {
-    // (D1f r5, critic r2: Shift held with no steer pressed the bird against a glass facade, the wall
-    // filling 70 % of the frame, 2.1 m off; the guide now keeps the heading in a dive and a soft
-    // wall eases it back out, so steered at a facade it slides along it.)
-    const cases: Array<[string, { steer: number; climb: number; flap: boolean; dive: boolean }, number]> = [
-      ['dive', { steer: 0, climb: 0, flap: false, dive: true }, 3],
-      ['A+S', { steer: -0.7, climb: -1, flap: false, dive: false }, 2.5],
-      ['dive+A', { steer: -0.6, climb: 0, flap: false, dive: true }, 2.5],
+  it('a bird flown into the capital\'s facades crashes and recovers: never inside, the camera never whips round, the bird in frame', () => {
+    // (v2-BF: nothing steers it off a wall now. Shift from the street, A + S and a dive steered at
+    // the blocks all meet a facade or the street: a bonk, a tumble, a recovery.)
+    const cases: Array<[string, { steer: number; climb: number; flap: boolean; dive: boolean }]> = [
+      ['dive', { steer: 0, climb: 0, flap: false, dive: true }],
+      ['A+S', { steer: -0.7, climb: -1, flap: false, dive: false }],
+      ['dive+A', { steer: -0.6, climb: 0, flap: false, dive: true }],
+      ['D', { steer: 1, climb: 0, flap: false, dive: false }],
     ];
-    for (const [name, input, berth] of cases) {
+    let crashes = 0;
+    for (const [name, input] of cases) {
       const { ctx, sys, step, canvas } = setup();
       streetShot(ctx);
       step();
       ctx.services.camera.fly!();
       const dir = directorOf(ctx);
       dir.override = input;
-      let nearest = 99;
+      let inside = 99;
+      let crashAt = -1;
+      let lastCrash = 0;
+      let worstTurn = 0;
+      let outFrames = 0;
+      let turnAt = '';
+      let recovered = true;
+      const prevF = new Vector3(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
       for (let i = 0; i < 60 * 9; i++) {
         step();
-        if (i > 20) nearest = Math.min(nearest, facadeDist(ctx, dir.bird.pos));
+        const b = dir.bird;
+        if (b.crashes > lastCrash) {
+          lastCrash = b.crashes;
+          crashAt = i;
+          recovered = false;
+          // (The player lets go once it has hit.)
+          dir.override = { steer: 0, climb: 0, flap: false, dive: false };
+        }
+        if (!recovered && b.crash === 0) {
+          recovered = true;
+          expect(i - crashAt, `${name}: recovery frames`).toBeLessThan(60 * 2.2);
+        }
+        if (i > 20) inside = Math.min(inside, facadeDist(ctx, b.pos));
+        const f = new Vector3(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+        if (f.angleTo(prevF) > worstTurn) turnAt = `frame ${i} crash ${b.crash.toFixed(2)} crashes ${b.crashes} blend ${ctx.services.camera.mode!().blend.toFixed(2)} v ${b.speed.toFixed(1)} γ ${(b.gamma / DEG).toFixed(0)} alt ${b.alt.toFixed(1)} boom ${ctx.camera.position.distanceTo(b.pos).toFixed(2)}`;
+        worstTurn = Math.max(worstTurn, f.angleTo(prevF));
+        prevF.copy(f);
+        const nd = b.pos.clone().project(ctx.camera);
+        if (Math.abs(nd.x) > 1 || Math.abs(nd.y) > 1 || nd.z > 1) outFrames++;
+        // The camera never under the ground or a roof.
+        expect(ctx.view.altTerrain, name).toBeGreaterThan(0);
+        expect(Number.isFinite(b.pos.x + b.speed + ctx.camera.position.x), name).toBe(true);
       }
-      expect(nearest, name).toBeGreaterThan(berth);
-      expect(dir.bird.wallHits, name).toBe(0);
+      crashes += dir.bird.crashes;
+      // Never inside a facade (its centre at least about a body radius off it).
+      expect(inside, name).toBeGreaterThan(BIRD.bodyR - 0.1);
+      expect(worstTurn, `${name}: ${turnAt}`).toBeLessThan(TURN_FRAME);
+      expect(outFrames, `${name}: frames without the bird`).toBeLessThanOrEqual(3);
+      // No crash loop: hands off after the bonk, at most one more (a glide that meets a facade).
+      expect(dir.bird.crashes, name).toBeLessThanOrEqual(2);
       sys.dispose!(ctx);
       canvas.remove();
     }
+    // The cases met something (the test means something).
+    expect(crashes).toBeGreaterThan(0);
   });
 
   it('ordinary trips are snappy: a car down the street or a walker across town in ≤ 2.15 s', () => {

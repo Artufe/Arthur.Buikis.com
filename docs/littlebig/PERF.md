@@ -327,6 +327,11 @@ and roads 16.6 KiB (plus 1.4 KiB of keep-out wiring in nature/). The ceilings ar
 roads add at most 14 draw calls and stay inside every frame budget (orbit 83 calls, region-west
 83, street 78); the world is complete at 1.2–1.7 s against 2.5 s.
 
+**v2 bird flight (2026-10-09).** The bird's lift-and-drag flight model, landing, crashes, the
+towns' collision service and the jointed wing, leg and tail animation measure **373.0 KiB own /
+537.5 KiB total**, +9.3 KiB on the towns-and-roads tree. The ceilings are now **381 / 550**.
+The bird stays one draw call plus its shadow, and its step costs about 4 µs a frame.
+
 The engine now owns HUD, touch detection and stick presentation subscriptions. They run after
 its render, pause when its loop is suspended and are released on disposal. Deterministic sim,
 instanced rendering, staged shader warmup and adaptive resolution remain in place.

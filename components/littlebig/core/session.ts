@@ -15,6 +15,11 @@ export interface BirdSnapshot {
   bank: number;
   turn: number;
   phase: number;
+  /** (v2-BF, optional) The lift coefficient against trim's and the beat's strength; absent: trim, gliding. */
+  lift?: number;
+  amp?: number;
+  /** (v2-BF, optional) Standing (or floating) on its floor. */
+  ground?: boolean;
 }
 
 export interface PlanetSession {

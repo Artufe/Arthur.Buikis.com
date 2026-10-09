@@ -357,6 +357,11 @@ export interface Services {
    * ctx.services.traffic?.collide(...).
    */
   traffic?: TrafficService;
+  /**
+   * v2-BF: the towns' buildings as height-aware solids (the bird meets their walls and roofs).
+   * Optional: installed once the towns system has built its sites; call through ctx.services.towns?.
+   */
+  towns?: TownsService;
   /** v2: everything the camera can ride or the player can click to follow (core/track.ts). */
   track: TrackService;
   /** v2: world-anchored name tags the UI draws (settlements, landmarks, the station). */
@@ -381,6 +386,37 @@ export interface PeopleService {
    * position into out; returns true if it moved.
    */
   pushOut(x: number, z: number, r: number, out: { x: number; z: number }): boolean;
+}
+
+/**
+ * The towns' buildings as solids (v2-BF, towns/solids.ts): each plan item's footprint, from the ground
+ * up to its roof (m above sea level). Zero-alloc; a cheap broad phase per site.
+ */
+export interface TownsService {
+  /** True when unit `dir` is within a town site's reach (its buildings' bounding circle). */
+  near(dir: Vec3): boolean;
+  /**
+   * The highest roof (m above sea level) of the buildings whose footprints come within r (m) of unit
+   * `dir` and whose roofs are at most h (m above sea level); −Infinity if none.
+   */
+  roofAt(dir: Vec3, h: number, r: number): number;
+  /**
+   * Push a body of radius r (m) at unit `dir` out of every footprint whose roof is over h (m above sea
+   * level), sliding along it. Writes the resolved unit direction into out (out may be dir); true if it
+   * moved.
+   */
+  solid(dir: Vec3, h: number, r: number, out: Vec3): boolean;
+  /**
+   * The top (m above sea level) of the garden fences, hedges and paddock rails within r (m) of unit
+   * `dir` (each a band along its plot's edge, ≤ ~1.25 m tall), or −Infinity. For the bird camera's
+   * sight line and placement; nothing collides with them.
+   */
+  fenceTop(dir: Vec3, r: number): number;
+  /**
+   * The top of the street paving at unit `dir` (m above sea level): a carriageway's asphalt, or its
+   * sidewalk's slab CURB_H over that, if at most h; else (or off the streets) −Infinity.
+   */
+  pavingAt(dir: Vec3, h: number): number;
 }
 
 /** Collision against the countryside's trunks and boulders (A1, nature/collide.ts). Zero-alloc. */

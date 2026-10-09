@@ -28,8 +28,11 @@ export { lookQuat };
 const DEG = Math.PI / 180;
 
 export interface RideEnv {
-  /** Lowest height (m above sea level) the camera may take above unit `dir`: terrain or water, roofs. */
-  floor(dir: Vector3): number;
+  /**
+   * Lowest height (m above sea level) the camera may take above unit `dir`: terrain or water, roofs.
+   * `h` (optional, v2-BF): the camera's height, so a facade taller than it beside it is left to `wall`.
+   */
+  floor(dir: Vector3, h?: number): number;
   /** Fraction (0…1) of the segment from a to b that is clear of buildings, measured from a. */
   free(a: Vector3, b: Vector3): number;
   /**

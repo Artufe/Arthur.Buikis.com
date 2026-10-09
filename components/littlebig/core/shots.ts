@@ -22,8 +22,8 @@ export interface ShotDef {
   t?: number | ((view: ViewSpec) => number);
   /** v2 (D1): then ride this Trackable, settled (the camera director's ride). */
   ride?: string;
-  /** v2 (D1): then fly the bird, holding this input for `secs` of flight before the frame. */
-  bird?: { steer: number; climb: number; secs: number };
+  /** v2 (D1): then fly the bird, holding this input for `secs` of flight before the frame (v2-BF: Space, Shift too). */
+  bird?: { steer: number; climb: number; secs: number; flap?: boolean; dive?: boolean };
 }
 
 const DEG = 180 / Math.PI;
@@ -127,6 +127,12 @@ export const SHOTS: Record<string, ShotDef> = {
   alongside: { about: 'v2: riding alongside the sky station: high and beside it, over the planet', view: () => ({ lat: CITY_LAT - 6, lon: CITY_LON + 26, alt: 380, heading: 0 }), ride: 'station:0' },
   bird: { about: 'v2: the bird over downtown, 1.2 s into a gentle right climb from the rooftops shot', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24), bird: { steer: 0.3, climb: 0.2, secs: 1.2 } },
   takeoff: { about: 'v2 (D1f): the bird 1.2 s after a launch from the street shot, no input: climbing out down the street', view: streetView, bird: { steer: 0, climb: 0, secs: 1.2 } },
+  // (v2-BF) The bird's flight: a hands-off glide, a flapping climb, a stoop, a bank, a crash into a facade.
+  'bird-glide': { about: 'v2-BF: the bird 2.5 s into a hands-off glide from the rooftops shot: wings out, gliding down', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24), bird: { steer: 0, climb: 0, secs: 2.5 } },
+  'bird-climb': { about: 'v2-BF: the bird 2 s into a W climb from the rooftops shot: beating, nose up', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24), bird: { steer: 0, climb: 1, secs: 2 } },
+  'bird-stoop': { about: 'v2-BF: the bird 1.4 s into a stoop (Shift) from the rooftops shot: wings tucked, diving at the street', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 30, -24), bird: { steer: 0, climb: 0, secs: 1.4, dive: true } },
+  'bird-bank': { about: 'v2-BF: the bird 1.5 s into a hard right turn from the rooftops shot: banked 48°', view: (ctx) => viewAt(ctx.world.city.viewpoints.rooftops, 16, -24), bird: { steer: 1, climb: 0, secs: 1.5 } },
+  'bird-crash': { about: 'v2-BF: the bird 1 s after a launch from the street shot steered left and down (A + S) into the street: the bonk', view: streetView, bird: { steer: -0.7, climb: -1, secs: 1 } },
   dusk: {
     about: 'street at sunset, looking west: the sun disc touching the horizon',
     view: (ctx) => viewAt(ctx.world.city.viewpoints.dusk, EYE_HEIGHT),

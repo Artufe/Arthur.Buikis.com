@@ -3,6 +3,7 @@
 // production only with ?shot=1.
 
 import type { BootEntry, CameraMode, LBContext, RideView, TrackKind, ViewSpec } from './contracts';
+import type { BirdHold } from '../camera/bird';
 import { DIVE_SECONDS } from '../camera/dive';
 import { DIVE_T0, diveAt, SHOTS } from './shots';
 
@@ -93,6 +94,45 @@ export interface LittlebigHook {
    * last one: the live path, deterministic.
    */
   advance(seconds: number, fps?: number): void;
+  /**
+   * v2 (BA): freeze the bird at a pose for close review, the camera on a turntable round it (null
+   * lets go and hands the camera back). The first call anchors the bird 3 m ahead of the camera,
+   * level, heading along the view; later calls keep that spot until let go. False before the bird
+   * system is up.
+   */
+  birdPose(p: BirdPoseSpec | null): boolean;
+}
+
+/** A bird review pose (core/debug.ts birdPose; scripts/littlebig-shot.mjs --bird-pose). */
+export interface BirdPoseSpec {
+  /** The beat: phase (rad), or u, the cycle fraction (downstroke [0, 0.55), then the upstroke). */
+  phase?: number;
+  u?: number;
+  /** camera/bird/shared.ts BirdRender: amp, tuck, spread, turn, speed (m/s), crash, stand, legs, hop. */
+  amp?: number;
+  tuck?: number;
+  spread?: number;
+  turn?: number;
+  speed?: number;
+  crash?: number;
+  stand?: number;
+  legs?: number;
+  hop?: number;
+  /** 1: set it on the floor below its spot (standing height, FEET × scale), level. */
+  ground?: number;
+  /** Seconds since the impact (the daze), and the clock (s) of the glide's life and the flail. */
+  daze?: number;
+  clock?: number;
+  /** Body attitude (deg): nose up +, banked right +. */
+  pitch?: number;
+  bank?: number;
+  /** Turntable: azimuth round the bird (deg: 0 behind, 90 its left, 180 head on), elevation (deg), distance (m), lens (deg). */
+  az?: number;
+  el?: number;
+  dist?: number;
+  fov?: number;
+  /** Draw scale (default 0.62, the game's BIRD_SIZE). */
+  scale?: number;
 }
 
 /** The camera system's dev-only extras (camera/index.ts), not part of the contract. */
@@ -126,7 +166,9 @@ export interface DebugDeps {
 
 export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
   if (!deps.enabled || typeof window === 'undefined') return () => {};
+  const birdPose = birdPoseHook(ctx, deps);
   const hook: LittlebigHook = {
+    birdPose,
     get ready() {
       return deps.isReady();
     },
@@ -160,7 +202,7 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
       // v2 (D1): a ride or the bird on top of the view.
       if (s.ride) hook.ride(s.ride);
       if (s.bird) {
-        hook.birdInput({ steer: s.bird.steer, climb: s.bird.climb });
+        hook.birdInput({ steer: s.bird.steer, climb: s.bird.climb, flap: s.bird.flap, dive: s.bird.dive });
         hook.fly();
         hook.advance(s.bird.secs);
       }
@@ -328,5 +370,100 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
     if (window.__littlebig === hook) delete window.__littlebig;
     if (testWindow.render_game_to_text === textState) testWindow.render_game_to_text = previousText;
     if (testWindow.advanceTime === advance) testWindow.advanceTime = previousAdvance;
+  };
+}
+
+/**
+ * v2 (BA) birdPose: holds the bird system's render state at a pose (camera/bird/index.ts calls
+ * mesh.userData.hold each update, after the director wrote it) and puts the camera on a turntable
+ * round it, on top of the camera system's frame; the lens (near, fov, shift) is saved and handed
+ * back on release. three's classes come from cloning the camera's own (no engine imports here).
+ */
+function birdPoseHook(ctx: LBContext, deps: DebugDeps): LittlebigHook['birdPose'] {
+  const D = Math.PI / 180;
+  const cam = ctx.camera;
+  type Lens = { near: number; fov: number; shift: boolean };
+  let at: { P: typeof cam.position; up: typeof cam.position; fwd: typeof cam.position; left: typeof cam.position; camUp: typeof cam.position; saved: Lens; mine: Lens } | null = null;
+  const v = cam.position.clone();
+  const f = cam.position.clone();
+  const u = cam.position.clone();
+  const l = cam.position.clone();
+  const m = cam.matrix.clone();
+  const lens = (): Lens => ({ near: cam.near, fov: cam.fov, shift: !!cam.view?.enabled });
+  const setLens = (x: Lens) => {
+    cam.near = x.near;
+    cam.fov = x.fov;
+    if (cam.view) cam.view.enabled = x.shift;
+    cam.updateProjectionMatrix();
+  };
+  return (p) => {
+    const bird = ctx.scene.getObjectByName('bird');
+    if (!bird) return false;
+    if (!p) {
+      if (at) {
+        setLens(at.saved);
+        cam.up.copy(at.camUp);
+      }
+      delete bird.userData.hold;
+      at = null;
+      deps.frameNow(0);
+      return true;
+    }
+    ctx.debug.cameraLocked = true;
+    if (!at) {
+      const fwd = cam.getWorldDirection(cam.position.clone());
+      const P = cam.position.clone().addScaledVector(fwd, 3);
+      const up = P.clone().normalize();
+      fwd.addScaledVector(up, -fwd.dot(up)).normalize();
+      // On the floor: the terrain's height there (R = |eye| − altSea), the feet FEET below the centre.
+      if (p.ground) P.copy(up).multiplyScalar(cam.position.length() - ctx.view.altSea + ctx.world.planet.surfaceAt(up) + 0.36 * (p.scale ?? 0.62));
+      at = { P, up, fwd, left: up.clone().cross(fwd), camUp: cam.up.clone(), saved: lens(), mine: lens() };
+    }
+    const A = at;
+    const q = { amp: 0, tuck: 0, spread: 0, turn: 0, speed: 7, crash: 0, stand: 0, legs: 0, hop: 0, pitch: 0, bank: 0, az: 90, el: 0, dist: 1.8, fov: 30, scale: 0.62, ...p };
+    const phase = q.phase ?? (q.u ?? 0) * 2 * Math.PI;
+    const hold: BirdHold = (st, dev) => {
+      st.show = true;
+      st.pos.copy(A.P);
+      // Attitude: pitched about the left axis, then banked about the forward one (right wing down +).
+      const pr = q.pitch * D;
+      const br = q.bank * D;
+      f.copy(A.fwd).multiplyScalar(Math.cos(pr)).addScaledVector(A.up, Math.sin(pr));
+      u.copy(A.up).multiplyScalar(Math.cos(pr)).addScaledVector(A.fwd, -Math.sin(pr));
+      l.copy(A.left).multiplyScalar(Math.cos(br)).addScaledVector(u, Math.sin(br));
+      u.multiplyScalar(Math.cos(br)).addScaledVector(A.left, -Math.sin(br));
+      st.quat.setFromRotationMatrix(m.makeBasis(l, u, f));
+      st.scale = q.scale;
+      st.phase = phase;
+      st.amp = q.amp;
+      st.tuck = q.tuck;
+      st.spread = q.spread;
+      st.turn = q.turn;
+      st.speed = q.speed;
+      st.crash = q.crash;
+      st.stand = q.stand;
+      st.legs = q.legs;
+      st.hop = q.hop;
+      if (q.clock !== undefined) dev.clock = q.clock;
+      // (No daze given: one long over, or the frozen clock would keep the last pose's feathers.)
+      dev.daze = q.daze ?? 99;
+      // The turntable, in the bird's level frame.
+      const a = q.az * D;
+      const e = q.el * D;
+      v.copy(A.fwd).multiplyScalar(-Math.cos(a)).addScaledVector(A.left, Math.sin(a)).multiplyScalar(Math.cos(e)).addScaledVector(A.up, Math.sin(e));
+      cam.position.copy(A.P).addScaledVector(v, q.dist);
+      cam.up.copy(Math.abs(q.el) > 80 ? A.fwd : A.up);
+      cam.lookAt(A.P);
+      // The camera system rewrites the lens only when its own changes: keep its latest for the release.
+      const now = lens();
+      if (now.near !== A.mine.near || now.fov !== A.mine.fov || now.shift !== A.mine.shift) A.saved = now;
+      A.mine = { near: 0.05, fov: q.fov, shift: false };
+      setLens(A.mine);
+      cam.updateMatrixWorld();
+      ctx.uniforms.lbCamPos.value.copy(cam.position);
+    };
+    bird.userData.hold = hold;
+    deps.frameNow(0);
+    return true;
   };
 }

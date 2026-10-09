@@ -34,8 +34,8 @@ const HINT_STREET_PAGE: HintDef = [['*wasd* walk', 4], ['*click* to look', 2], [
 const HINT_STREET_TOUCH: HintDef = [['*left thumb* walks', 3], ['*drag* to look', 2], ['*pinch* out to fly', 1]];
 const HINT_SEA: HintDef = [['*scroll* out to fly', 2], ['*double-click* land to fly there', 1]];
 const HINT_SEA_TOUCH: HintDef = [['*pinch* out to fly', 2], ['*double-tap* land to fly there', 1]];
-const HINT_BIRD: HintDef = [['*wasd* steer', 4], ['*space* flap', 3], ['*shift* dive', 1], ['*esc* to land', 2]];
-const HINT_BIRD_TOUCH: HintDef = [['*left thumb* steers', 3], ['*tap* to flap', 2], ['*×* to land', 1]];
+const HINT_BIRD: HintDef = [['*a* *d* turn', 5], ['*w* climb', 4], ['*s* dive', 2], ['*space* flap', 4], ['*shift* stoop', 1], ['*esc* to leave', 3]];
+const HINT_BIRD_TOUCH: HintDef = [['*left thumb* turns, climbs, dives', 3], ['*tap* to flap or take off', 2], ['*×* to leave', 1]];
 const HINT_CHASE: HintDef = [['*drag* to look around', 3], ['*scroll* to zoom', 1], ['*[* *]* next', 2], ['*esc* to hop off', 4]];
 const HINT_EYES: HintDef = [['*drag* to look around', 3], ['*[* *]* next', 2], ['*esc* to step out', 4]];
 const HINT_SPACE: HintDef = [['*drag* to orbit', 3], ['*scroll* to zoom', 1], ['*[* *]* next', 2], ['*esc* to come home', 4]];
@@ -579,9 +579,13 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
           key: 'bird',
           kind: 'bird',
           title: 'you, a little bird',
-          sub: 'free as a bird · flap to climb',
-          // (No speed until it has been measured: never a false '0 km/h'.)
-          detail: `alt ${Math.max(0, Math.round(altBird))} m${L.speed > 0 ? ` · ${Math.round(L.speed * 3.6)} km/h` : ''} · flying ${compass(v.heading)}`,
+          // (v2-BF: let go it glides down and lands; standing, W or Space take off.)
+          sub: isTouch ? 'lands when let go · tap to take off' : 'lands when let go · w or space takes off',
+          // (No speed until it has been measured: never a false '0 km/h'. Still: standing.)
+          detail:
+            L.speed > 0 && L.speed < 0.8
+              ? `alt ${Math.max(0, Math.round(altBird))} m · ${altBird < 0.15 ? 'afloat' : 'standing'}, facing ${compass(v.heading)}`
+              : `alt ${Math.max(0, Math.round(altBird))} m${L.speed > 0 ? ` · ${Math.round(L.speed * 3.6)} km/h` : ''} · flying ${compass(v.heading)}`,
           canCycle: false,
         };
       }

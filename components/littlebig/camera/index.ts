@@ -1495,7 +1495,7 @@ export function createCameraSystem(): System {
       };
       // Dev introspection for player tests and the review hooks (not part of the contract).
       Object.assign(ctx.services.camera, {
-        debug: () => ({ landOn, landDone, landX, landZ, landHeading, fromX, fromZ, lift: s.lift, anchorOn, aimOn, landInfo, target: Math.exp(s.logAltTarget), input: input?.debugState(), override: s.overrideWeight, pitchOverride: s.pitchOverride, exitRelease, posePitch: pose.pitch, poseAlt: pose.alt, mode: director.mode, ride: director.rideId, blend: director.blend, birdOn: director.birdOn, bird: { alt: director.bird.alt, speed: director.bird.speed, bank: director.bird.bank, gamma: director.bird.gamma, hardHits: director.bird.hardHits } }),
+        debug: () => ({ landOn, landDone, landX, landZ, landHeading, fromX, fromZ, lift: s.lift, anchorOn, aimOn, landInfo, target: Math.exp(s.logAltTarget), input: input?.debugState(), override: s.overrideWeight, pitchOverride: s.pitchOverride, exitRelease, posePitch: pose.pitch, poseAlt: pose.alt, mode: director.mode, ride: director.rideId, blend: director.blend, birdOn: director.birdOn, bird: { alt: director.bird.alt, speed: director.bird.speed, bank: director.bird.bank, gamma: director.bird.gamma, hardHits: director.bird.hardHits, crashes: director.bird.crashes, landings: director.bird.landings, grounded: director.bird.grounded, onWater: director.bird.onWater, stand: director.bird.stand, legs: director.bird.legs, takingOff: director.bird.takingOff, crash: director.bird.crash, floor: director.bird.floorH } }),
         director,
       });
       setView(ctx, { lat: 20, lon: 10, alt: 380, heading: 0 });
