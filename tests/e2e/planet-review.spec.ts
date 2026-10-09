@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
-test.setTimeout(120_000);
-// Software WebGL in headless CI renders a few frames a second: a ride's ~2 s blend takes far longer.
+// Software WebGL in headless CI renders a frame or two a second since the towns landed (~0.6 M
+// triangles in view): a boot takes 60-90 s and a ride's ~2 s blend far longer.
+test.setTimeout(240_000);
 const SETTLE = { timeout: 60_000 };
 const ready = (page: Page) => page.waitForFunction(() => window.__littlebig?.ready, null, { timeout: 90_000 });
 async function open(page: Page) {
@@ -17,11 +18,11 @@ test('planet smoke: keyboard activates HUD buttons without moving the camera; no
   await plane.focus();
   await page.keyboard.press('Space');
   await expect(plane).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode)).toBe('ride');
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), SETTLE).toBe('ride');
   const stop = page.getByRole('button', { name: 'stop riding (esc)', exact: true });
   await stop.focus();
   await page.keyboard.press('Space');
-  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode)).toBe('explore');
+  await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), SETTLE).toBe('explore');
   await plane.focus();
   await page.keyboard.press('Enter');
   await expect(plane).toHaveAttribute('aria-pressed', 'true');
@@ -55,6 +56,7 @@ test('planet smoke: expanding a window preserves the selected ride and framing',
 });
 
 test('planet smoke: context recovery preserves a ride on a fresh canvas', async ({ page }) => {
+  test.setTimeout(360_000); // two boots
   await open(page);
   await page.getByRole('button', { name: 'follow a plane', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().blend), SETTLE).toBe(1);
@@ -106,7 +108,7 @@ test.describe('touch', () => {
 });
 
 test('planet smoke: all six modes, cycling rides and leaving them remain usable', async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await open(page);
@@ -116,7 +118,7 @@ test('planet smoke: all six modes, cycling rides and leaving them remain usable'
     const button = page.getByRole('button', { name: label, exact: true });
     await expect(button).toBeEnabled();
     await button.click();
-    await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), { message: label, timeout: 15000 }).toBe('ride');
+    await expect.poll(() => page.evaluate(() => window.__littlebig!.mode().mode), { message: label, ...SETTLE }).toBe('ride');
     const next = page.getByRole('button', { name: 'next ride', exact: true });
     if (await next.count()) await next.click();
     await page.getByRole('button', { name: 'stop riding (esc)', exact: true }).click();
