@@ -64,14 +64,14 @@ export default function PlanetPage() {
           Its own rule: it shows before the game's chunk arrives. The radius beats the site's global
           square corners by specificity. */}
       <style>{`
-        .lb-back{top:12px;left:12px;display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 15px 1px 12px;font-family:ui-rounded,'SF Pro Rounded','Arial Rounded MT Bold','Nunito','Trebuchet MS',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.01em;
+        .lb-back{top:calc(12px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px));display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 15px 1px 12px;font-family:ui-rounded,'SF Pro Rounded','Arial Rounded MT Bold','Nunito','Trebuchet MS',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.01em;
           color:#1B1530;background:#FFF8E8;border:2px solid #1B1530;box-shadow:3px 3px 0 #1B1530;transition:transform .16s cubic-bezier(.3,1.65,.5,1),box-shadow .16s}
         a.lb-back{border-radius:99px !important}
         .lb-back span{font-weight:900;font-size:14px}
         .lb-back:hover{transform:translateY(-1.5px);box-shadow:3px 4.5px 0 #1B1530}
         .lb-back:active{transform:translateY(2px);box-shadow:1px 1px 0 #1B1530}
         .lb-back:focus-visible{outline:3px solid #FFB84D;outline-offset:2px}
-        @media (pointer:coarse){.lb-back{height:40px}}
+        @media (pointer:coarse){.lb-back{height:44px}}
         @media (prefers-reduced-motion:reduce){.lb-back{transition:none}}
       `}</style>
     </div>

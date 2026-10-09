@@ -758,3 +758,19 @@ Spec: `V2.md`. Tag lines `[v2-<task>]`.
 - [v2-R2, refine 2] **Shots.** The orbit is 380 m over (CITY_LAT − 18°, CITY_LON − 25°), 4° west and 2° south of refine 1, with the western towns nearer the middle of the disc. Spec'd: capital facing > 0.7, two towns facing > 0.6 (was 0.5), sunlit and cloud-clear. A new spec, 'clear of cloud', resolves every town-, quay-, beach-, region- and globe- shot through `SHOTS`. Each shot's line of sight to its own town (or, from 240–380 m up, to every town it holds face-on) clears the cloud layer at the shot's time. To pass it, globe-270 moved to hour angle 38 and globe-315 to 40, globe-180 to its morning (−20) 8° east, and region-west to hour angle 40. The town shots were clear. No `orbit-west`: globe-315 is that view. Far haven's blocks: market street r2 = r1 + 18.6 and park row r3 = r2 + 25 (block-area CoV 0.32; its boulevard and east avenue had 5.8–5.9 m between junction patches).
 - [v2-R2, refine 2] **Deviations from the critic.** (1) Patches ≤ 0.9 of the cap: not met. A right-angle T of 5 m streets needs √((RHO_TOWN + 1.25)² + 1.25²) ≈ 4.96 m against the cap's 5.0, so 0.99 is the floor without slackening RHO_TOWN (measured max 0.986). A crossing of lanes alone needs ≈ 4.78 m, over 0.6 × 4.4 + 2 = 4.64, so its cap is 4.85. (2) 4–6 lanes a town: only port pebble has 4. Coral cove has 2 (plus the promenade): on a 28 m pad with ≥ 6 m between junction patches there is no room for more junctions, and a dead-end lane needs ~23 m to keep 6 m between its patches. (3) Dead-end lanes ≥ 12 m: specced at ≥ 6 m (shortest 6.75). 12 m needs ~29 m of lane on a 26 m pad. (4) Bake the town polylines: not a size win. The generators gzip to 11 KB; the 4,890 street samples would cost about as much at 1 cm, and 1 cm quantisation puts curvature noise on a 4.8 m lane bend that breaks the 3.5 m traffic-lane spec. (5) Cold build ≤ 12 ms: not reached, 14.6–17.8 ms on the shared machine (budget 20). The carve's CSR bucketing is ~4.5 ms of it, mostly cold JIT (1.1 ms warm). Baking its ~20 k pairs would cost more bytes than the time is worth. (6) The dusk walker: world/city/views.ts belongs to another builder, so it is untouched. (7) The north islet: not built.
 - [v2-R2, refine 2] **Coral cove** is a 28 m pad (was 25). Its promenade hugs the crescent: pinned points on the arc `PROM_SET` 4.2 m behind the beach, its ends turning onto the arc at ±16.5 m round 6.8 m fillets tangent to it, and the lanes up the town's edges are tangents from the hotel row's ends to those fillets. Its quay (the crescent) is clipped where the bite meets the pad's rim; the old chord estimate ran it off the pad. `REGION_VERSION` 5.
+
+## Review follow-up (2026-10-09): lifecycle and responsibility boundaries
+
+- `core/frame-events.ts` owns presentation subscriptions; the engine presents before notifying
+  HUD/stick listeners. Overlays no longer keep separate animation loops alive during suspension.
+- `core/session.ts` defines an engine-free, versioned handoff/recovery payload. A ride carries its
+  target ID and framing; a bird carries flight pose, speed, steering state and camera distance.
+  Restoration waits for stage-two trackables; an unavailable target keeps the captured explore
+  viewpoint. This is an in-memory session transfer, not a persistent save format.
+- `camera/clearance.ts` owns static-world spatial clearance and its scratch/grid storage;
+  `camera/picking.ts` owns hover/pick hysteresis. The director retains mode transitions and
+  camera orchestration. `people/path.ts` owns path sampling; `people/lens.ts` owns camera avoidance
+  state. Their public compatibility exports preserve existing callers and deterministic tests.
+- Touch controls retain the POP styling, show the active mode, allow details to collapse, and
+  use 44px action targets. Below 380px height the dock uses two columns. Page chrome accounts
+  for safe-area insets without changing the projected world-label coordinate system.

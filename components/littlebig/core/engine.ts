@@ -34,6 +34,8 @@ import type { DebugDeps } from './debug';
 import { KIT } from './kit';
 import { ParamRegistry } from './params';
 import { Perf } from './perf';
+import { FrameEvents } from './frame-events';
+import type { PlanetSession } from './session';
 import { detectQuality, qualitySettings } from './quality';
 import { createReveal } from './reveal';
 import { createSystems } from './systems';
@@ -53,11 +55,14 @@ export interface EngineOptions {
    * Reboot after a WebGL context loss: carry on from this camera view and sim time, with the
    * reveal instant (the player is not thrown back to the opening orbit, nor shown the reveal again).
    */
-  resume?: { view: ViewSpec; t: number };
+  resume?: PlanetSession;
 }
 
 export interface Engine {
   ctx: LBContext;
+  /** Pauses with the engine; removed automatically on disposal. Runs after render. */
+  subscribeFrame(fn: (now: number) => void): () => void;
+  readonly status: 'running' | 'suspended' | 'disposed';
   /** Resolves once every stage-2 system is built (the world is complete). */
   ready: Promise<void>;
   /** Start the render loop (and the stage-2 build). */
@@ -162,6 +167,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   // `?p.core.shaderChecks=false` measures the production path there.
   renderer.debug.checkShaderErrors = params.toggle('core.shaderChecks', { label: 'shader error logs (read at boot)', value: process.env.NODE_ENV !== 'production' }).value;
   const perf = new Perf();
+  const frameEvents = new FrameEvents();
   // The post chain (B4, render/post): the scene renders into its own HDR target, so every scene
   // program must be compiled with a render target bound (no tone mapping, linear output), exactly
   // as it will be drawn. compileScene() does that; null post = plain render (no float targets).
@@ -666,6 +672,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
       }
       watchPrograms = n;
     }
+    frameEvents.emit(performance.now());
   };
   /** One full frame with a given sim dt and real dt. */
   const frame = (simDt: number, realDt: number) => {
@@ -894,6 +901,12 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     watchPrograms = renderer.info.programs?.length ?? 0;
     entries.push({ stage: 'total', ms: Math.round(performance.now() - t0), at: Math.round(performance.now() - t0) });
     isReady = true;
+    // Systems now own their trackables. A missing target leaves the fallback explore
+    // placement intact; a restored mode is presented before ready resolves.
+    if (opts.resume?.camera) {
+      services.camera.restore?.(opts.resume.camera);
+      frame(0, 0);
+    }
     resolveReady();
     if (process.env.NODE_ENV !== 'production') console.info('[littlebig] boot (ms)', entries.map((e) => `${e.stage} ${e.ms}`).join(' · '));
   };
@@ -976,6 +989,8 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
 
   const engine: Engine = {
     ctx,
+    subscribeFrame: (fn) => frameEvents.subscribe(fn),
+    get status() { return disposed ? 'disposed' : shouldRun() ? 'running' : 'suspended'; },
     ready,
     start() {
       if (disposed) return;
@@ -998,6 +1013,7 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
     dispose() {
       if (disposed) return;
       disposed = true;
+      frameEvents.dispose();
       resolveDisposed();
       running = false;
       if (raf) cancelAnimationFrame(raf);

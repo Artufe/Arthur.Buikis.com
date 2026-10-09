@@ -34,6 +34,9 @@
 import type { Building, CityIndex, CityPlan, Feature, PathSample, Polyline, WalkEdge } from '../world/city/types';
 import { CURB_H, EYE_HEIGHT, ROAD_H } from '../world/config';
 import { hash3, hashSeed, Rng } from '../world/rng';
+import { SL, Sample, nearestIn, sampleIn, nearestSL, samplePath } from './path';
+export { nearestSL, samplePath } from './path';
+export { LensWatch } from './lens';
 
 /** Body radius for collisions (shoulders ~0.44 m wide). */
 export const BODY_R = 0.22;
@@ -202,90 +205,6 @@ export const enum Pose {
   Lean = 4,
 }
 
-/** Below this altitude (m) a camera settling onto the street, or standing still, is a lens walkers make way for. */
-const LENS_ALT = 6;
-/** The berth (m) walkers give a lens: past it at this much, or (narrow pavements) they turn round before it. */
-const LENS_R = 1.6;
-/** Fixed steps between the speed samples (0.1 s at 60 Hz), the history ring, and the furthest look ahead (m). */
-const LENS_LAG = 6;
-const LENS_HIST = 16;
-const LENS_RUN = 15;
-/** A settling camera comes to rest at eye height over the pavement (m, ViewState.altTerrain). */
-const LENS_EYE = EYE_HEIGHT + ROAD_H + CURB_H;
-
-/**
- * How walkers see the camera, from its plan position and altitude each fixed step (`step`'s camOn,
- * camX/camZ, camR and lens). A walking player is avoided like a standing person (r 0.75, below
- * 3 m). A camera standing still, or settling down onto the pavement (the dive, scroll or fly-to: a
- * continuous descent, so no cut clears the lens), is a lens from LENS_ALT down: seen from further
- * ahead and given LENS_R, so nobody walks up to it, parks in front of it, or brushes past it at
- * arm's length. While it settles, the lens is where it will come to rest (x, z): its plan position
- * run on by its glide (horizontal / vertical speed × the height left to eye level, × 1.5 for the
- * flare: on the scripted dive it closes from 4.6 m short of the landing at 5.5 m up to within 0.1 m
- * from 2.4 m), or by its
- * stopping distance (v² / 2a) once it brakes, whichever is shorter. Walkers near the landing then
- * turn round before it touches down, not as the camera sweeps up to them.
- */
-export class LensWatch {
-  on = false;
-  r = 0.75;
-  lens = false;
-  /** Where walkers see the camera (plan m). */
-  x = 0;
-  z = 0;
-  /** Recent plan positions (a ring of fixed steps), for the speed and braking now and 0.1 s ago. */
-  private readonly hx = new Float64Array(LENS_HIST);
-  private readonly hz = new Float64Array(LENS_HIST);
-  private readonly ha = new Float64Array(LENS_HIST);
-  private n = 0;
-  private alt = Infinity;
-  private still = 0;
-  private settle = 0;
-
-  update(dt: number, x: number, z: number, alt: number, inCity: boolean): void {
-    // a camera cut (> 4 m in one step): the speed history starts over
-    if (this.n > 0) {
-      const l = (this.n - 1) % LENS_HIST;
-      if ((x - this.hx[l]) ** 2 + (z - this.hz[l]) ** 2 > 16) this.n = 0;
-    }
-    const k = this.n % LENS_HIST;
-    this.hx[k] = x;
-    this.hz[k] = z;
-    this.ha[k] = alt;
-    this.n++;
-    const p1 = (this.n - 1 - LENS_LAG + LENS_HIST * 4) % LENS_HIST;
-    const mx = x - this.hx[(this.n - 2 + LENS_HIST) % LENS_HIST];
-    const mz = z - this.hz[(this.n - 2 + LENS_HIST) % LENS_HIST];
-    this.still = this.n > 1 && mx * mx + mz * mz < (0.3 * dt) ** 2 ? Math.min(1, this.still + dt) : 0;
-    // (a scripted 30 fps descent moves on every other 60 Hz step: the settle flag holds 0.6 s)
-    this.settle = inCity && alt < LENS_ALT && alt < this.alt - 0.02 * dt ? 0.6 : Math.max(0, this.settle - dt);
-    this.alt = alt;
-    const still = this.still >= 0.5;
-    this.lens = inCity && alt < LENS_ALT && (still || this.settle > 0);
-    this.on = inCity && (alt < 3 || this.lens);
-    this.r = this.lens ? LENS_R : 0.75;
-    this.x = x;
-    this.z = z;
-    if (!this.lens || still || this.n <= 2 * LENS_LAG) return;
-    // speed over the last LENS_LAG steps and the LENS_LAG before
-    const p2 = (p1 - LENS_LAG + LENS_HIST * 4) % LENS_HIST;
-    const w = LENS_LAG * dt;
-    const vx = (x - this.hx[p1]) / w;
-    const vz = (z - this.hz[p1]) / w;
-    const v1x = (this.hx[p1] - this.hx[p2]) / w;
-    const v1z = (this.hz[p1] - this.hz[p2]) / w;
-    const v = Math.sqrt(vx * vx + vz * vz);
-    if (v < 0.05) return;
-    const brake = (Math.sqrt(v1x * v1x + v1z * v1z) - v) / w;
-    const sink = (this.ha[p1] - alt) / w;
-    let run = sink > 0.05 ? (1.5 * v * Math.max(0, alt - LENS_EYE)) / sink : LENS_RUN;
-    if (brake > 0.5) run = Math.min(run, (v * v) / (2 * brake));
-    run = Math.min(run, LENS_RUN);
-    this.x = x + (vx / v) * run;
-    this.z = z + (vz / v) * run;
-  }
-}
-
 export interface Obstacle {
   x: number;
   z: number;
@@ -399,27 +318,6 @@ export function columnObstacles(buildings: readonly Building[], heights?: number
   return out;
 }
 
-/** Scratch shapes of their own (see the header: zero-alloc). */
-class SL {
-  s = 0;
-  l = 0;
-  d = 0;
-  /** Inputs of nearestIn: the query point and the arc length to search up to. */
-  x = 0;
-  z = 0;
-  sMax = 0;
-}
-class Sample implements PathSample {
-  x = 0;
-  z = 0;
-  tx = 0;
-  tz = 0;
-  i = 0;
-  /** Input of sampleIn: the arc length. */
-  s = 0;
-}
-const SL0 = new SL();
-const SM0 = new Sample();
 class XZ {
   x = 0;
   z = 0;
@@ -486,89 +384,6 @@ class Berth {
 function towardRider(hx: number, hz: number, tx: number, tz: number, rx: number, rz: number): boolean {
   const d = Math.sqrt(rx * rx + rz * rz) || 1;
   return hx * rx + hz * rz > 0.3 * d && tx * rx + tz * rz > 0.3 * d;
-}
-
-/** Nearest point on a polyline from sample index lo while s ≤ sMax: arc length and signed lateral offset (right of a→b). */
-export function nearestSL(pl: Polyline, x: number, z: number, out: { s: number; l: number; d: number }, lo = 0, sMax = Infinity): void {
-  SL0.x = x;
-  SL0.z = z;
-  SL0.sMax = sMax;
-  nearestIn(pl, SL0, lo);
-  out.s = SL0.s;
-  out.l = SL0.l;
-  out.d = SL0.d;
-}
-
-/** nearestSL with its inputs in `out` (x, z, sMax): doubles never cross a call boundary in the hot loop. */
-function nearestIn(pl: Polyline, out: SL, lo: number): void {
-  const p = pl.pts;
-  const S = pl.s;
-  const x = out.x;
-  const z = out.z;
-  const sMax = out.sMax;
-  let best = Infinity;
-  for (let i = lo; i < (p.length >> 1) - 1 && S[i] <= sMax; i++) {
-    const x0 = p[i * 2];
-    const z0 = p[i * 2 + 1];
-    const dx = p[i * 2 + 2] - x0;
-    const dz = p[i * 2 + 3] - z0;
-    const l2 = dx * dx + dz * dz || 1;
-    const t = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / l2));
-    const qx = x - x0 - dx * t;
-    const qz = z - z0 - dz * t;
-    const d2 = qx * qx + qz * qz;
-    if (d2 < best) {
-      best = d2;
-      out.s = S[i] + t * (S[i + 1] - S[i]);
-      out.l = (qz * dx - qx * dz) / Math.sqrt(l2); // right of (dx, dz) is (−dz, dx)
-    }
-  }
-  out.d = Math.sqrt(best);
-}
-
-/** Point and unit tangent at arc length s (clamped; loops wrap). The zero-alloc twin of world/city/path sampleAt. */
-export function samplePath(pl: Polyline, s: number, out: PathSample): void {
-  SM0.s = s;
-  SM0.i = out.i;
-  sampleIn(pl, SM0);
-  out.x = SM0.x;
-  out.z = SM0.z;
-  out.tx = SM0.tx;
-  out.tz = SM0.tz;
-  out.i = SM0.i;
-}
-
-/** samplePath with its input in out.s. */
-function sampleIn(pl: Polyline, out: Sample): void {
-  const S = pl.s;
-  const P = pl.pts;
-  const n = P.length >> 1;
-  const L = pl.length;
-  let s = out.s;
-  s = pl.closed && L > 0 ? ((s % L) + L) % L : s < 0 ? 0 : s > L ? L : s;
-  let i = out.i | 0;
-  if (i < 0 || i > n - 2) i = 0;
-  if (S[i] > s || S[i + 1] < s) {
-    let lo = 0;
-    let hi = n - 2;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (S[mid] <= s) lo = mid;
-      else hi = mid - 1;
-    }
-    i = lo;
-  }
-  const t = (s - S[i]) / (S[i + 1] - S[i] || 1);
-  const x0 = P[i * 2];
-  const z0 = P[i * 2 + 1];
-  const dx = P[i * 2 + 2] - x0;
-  const dz = P[i * 2 + 3] - z0;
-  const l = Math.sqrt(dx * dx + dz * dz) || 1;
-  out.x = x0 + dx * t;
-  out.z = z0 + dz * t;
-  out.tx = dx / l;
-  out.tz = dz / l;
-  out.i = i;
 }
 
 export interface WalkerTraits {

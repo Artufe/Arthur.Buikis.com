@@ -69,6 +69,15 @@ export const HUD_CSS = /* css */ `
 .lbh[data-rail][data-compact] .lbh-tip{top:23px}
 /* Touch at street level: the left thumb owns the bottom-left, so the dock stands up bottom right. */
 .lbh[data-stick] .lbh-dock{left:auto;right:10px;top:auto;bottom:14px;transform:none;flex-direction:column;border-radius:999px !important}
+.lbh[data-squat] .lbh-dock{display:grid;grid-template-columns:repeat(2,44px);gap:4px;left:auto;right:10px;top:auto;bottom:10px;transform:none;padding:7px;border-radius:20px !important}
+.lbh[data-squat] .lbh-mode{width:44px;min-height:44px}
+.lbh[data-squat] .lbh-tl{right:126px}
+.lbh[data-squat] .lbh-card{max-width:100%}
+/* The active name stays inside the touch dock so hints cannot cover it. */
+.lbh .lbh-active-name{display:none}
+.lbh[data-touch] .lbh-active-name{display:block;position:absolute;left:50%;bottom:2px;transform:translateX(-50%);padding:1px 8px;border-radius:99px !important;background:${C.paper};font-size:11px;font-weight:800;line-height:14px;white-space:nowrap;pointer-events:none}
+.lbh[data-touch] .lbh-mode{min-height:44px}
+.lbh[data-touch] .lbh-btn{width:44px;height:44px}
 
 /* ── the top-left column: the card, and the hint under it (slot 'stack'). Below the page's back link
    (12 + 38 + 12), clear of the rail on the right; the card never needs measuring to stack the hint. ── */
@@ -129,6 +138,15 @@ export const HUD_CSS = /* css */ `
 .lbh[data-narrow] .lbh-card{align-self:stretch;width:auto;max-width:420px}
 .lbh[data-narrow] .lbh-x{top:8px;right:8px;width:40px;height:40px;box-shadow:2px 2px 0 ${INK}}
 .lbh[data-narrow] .lbh-head{padding-right:44px}
+.lbh .lbh-card-toggle{grid-column:1/-1;justify-self:start;min-height:44px;padding:0 10px;border:2px solid ${INK};border-radius:10px !important;background:${C.cream};font-size:12px;font-weight:800;cursor:pointer;display:none}
+.lbh[data-compact] .lbh-card-toggle{display:block}
+.lbh[data-compact] .lbh-card[data-collapsed] .lbh-row,.lbh[data-compact] .lbh-card[data-collapsed] .lbh-sub{display:none}
+.lbh[data-compact] .lbh-card[data-collapsed]{row-gap:4px;grid-template-columns:1fr auto}
+.lbh[data-compact] .lbh-card[data-collapsed] .lbh-badge{display:none}
+.lbh[data-compact] .lbh-card[data-collapsed] .lbh-head{grid-column:1/-1}
+.lbh[data-compact] .lbh-card[data-collapsed] .lbh-kind{display:none}
+.lbh[data-compact] .lbh-card[data-collapsed] .lbh-card-toggle{grid-column:1/-1}
+.lbh .lbh-card-toggle:focus-visible{outline:3px solid ${C.accent};outline-offset:2px}
 
 /* ── time button ── */
 .lbh .lbh-time{position:absolute;top:12px;right:12px;display:flex;align-items:center;padding:0;background:none;border:0;cursor:pointer;pointer-events:auto}
@@ -254,6 +272,19 @@ export const HUD_CSS = /* css */ `
 .lbh .lbh-hdot{display:grid;place-items:center;width:26px;height:26px;background:var(--kc);border:2px solid ${INK};border-radius:99px !important;--lbf:#fff}
 .lbh .lbh-hover small{display:block;font:800 10.5px/1 ${FONT_POP};letter-spacing:.03em;color:rgba(27,21,48,.62);margin-bottom:2px}
 .lbh .lbh-hover b{font-size:13px;font-weight:900;line-height:1}
+
+/* Keep chrome in the safe area without moving the world-label coordinate system. */
+.lbh[data-variant="page"]{--safe-top:env(safe-area-inset-top,0px);--safe-right:env(safe-area-inset-right,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px)}
+.lbh[data-variant="page"] .lbh-tl{top:calc(64px + var(--safe-top));left:calc(10px + var(--safe-left))}
+.lbh[data-variant="page"] .lbh-time{top:calc(12px + var(--safe-top));right:calc(12px + var(--safe-right))}
+.lbh[data-variant="page"]:not([data-rail]) .lbh-dock,.lbh[data-variant="page"][data-stick] .lbh-dock,.lbh[data-variant="page"][data-squat] .lbh-dock{bottom:calc(14px + var(--safe-bottom))}
+.lbh[data-variant="page"][data-rail] .lbh-dock,.lbh[data-variant="page"][data-stick] .lbh-dock{right:calc(14px + var(--safe-right))}
+.lbh[data-variant="page"][data-rail][data-short]:not([data-squat]):not([data-stick]) .lbh-dock{top:calc(64px + var(--safe-top))}
+.lbh[data-squat][data-rail] .lbh-dock{top:auto;transform:none;border-radius:20px !important}
+.lbh[data-touch][data-compact] .lbh-dock{padding-bottom:23px}
+.lbh[data-squat][data-compact] .lbh-tl{right:calc(132px + var(--safe-right,0px))}
+.lbh[data-touch] .lbh-x{width:44px;height:44px}
+.lbh[data-touch] button:not(.lbh-tag){min-width:44px;min-height:44px}
 
 @keyframes lbh-pop{0%{opacity:0;transform:scale(.7) rotate(-3deg)}60%{opacity:1;transform:scale(1.04) rotate(.6deg)}100%{transform:scale(1) rotate(0)}}
 @keyframes lbh-pop-c{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.05)}100%{transform:translateX(-50%) scale(1)}}

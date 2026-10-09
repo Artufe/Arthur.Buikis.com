@@ -421,7 +421,7 @@ export class CameraInput {
       this.dragging = false;
       this.dragEnded = true;
       const now = performance.now();
-      if (this.moved < 6 && now - this.downAt.t < 350) this.tap(p.x, p.y, p.type);
+      if (e.type === 'pointerup' && this.moved < 6 && now - this.downAt.t < 350) this.tap(p.x, p.y, p.type);
     }
   }
 
@@ -460,6 +460,9 @@ export class CameraInput {
     if (this.variant === 'window' && document.activeElement !== this.canvas) return;
     // A good guest: typing into the palette (or any field) never moves the camera.
     if (isEditable(e.target) || isEditable(document.activeElement)) return;
+    // Native controls own their activation/navigation keys. Releases above still clear
+    // a key held before focus moved from the canvas to the HUD.
+    if ((e.target as Element | null)?.closest?.('button,a[href],[role="button"],[role="slider"],[role="menuitem"]')) return;
     const game = /^(Key[WASDQE]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|ShiftRight|Equal|Minus|NumpadAdd|NumpadSubtract|BracketLeft|BracketRight)$/.test(e.code);
     if (!game) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;

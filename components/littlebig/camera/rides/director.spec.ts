@@ -1157,3 +1157,60 @@ describe('camera director (system, 60 fps)', { timeout: 30_000 }, () => {
     }
   });
 });
+
+ describe('session restoration', () => {
+  it('restores a ride, its target and user framing in a fresh camera', () => {
+    const a = setup();
+    const b = setup();
+    try {
+      a.ctx.services.track.register(plane());
+      b.ctx.services.track.register(plane());
+      expect(a.ctx.services.camera.ride!(plane().id)).toBe(true);
+      const state = a.ctx.services.camera.snapshot!();
+      if (state.mode !== 'ride') throw new Error('ride snapshot missing');
+      state.yaw = 0.3;
+      state.pitch = 0.15;
+      state.logDistance = Math.log(20);
+      b.ctx.services.camera.setView(a.ctx.services.camera.getView());
+      expect(b.ctx.services.camera.restore!(state)).toBe(true);
+      expect(b.ctx.services.camera.snapshot!()).toEqual(state);
+      b.step();
+      expect(b.ctx.view.mode).toBe('ride');
+      expect(b.ctx.view.ride).toBe(plane().id);
+      expect(Number.isFinite(b.ctx.camera.position.length())).toBe(true);
+    } finally {
+      a.sys.dispose!(a.ctx); b.sys.dispose!(b.ctx); a.canvas.remove(); b.canvas.remove();
+    }
+  });
+  it('restores the bird body, velocity and zoom instead of relaunching it', () => {
+    const a = setup();
+    const b = setup();
+    try {
+      a.step();
+      a.ctx.services.camera.fly!();
+      for (let i = 0; i < 90; i++) a.step();
+      const state = a.ctx.services.camera.snapshot!();
+      if (state.mode !== 'bird') throw new Error('bird snapshot missing');
+      b.ctx.services.camera.setView(a.ctx.services.camera.getView());
+      expect(b.ctx.services.camera.restore!(state)).toBe(true);
+      const restored = b.ctx.services.camera.snapshot!();
+      if (restored.mode !== 'bird') throw new Error('bird restore missing');
+      expect(restored.flight.position).toEqual(state.flight.position);
+      expect(restored.flight.speed).toBe(state.flight.speed);
+      expect(restored.flight.bank).toBe(state.flight.bank);
+      expect(restored.logDistance).toBe(state.logDistance);
+    } finally {
+      a.sys.dispose!(a.ctx); b.sys.dispose!(b.ctx); a.canvas.remove(); b.canvas.remove();
+    }
+  });
+  it('keeps the explore fallback if the saved ride no longer exists', () => {
+    const a = setup();
+    try {
+      const view = { lat: 20, lon: 10, alt: 72, heading: 30, pitch: -40 };
+      a.ctx.services.camera.setView(view);
+      expect(a.ctx.services.camera.restore!({ version: 1, mode: 'ride', id: 'missing', yaw: 0, pitch: 0, logDistance: 2 })).toBe(false);
+      expect(a.ctx.services.camera.snapshot!()).toEqual({ version: 1, mode: 'explore' });
+      expect(a.ctx.services.camera.getView().alt).toBeCloseTo(view.alt);
+    } finally { a.sys.dispose!(a.ctx); a.canvas.remove(); }
+  });
+});

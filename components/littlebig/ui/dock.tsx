@@ -20,6 +20,7 @@ export function Dock({
   const [quiet, setQuiet] = useState<ModeId | null>(null);
   return (
     <nav className="lbh-dock" aria-label="ways to see the planet">
+      <span className="lbh-active-name" aria-hidden>{MODES.find((m) => m.id === active)?.label}</span>
       {MODES.map((m) => {
         const on = m.id === active;
         const ok = avail[m.id];

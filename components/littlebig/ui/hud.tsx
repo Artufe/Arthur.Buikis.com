@@ -424,6 +424,9 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       root.toggleAttribute('data-narrow', narrow);
       root.toggleAttribute('data-rail', rail);
       root.toggleAttribute('data-short', short);
+      // A six-button rail needs ~300 px below the top controls. On shorter
+      // landscapes use two columns; touch-stick mode uses the same height rule.
+      root.toggleAttribute('data-squat', H < 380);
       Object.assign(L.lay, { compact, narrow, rail, short });
       pushLay();
       measure();
@@ -692,10 +695,8 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       }
     };
 
-    let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
       const t0 = performance.now();
       const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
       last = now;
@@ -735,9 +736,9 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       // The HUD's own JS cost, beside the systems' (F1 / ctx.perf.systemMs.hud).
       ctx.perf.system('hud', performance.now() - t0);
     };
-    raf = requestAnimationFrame(tick);
+    const unsubscribe = engine.subscribeFrame(tick);
     return () => {
-      cancelAnimationFrame(raf);
+      unsubscribe();
       ro.disconnect();
       labels.dispose();
       hover.dispose();

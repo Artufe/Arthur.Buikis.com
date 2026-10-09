@@ -1,13 +1,10 @@
 // The window → /planet handoff and the one canvas loader. Tiny and engine-free: the window host and
 // app/planet import it statically, so it must not pull in anything of the game.
 
-import type { ViewSpec } from './core/contracts';
+import type { PlanetSession } from './core/session';
 
 /** Where a player is: what EngineOptions.resume takes. */
-export interface PlanetResume {
-  view: ViewSpec;
-  t: number;
-}
+export type PlanetResume = PlanetSession;
 
 /**
  * The one dynamic import of the canvas wrapper. next/dynamic and the prefetch must share this call
@@ -46,5 +43,5 @@ export function takeHandoff(): PlanetResume | null {
   const p = pending;
   pending = null;
   // (A handoff the page never picked up promptly is stale: /planet reached some other way later.)
-  return p && Date.now() - p.at < 30_000 ? { view: p.view, t: p.t } : null;
+  return p && Date.now() - p.at < 30_000 ? { view: p.view, t: p.t, camera: p.camera } : null;
 }

@@ -1456,6 +1456,8 @@ export function createCameraSystem(): System {
       input.escapeWanted = () => director.mode !== 'explore' && !ctx.debug.cameraLocked;
       const modeOut = { mode: 'explore' as LBContext['view']['mode'], ride: null as string | null, blend: 1 };
       ctx.services.camera = {
+        snapshot: () => director.snapshot(),
+        restore: (state) => director.restore(ctx, state),
         setView: (v, o) => setView(ctx, v, o?.glide),
         getView: () => {
           if (director.mode !== 'explore' || director.blending) {

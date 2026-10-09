@@ -17,6 +17,7 @@
 import { Vector3 } from 'three';
 import { R } from '../../world/config';
 import { springStep } from '../model';
+import type { BirdSnapshot } from '../../core/session';
 
 const DEG = Math.PI / 180;
 
@@ -187,6 +188,20 @@ export class BirdFlight {
     this.swerveAge = 0;
     this.wallAvoid = 0;
     this.calm = 0;
+    this.frame();
+  }
+
+  snapshot(): BirdSnapshot {
+    return { position: this.pos.toArray(), heading: this.fwd.toArray(), speed: this.speed,
+      gamma: this.gamma, bank: this.bank, turn: this.turn, phase: this.flapPhase };
+  }
+
+  restore(state: BirdSnapshot): void {
+    this.reset(new Vector3().fromArray(state.position), new Vector3().fromArray(state.heading), state.speed);
+    this.gamma = state.gamma;
+    this.bank = state.bank;
+    this.turn = state.turn;
+    this.flapPhase = state.phase;
     this.frame();
   }
 

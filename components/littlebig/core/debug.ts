@@ -316,7 +316,17 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
     },
   };
   window.__littlebig = hook;
+  // Common web-game test hooks; only installed with this development/shot module.
+  const testWindow = window as typeof window & { render_game_to_text?: () => string; advanceTime?: (ms: number) => void };
+  const previousText = testWindow.render_game_to_text;
+  const previousAdvance = testWindow.advanceTime;
+  const textState = () => JSON.stringify({ coordinates: 'planet centered at origin; metres, Y up; view lat/lon in degrees', ready: hook.ready, ...hook.state(), mode: hook.mode() });
+  const advance = (ms: number) => { if (hook.ready) hook.advance(ms / 1000); };
+  testWindow.render_game_to_text = textState;
+  testWindow.advanceTime = advance;
   return () => {
     if (window.__littlebig === hook) delete window.__littlebig;
+    if (testWindow.render_game_to_text === textState) testWindow.render_game_to_text = previousText;
+    if (testWindow.advanceTime === advance) testWindow.advanceTime = previousAdvance;
   };
 }

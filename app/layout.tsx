@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
+import { SiteChrome } from '@/components/site-chrome';
 import { ScanLine } from '@/components/scan-line';
 import { RevealObserver } from '@/components/reveal-observer';
 import { HeroShader } from '@/components/hero-shader';
@@ -125,7 +126,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="#main" className="skip-link">Skip to content</a>
           <Nav />
           <main id="main" className="relative z-10 pt-16">{children}</main>
-          <Footer />
+          <SiteChrome><Footer /></SiteChrome>
           <SnakeWindowHost />
           <GoldenlineWindowHost />
           <LittlebigWindowHost />

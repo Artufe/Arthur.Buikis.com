@@ -302,3 +302,24 @@ lazily built buckets plus a few primitives (zero-alloc, margin clamped to 8 m), 
 fine per scatter instance and per camera frame.
 
 **Refine round 2.** Build: six fresh contexts, 17.8, 17.3, 17.6, 17.5, 14.6, 15.7 ms (budget 20; bake misses 0, 399 primitives; machine shared with other agents' runs, refine 1 measured 15.2–16.0 on a quieter machine). Split: sites 2.5–3.7, towns 1.3–1.6, roads 4.7–6.0 (finish 1.4–2.2), carve build 4.1–5.2. In node the same build is 5.1–5.7 ms warm, 14–28 ms in the first runs (JIT). Size: every search, planner pass and the bake writer are compiled out of production (`process.env.NODE_ENV === 'production' ? null : …`, the bake replayed by key). The rolldown engine bundle went 335.4 → 330.0 KB gzip (the whole working tree, every agent's code; HEAD measures 280.8 KB the same way). buildRegion with its world dependencies is 46.9 KB gzip, against 33.3 KB at HEAD; its town generators (towns.ts, kept for the lazy street planning) are 11.0 KB of that. `baked.ts` is 10.6 KB (it now holds the ferries' A* too). Frames (`--perf 60 --reps 3`, no overlay): orbit 3.7 ms net (60 draw calls, 0.76 M triangles), town-port-pebble 3.1 (53), quay-port-pebble 2.3 (54), region-west 3.9 (59), street 2.7 (72); no hitches.
+
+## Review follow-up: production route budget (2026-10-09)
+
+The actual Next production export measures **320.8 KiB gzip own JavaScript**, **485.3 KiB
+including Three.js**, incremental to `/about/`. This replaces the 330 KiB Rolldown estimate
+above for this working tree. The historical **260 KiB own-JS target is still unmet**; it is
+not being reported as a performance pass. Preserving the current world and gameplay scope,
+CI now enforces explicit **330 KiB own / 500 KiB total incremental no-regression ceilings**.
+Reaching 260 KiB requires a separate feature-loading/size reduction effort; merely splitting
+modules does not reduce the bytes needed by the complete world.
+
+Run `pnpm build` then `node scripts/littlebig-bundle.mjs`. The script serves `out/` on an
+isolated ephemeral loopback port, waits for the real HUD and network idle, compares route
+requests, and gzips each transferred JS chunk at level 9. The own-JS classifier follows the
+existing shot tool's Three.js markers; the total ceiling also catches chunk-merging or
+classification changes. Missing/incomplete loads fail. `LB_OWN_KIB` / `LB_TOTAL_KIB` override
+the ceilings for experiments; CI uses the checked-in defaults.
+
+The engine now owns HUD, touch detection and stick presentation subscriptions. They run after
+its render, pause when its loop is suspended and are released on disposal. Deterministic sim,
+instanced rendering, staged shader warmup and adaptive resolution remain in place.

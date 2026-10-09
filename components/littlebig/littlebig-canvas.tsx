@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Engine } from './core/engine';
+import type { PlanetSession } from './core/session';
 import { provideHandoff, takeHandoff } from './handoff';
 import { Hud } from './ui/hud';
 
@@ -36,7 +37,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   // reboots the engine (~150 ms warm).
   const [generation, setGeneration] = useState(0);
   // Where the player was when the context was lost: the rebooted engine carries on from there.
-  const resumeRef = useRef<{ view: ReturnType<Engine['ctx']['services']['camera']['getView']>; t: number } | null>(null);
+  const resumeRef = useRef<PlanetSession | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -50,7 +51,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
     // (Registered before the engine's own listener, which releases the engine on loss.)
     const onLost = () => {
       const e = engineRef.current;
-      if (e && !cancelled) resumeRef.current = { view: e.ctx.services.camera.getView(), t: e.ctx.time.t };
+      if (e && !cancelled) resumeRef.current = { view: e.ctx.services.camera.getView(), t: e.ctx.time.t, camera: e.ctx.services.camera.snapshot?.() };
     };
     canvas.addEventListener('webglcontextlost', onLost);
     canvas.addEventListener('webglcontextrestored', onRestored);
@@ -94,7 +95,7 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
         });
         ro.observe(wrap);
         engine.start();
-        if (variant === 'window') offHandoff = provideHandoff(() => ({ view: engine.ctx.services.camera.getView(), t: engine.ctx.time.t }));
+        if (variant === 'window') offHandoff = provideHandoff(() => ({ view: engine.ctx.services.camera.getView(), t: engine.ctx.time.t, camera: engine.ctx.services.camera.snapshot?.() }));
         setEngine(engine);
         setPhase('running');
       } catch (e) {
@@ -120,12 +121,11 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
 
   // Touch seen (or a coarse pointer): mounts the virtual stick overlay. (The hint row lives in the HUD.)
   useEffect(() => {
-    if (shotMode || phase !== 'running' || touchUi) return;
-    const id = window.setInterval(() => {
+    if (shotMode || phase !== 'running' || touchUi || !engine) return;
+    return engine.subscribeFrame(() => {
       if (engineRef.current?.ctx.services.camera.stick?.().touch) setTouchUi(true);
-    }, 250);
-    return () => window.clearInterval(id);
-  }, [phase, shotMode, touchUi]);
+    });
+  }, [engine, phase, shotMode, touchUi]);
 
   // Touch UI: the left-thumb stick, shown only on touch and only at street level. Driven straight
   // from the camera's live stick state each frame (no React renders).
@@ -133,13 +133,11 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
   const knobRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<SVGCircleElement>(null);
   useEffect(() => {
-    if (shotMode || phase !== 'running' || !touchUi) return;
-    let raf = 0;
+    if (shotMode || phase !== 'running' || !touchUi || !engine) return;
     let shown = false;
     const last = [NaN, NaN, NaN, NaN];
     let lastActive = false;
     const tick = () => {
-      raf = requestAnimationFrame(tick);
       const base = stickRef.current;
       const knob = knobRef.current;
       const st = engineRef.current?.ctx.services.camera.stick?.();
@@ -164,9 +162,8 @@ export function LittlebigCanvas({ variant }: { variant: 'window' | 'page' }) {
       ringRef.current?.setAttribute('stroke', st.active ? '#FFB84D' : 'rgba(255,248,232,0.6)');
       knob.style.transform = `translate(${kx}px, ${ky}px)`;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [phase, shotMode, touchUi]);
+    return engine.subscribeFrame(tick);
+  }, [engine, phase, shotMode, touchUi]);
 
   // F1: debug readout (altitude, position, frame time).
   useEffect(() => {

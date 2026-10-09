@@ -15,6 +15,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${port}`,
     viewport: { width: 1440, height: 900 },
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
   },
   projects: [
     {
@@ -22,7 +24,9 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         // Headless Chromium only offers software WebGL when explicitly allowed.
-        launchOptions: { args: ['--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
+        launchOptions: { args: process.platform === 'darwin'
+          ? ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']
+          : ['--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
       },
     },
   ],

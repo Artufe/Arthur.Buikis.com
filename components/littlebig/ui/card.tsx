@@ -89,6 +89,7 @@ export function FollowCard({
 }) {
   // A new ride pops the card again. (It stays mounted, so a focused prev / next keeps its focus.)
   const ref = useRef<HTMLElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const first = useRef(true);
   useEffect(() => {
     const el = ref.current;
@@ -111,6 +112,7 @@ export function FollowCard({
       aria-hidden={leaving || undefined}
       inert={leaving || undefined}
       data-out={leaving ? '' : undefined}
+      data-collapsed={collapsed ? '' : undefined}
       style={{ ['--kc' as string]: color }}
     >
       <div className="lbh-badge" aria-hidden>
@@ -126,6 +128,9 @@ export function FollowCard({
         </h2>
         {info.sub && <span className="lbh-sub">{dots(info.sub)}</span>}
       </div>
+      <button type="button" className="lbh-card-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed((v) => !v)}>
+        {collapsed ? 'show details' : 'hide details'}
+      </button>
       <div className="lbh-row">
         {info.canCycle && (
           <button type="button" className="lbh-btn" aria-label="previous ride" aria-keyshortcuts="[" onClick={(e) => onCycle(-1, e.detail > 0)}>

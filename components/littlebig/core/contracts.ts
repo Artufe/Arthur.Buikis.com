@@ -43,6 +43,7 @@ import type { ToonKit } from '../render/toon';
 import type { ParamRegistry } from './params';
 import type { Perf } from './perf';
 import type { SharedUniforms } from './uniforms';
+import type { CameraSnapshot } from './session';
 
 export type Quality = 'low' | 'high';
 export type Variant = 'window' | 'page';
@@ -261,6 +262,9 @@ export interface CameraService {
   setView(v: ViewSpec, opts?: { glide?: number }): void;
   /** Current placement (pitch included). */
   getView(): Required<ViewSpec>;
+  /** Session continuity. Restore after stage two has registered ride targets. */
+  snapshot?(): CameraSnapshot;
+  restore?(snapshot: CameraSnapshot): boolean;
   /** Fly to a surface direction (and optionally an altitude) along a smooth arc. */
   flyTo(dir: Vec3, alt?: number): void;
   /** Release pointer lock if held. */
