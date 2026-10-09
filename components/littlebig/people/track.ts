@@ -279,6 +279,163 @@ export function eyeToWorld(e: PlanPose, fx: number, fz: number, out: PoseOut): v
   out.fwd.z = wz / wl;
 }
 
+// ── A passer-by's head ──
+
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * How far a walker turns its head (rad, the shader's yaw: + = left) toward or away from a camera at
+ * `dist` (m) whose direction is `ang` off its facing (+ = to its left). Glancers (`seed & 3`) look
+ * at a nearby player; riding someone's eyes (`riding`) they glance only from over 4 m, and closer
+ * anyone facing the lens looks a little away from it, as people passing a stranger do (L1f refine 1).
+ * people/index.ts poses the heads with it; ride.spec measures the faces it leaves turned to the lens.
+ */
+export function headLook(ang: number, dist: number, seed: number, riding: boolean): number {
+  let look = 0;
+  if ((seed & 3) !== 0) look = Math.max(-1.1, Math.min(1.1, ang)) * smooth(7.5, 3.5, dist) * smooth(2.0, 1.3, Math.abs(ang)) * (riding ? smooth(4, 5, dist) : 1);
+  const aa = Math.abs(ang);
+  if (riding && aa < 1.25) {
+    const away = aa > 0.08 ? (ang > 0 ? -1 : 1) : seed & 4 ? 1 : -1;
+    look += away * 0.55 * smooth(3.8, 2.6, dist) * smooth(1.25, 0.6, aa);
+  }
+  return look;
+}
+
+// ── Looking past strangers ──
+
+/** Most the eyes ride turns its view to look past someone close at the edge of it (rad, ~21°). */
+export const AVERT_MAX = 0.36;
+/** Heads (and posts) count fully within AVERT_NEAR (m from the eye), fading out by AVERT_FAR. */
+const AVERT_NEAR = 1.8;
+const AVERT_FAR = 3.2;
+/**
+ * Someone walking at the eye, nearer the middle of the view than the edge rule reaches: the view
+ * eases ONC_MAX toward the open side as the pass begins (fully within ONC_NEAR, from ONC_FAR), so
+ * the passer-by slides out of the frame's side instead of walking up to the lens (L1f refine 1).
+ */
+const ONC_MAX = 0.2;
+const ONC_NEAR = 2.2;
+const ONC_FAR = 4;
+/** How far ahead (s) a walker's course counts for the aversion: the ride camera's lag behind the published yaw. */
+const AVERT_LEAD = 0.6;
+
+/**
+ * The eyes ride looks past a stranger close at the edge of its view, as people do on a pavement:
+ * a head (or a seated one's, or a lamp post) whose disc is inside the frame's side by less than
+ * ~1.6 AVERT_MAX turns the view away from it by as much as takes it out, up to AVERT_MAX, weighted
+ * by how close it is (a passer-by at a metre on 2.2 m of pavement otherwise fills a third of the
+ * frame's side for a second, and inside the eyes' 0.75 m near plane it is clipped open). Someone
+ * squarely in front is the berth's business (people/sim.ts): turning away from them would be a
+ * swing, not a glance. The kerb glance does not turn onto someone standing close beside the walker
+ * either: it stops where they would come into the frame. `face`: the walker's facing (plan yaw);
+ * `glance`: the kerb glance's offset; returns the whole offset to add to `face` (the glance, so
+ * limited, plus the eased aversion). `half`: the frame's horizontal half-angle (rad). Zero-alloc.
+ */
+export class GazeAvert {
+  a = 0;
+
+  reset(): void {
+    this.a = 0;
+  }
+
+  step(sim: PeopleSim, looks: readonly Look[], r: number, ex: number, ez: number, face: number, glance: number, half: number, dt: number): number {
+    const F2 = AVERT_FAR * AVERT_FAR;
+    const n = Math.min(sim.n, looks.length);
+    // the glance, stopped short of close heads it would turn onto
+    let g = glance;
+    if (glance !== 0) {
+      const cy = Math.cos(face);
+      const sy = Math.sin(face);
+      for (let q = 0; q < n; q++) {
+        if (q === r || !sim.on[q]) continue;
+        const dx = sim.x[q] - ex;
+        const dz = sim.z[q] - ez;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > 4.84) continue;
+        const d = Math.sqrt(d2) || 1e-3;
+        const phi = Math.atan2(-dx * sy + dz * cy, dx * cy + dz * sy);
+        if (phi * glance <= 0) continue;
+        const edge = half + 0.05 - Math.asin(Math.min(1, (0.23 * looks[q].scale) / d));
+        const ap = phi < 0 ? -phi : phi;
+        if (ap <= edge) continue;
+        const b = ap - edge;
+        const w = Math.min(1, Math.max(0, (2.2 - d) / 0.7));
+        const lim = Math.abs(glance) + (b - Math.abs(glance)) * w * w * (3 - 2 * w);
+        if (lim < Math.abs(g)) g = glance < 0 ? -lim : lim;
+      }
+    }
+    const base = face + g;
+    const cy = Math.cos(base);
+    const sy = Math.sin(base);
+    let pos = 0;
+    let neg = 0;
+    const OF2 = ONC_FAR * ONC_FAR;
+    const rvx = sim.vx[r];
+    const rvz = sim.vz[r];
+    for (let q = -sim.obstacles.length; q < n; q++) {
+      let dx0: number;
+      let dz0: number;
+      let hr: number;
+      /** Plan velocity relative to the eye (walkers): where it will be AVERT_LEAD s on counts too. */
+      let wx = 0;
+      let wz = 0;
+      let facing = false;
+      if (q >= 0) {
+        if (q === r || !sim.on[q]) continue;
+        dx0 = sim.x[q] - ex;
+        dz0 = sim.z[q] - ez;
+        hr = 0.23 * looks[q].scale;
+        wx = sim.vx[q] - rvx;
+        wz = sim.vz[q] - rvz;
+        const o2 = dx0 * dx0 + dz0 * dz0;
+        if (o2 > 64) continue;
+        const sp2 = sim.vx[q] * sim.vx[q] + sim.vz[q] * sim.vz[q];
+        facing = sp2 > 0.04 && -(sim.hx[q] * dx0 + sim.hz[q] * dz0) > 0.5 * Math.sqrt(o2);
+      } else {
+        // people sitting or standing about (their heads), and posts taller than the eye
+        const k = -1 - q;
+        if (k < sim.nProps && sim.obsH[k] < 1.9) continue;
+        const o = sim.obstacles[k];
+        dx0 = o.x - ex;
+        dz0 = o.z - ez;
+        hr = k < sim.nProps ? Math.min(o.r, 0.3) : 0.23;
+      }
+      // (now, and where it will be by the time the view has turned: the ride camera lags the
+      // published yaw by ~0.6 s, and someone coming at the eye closes ~1.5 m in that)
+      for (let pass = 0; pass < 2; pass++) {
+        if (pass === 1 && wx === 0 && wz === 0) break;
+        const dx = dx0 + wx * AVERT_LEAD * pass;
+        const dz = dz0 + wz * AVERT_LEAD * pass;
+        const d2 = dx * dx + dz * dz;
+        const ahead = dx * cy + dz * sy;
+        if (ahead < -0.3) continue;
+        const lat = -dx * sy + dz * cy;
+        const d = Math.sqrt(d2) || 1e-3;
+        if (facing && d2 < OF2 && ahead > 0.3 && Math.abs(lat) < ahead * Math.tan(half * 0.75)) {
+          // (walking at the eye, in the middle of the view: ease toward the open side)
+          const t = Math.min(1, Math.max(0, (ONC_FAR - d) / (ONC_FAR - ONC_NEAR)));
+          const s = ONC_MAX * t * t * (3 - 2 * t);
+          if (lat > 0) neg = Math.max(neg, s);
+          else pos = Math.max(pos, s);
+        }
+        if (d2 > F2) continue;
+        const th = Math.atan2(lat < 0 ? -lat : lat, ahead);
+        const need = half + 0.05 - (th - Math.asin(Math.min(1, hr / d)));
+        if (need <= 0 || need > AVERT_MAX * 1.6) continue;
+        const t = Math.min(1, Math.max(0, (AVERT_FAR - d) / (AVERT_FAR - AVERT_NEAR)));
+        const s = Math.min(need, AVERT_MAX) * t * t * (3 - 2 * t);
+        if (lat > 0) neg = Math.max(neg, s);
+        else pos = Math.max(pos, s);
+      }
+    }
+    this.a += (pos - neg - this.a) * Math.min(1, dt * 4);
+    return g + this.a;
+  }
+}
+
 // ── The smoothed forward of a ridden walker ──
 
 /**

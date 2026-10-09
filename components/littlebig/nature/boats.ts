@@ -36,8 +36,17 @@ export interface BoatLoop {
   w: number;
 }
 
-/** Minimum water depth (m) along a loop, with a margin round it. */
-const MIN_DEPTH = 0.9;
+/**
+ * Minimum water depth (m) along a loop, and in a band BAND m either side of it (and at its
+ * centre): open water, deep blue, all round the hull and its wake. v2 (L1): 0.9 m with a 2.5 m
+ * margin put the fishing boat's loop over a sand shelf, a pale blob sliding through a chase view.
+ */
+const MIN_DEPTH = 3;
+const BAND_DEPTH = 2.4;
+const BAND = 6;
+/** …and no sandbar or islet poking up within OUTER m of it (the chase camera rides ~10 m behind and above: one slid through its view). */
+const OUTER = 14;
+const OUTER_DEPTH = 1;
 
 function frame(c: Vec3, rot: number) {
   let ex = c.z, ey = 0, ez = -c.x;
@@ -95,8 +104,14 @@ export function findBoatLoops(planet: Planet, anchors: Array<{ dir: Vec3; dists:
           const sep = Math.acos(Math.min(1, o.c.x * c.x + o.c.y * c.y + o.c.z * c.z)) * R;
           if (sep < o.a + a + 6) ok = false;
         }
-        for (let s = 0; ok && s < 16; s++) if (planet.heightAt(loopDir(l, (s / 16) * Math.PI * 2, d, 2.5)) > -MIN_DEPTH) ok = false;
-        if (ok && planet.heightAt(c) > -MIN_DEPTH) ok = false;
+        for (let s = 0; ok && s < 32; s++) {
+          const th = (s / 32) * Math.PI * 2;
+          if (planet.heightAt(loopDir(l, th, d)) > -MIN_DEPTH) ok = false;
+          else if (planet.heightAt(loopDir(l, th, d, BAND)) > -BAND_DEPTH) ok = false;
+          else if (planet.heightAt(loopDir(l, th, d, -Math.min(BAND, 0.8 * l.b))) > -BAND_DEPTH) ok = false;
+          else if (planet.heightAt(loopDir(l, th, d, OUTER)) > -OUTER_DEPTH || planet.heightAt(loopDir(l, th, d, OUTER / 2 + BAND / 2)) > -OUTER_DEPTH) ok = false;
+        }
+        if (ok && planet.heightAt(c) > -BAND_DEPTH) ok = false;
         if (!ok) continue;
         const speed = fish ? 1.1 : 1.6 + rnd() * 0.8;
         out.push({ kind: fish ? 'fish' : 'sail', ...l, phase: rnd() * Math.PI * 2, w: ((rnd() < 0.5 ? -1 : 1) * speed) / ((l.a + l.b) / 2) });
@@ -278,7 +293,7 @@ const SAIL_SUBS = ['skipper marlin · tacking round the bay', 'skipper coral · 
 
 /** Boat i's card: 'the salty pickle' (the fishing boat) or a sailboat's name. Deterministic in loop order. */
 export function boatCard(loops: readonly BoatLoop[], i: number): { label: string; sub: string } {
-  if (loops[i].kind === 'fish') return { label: 'the salty pickle', sub: 'fishing boat · captain barnacle, back with the sardines' };
+  if (loops[i].kind === 'fish') return { label: 'the salty pickle', sub: 'fishing boat · skipper barnacle, back with the sardines' };
   let k = 0;
   for (let j = 0; j < i; j++) if (loops[j].kind === 'sail') k++;
   return { label: SAIL_NAMES[k % SAIL_NAMES.length], sub: SAIL_SUBS[k % SAIL_SUBS.length] };

@@ -149,6 +149,39 @@ export function createRegionSystem(): System {
         linC.push(...col, ...col);
       }
     };
+    // (v2 R2) a junction paved along its turning paths (each connector a lane-wide ribbon, so a plan
+    // reads as one network rather than ribbons between empty circles), a dead end's turning circle
+    // as a paved disc
+    const disc = (c: Vec3, r: number, h: number, col: [number, number, number]) => {
+      const n = Math.max(16, Math.ceil(r * 3));
+      const p = v3();
+      const q = v3();
+      for (let i = 0; i < n; i++) {
+        for (const [k, o] of [[i, p], [i + 1, q]] as const) {
+          headingVector(c, (k / n) * Math.PI * 2, t);
+          const sc = r / (R + h);
+          o.x = c.x + t.x * sc;
+          o.y = c.y + t.y * sc;
+          o.z = c.z + t.z * sc;
+          const l = Math.hypot(o.x, o.y, o.z);
+          o.x /= l;
+          o.y /= l;
+          o.z /= l;
+        }
+        push(tri, c, h + 0.05);
+        push(tri, p, h + 0.05);
+        push(tri, q, h + 0.05);
+        for (let k = 0; k < 3; k++) triC.push(col[0], col[1], col[2]);
+      }
+    };
+    for (const c of region.connectors) {
+      if (c.turn === 'uturn' || c.path.h.length < 2) continue;
+      const n = region.nodes[c.node];
+      if (n.control === 'roundabout') continue;
+      const e = region.edges[n.edges[0]];
+      ribbon(c.path, 1.9, 0.05, () => KIND_COL[e?.kind ?? 'street'] ?? KIND_COL.street);
+    }
+    for (const n of region.nodes) if (n.kind === 'end' && n.turnR > 0) disc(n.dir, n.turnR, n.h, KIND_COL.street);
     for (const e of region.edges) {
       const base = KIND_COL[e.kind] ?? KIND_COL.road;
       const spans = e.bridges.map((b) => region.bridges[b]);
@@ -174,6 +207,62 @@ export function createRegionSystem(): System {
         // the green / square (plan → world through the town's chart)
         const d = chartDir(s, s.square.x, s.square.z);
         ring(d, s.square.r, s.h, [0.4, 1, 0.5]);
+      }
+    }
+    // (v2 R2 refine) sea walls: the stone face from its foot to the deck, the coping, the paved apron
+    // behind (types.ts QuayWall: what H1 extrudes); v2 R2 refine 2: the block's deck on back to its
+    // depth (the terrain ramps down under it) and its two end faces
+    for (const s of region.settlements) {
+      const w = s.wall;
+      if (!w) continue;
+      const n = w.line.length / 2;
+      const quadAt = (a: Vec3, ha: number, b: Vec3, hb: number, c: Vec3, hc: number, d: Vec3, hd: number, col: [number, number, number]) => {
+        for (const [v, hh] of [[a, ha], [b, hb], [c, hc], [b, hb], [d, hd], [c, hc]] as const) {
+          push(tri, v, hh);
+          triC.push(col[0], col[1], col[2]);
+        }
+      };
+      for (let i = 0; i + 1 < n; i++) {
+        const x0 = w.line[i * 2], z0 = w.line[i * 2 + 1], x1 = w.line[i * 2 + 2], z1 = w.line[i * 2 + 3];
+        const f0 = chartDir(s, x0, z0), f1 = chartDir(s, x1, z1);
+        const t0 = w.top[i], t1 = w.top[i + 1];
+        // face (outward, slightly proud of the cut so it never hides in the terrain)
+        const o0 = chartDir(s, x0 + w.nx * 0.15, z0 + w.nz * 0.15), o1 = chartDir(s, x1 + w.nx * 0.15, z1 + w.nz * 0.15);
+        quadAt(o0, w.foot, o1, w.foot, o0, t0 + w.lip, o1, t1 + w.lip, [0.52, 0.5, 0.47]);
+        // coping
+        const c0 = chartDir(s, x0 - w.nx * w.coping, z0 - w.nz * w.coping), c1 = chartDir(s, x1 - w.nx * w.coping, z1 - w.nz * w.coping);
+        quadAt(o0, t0 + w.lip, o1, t1 + w.lip, c0, t0 + w.lip, c1, t1 + w.lip, [0.86, 0.84, 0.78]);
+        // apron, then the rest of the block's deck back to its depth
+        const a0 = chartDir(s, x0 - w.nx * w.apron, z0 - w.nz * w.apron), a1 = chartDir(s, x1 - w.nx * w.apron, z1 - w.nz * w.apron);
+        quadAt(c0, t0 + 0.04, c1, t1 + 0.04, a0, t0 + 0.04, a1, t1 + 0.04, [0.72, 0.66, 0.58]);
+        const b0 = chartDir(s, x0 - w.nx * w.depth, z0 - w.nz * w.depth), b1 = chartDir(s, x1 - w.nx * w.depth, z1 - w.nz * w.depth);
+        quadAt(a0, t0 + 0.04, a1, t1 + 0.04, b0, t0 + 0.04, b1, t1 + 0.04, [0.64, 0.6, 0.54]);
+        // the block's end faces
+        for (const [k, o, b, t] of [[0, o0, b0, t0], [n - 2, o1, b1, t1]] as const) if (i === k) quadAt(o, w.foot, b, w.foot, o, t + w.lip, b, t + 0.04, [0.46, 0.44, 0.41]);
+        push(lin, f0, t0 + w.lip + 0.05);
+        push(lin, f1, t1 + w.lip + 0.05);
+        linC.push(1, 1, 1, 1, 1, 1);
+      }
+    }
+    // (v2 R2 refine) bridge abutments: the box H1 clads (types.ts BridgeAbutment), outlined at deck height
+    for (const b of region.bridges) {
+      for (const ab of b.abutments) {
+        const rx = ab.into.y * ab.dir.z - ab.into.z * ab.dir.y, ry = ab.into.z * ab.dir.x - ab.into.x * ab.dir.z, rz = ab.into.x * ab.dir.y - ab.into.y * ab.dir.x;
+        const at = (al: number, lat: number) => {
+          const p = v3(ab.dir.x + (ab.into.x * al + rx * lat) / R, ab.dir.y + (ab.into.y * al + ry * lat) / R, ab.dir.z + (ab.into.z * al + rz * lat) / R);
+          const l = Math.hypot(p.x, p.y, p.z);
+          return v3(p.x / l, p.y / l, p.z / l);
+        };
+        const cs = [at(-ab.back, -ab.half), at(ab.depth, -ab.half), at(ab.depth, ab.half), at(-ab.back, ab.half)];
+        for (let i = 0; i < 4; i++) {
+          push(lin, cs[i], ab.top + 0.3);
+          push(lin, cs[(i + 1) % 4], ab.top + 0.3);
+          linC.push(1, 0.55, 0.2, 1, 0.55, 0.2);
+        }
+        // the face across the road
+        push(lin, at(0, -ab.half), ab.top + 0.3);
+        push(lin, at(0, ab.half), ab.top + 0.3);
+        linC.push(1, 0.85, 0.3, 1, 0.85, 0.3);
       }
     }
     for (const g of region.gates) {

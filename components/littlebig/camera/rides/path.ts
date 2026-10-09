@@ -26,6 +26,12 @@ export const CLOUD_HI = 50;
 
 /** Most points a planned path holds (after rounding). */
 const MAXP = 4608;
+/**
+ * No clearance the world can ask for is higher than this (m above sea level): the tallest tower on
+ * the plateau plus its margin, the peaks, the countryside crowns. Samples planned above it skip the
+ * query (a trip up to space or round the planet plans in a millisecond or two).
+ */
+const CLEAR_CEIL = 46;
 /** Steepest ramp of the clearance envelope (height per metre of ground track). */
 const RAMP = 0.9;
 /** Roof clearance radius along the track (m): facades stay ≥ this far from the lens. */
@@ -35,6 +41,8 @@ const PROBE_R = [CLEAR_R, 2.5, 1.5, 1, 0.6, 0.3] as const;
 const START_R = 9;
 /** Track bulges tried (fractions of the trip, capped at 160 m), when the straight one must climb. */
 const BULGES = [0.18, -0.18, 0.36, -0.36, 0.55, -0.55] as const;
+/** ... and on short hops, absolute ones (m): round a block. */
+const BULGES_ABS = [9, -9, 16, -16] as const;
 /** Effective length a radian of the view's turn toward the new look point costs. */
 const K_TURN = 2.2;
 /** Climb / descent line (height per metre of ground track). */
@@ -49,7 +57,18 @@ export interface PathEnv {
    * `r` metres of it (roofs + margin, lamp heads, crowns, terrain + margin).
    */
   clear(dir: Vector3, r: number): number;
+  /**
+   * (D1f r2) Height (m above sea level) of what stands at unit `dir` — a roof, else the terrain —
+   * for the sight envelope (optional: without it the path keeps no line of sight).
+   */
+  top?(dir: Vector3): number;
 }
+
+/** The sight envelope looks this far (m) from the camera toward the subject, in this many steps. */
+const SIGHT_REACH = 14;
+const SIGHT_STEPS = 4;
+/** ... and keeps the line to the subject this far (m) over what it passes. */
+const SIGHT_OVER = 2;
 
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -89,6 +108,11 @@ export function heightCurve(u: number, k: number): number {
 
 const _dS = new Vector3();
 const _dQ = new Vector3();
+const _dT = new Vector3();
+const _pq = new Vector3();
+const _sx = new Vector3();
+const _sy = new Vector3();
+const _pd = new Vector3();
 const _ax = new Vector3();
 const _d = new Vector3();
 const _p = new Vector3();
@@ -147,14 +171,30 @@ export class EnterPath {
   dropDown = 0;
   /** Ground distance (m) of the low route under the band before the climb (0: none). */
   lowRoute = 0;
+  /** Length (m) of the pivot's spiral approach (0: a straight one) and the most it had to be lifted. */
+  pivotLen = 0;
+  pivotLift = 0;
+  /** Review (D1f r5): the track's cost with the crane start, and low (−1: not tried); the last bulge. */
+  readonly dbgCost = [0, 0, 0];
+  private dbgBulge = 0;
 
   /**
    * Plan from S through the approach point Q to the end T (world positions). `clearEnv` gives the
    * clearance; `hopLog` adds a sin-shaped hop in log-height units (long trips round the planet).
    */
-  plan(S: Vector3, Q: Vector3, T: Vector3, clearEnv: PathEnv, hopLog = 0, look: Vector3 | null = null, subject: Vector3 | null = null): this {
+  plan(S: Vector3, Q0: Vector3, T: Vector3, clearEnv: PathEnv, hopLog = 0, look: Vector3 | null = null, subject: Vector3 | null = null, pivotAxis: Vector3 | null = null, pivotAng = 0, pivotLate = 1, sightTo: Vector3 | null = null, coneTan = 0, pivotTail = 0): this {
+    // (D1f) A pivot: the approach Q → T swung round the subject's vertical axis (unit `pivotAxis`,
+    // through the planet centre) by pivotAng, so the camera comes in on its own side, and the last
+    // stretch spirals back round to T — arriving straight along the view's axis, the subject in view
+    // all the way — instead of a track that passes over or right beside the subject (the view
+    // spun round it at 600°/s) or a framing that swings round after arriving.
+    // (D1f r5: a straight approach whose height is shaped — pivotLate ≠ 1 — is a spiral of no swing.)
+    const pivot = pivotAxis !== null && (Math.abs(pivotAng) > 1e-3 || pivotLate !== 1);
+    const Q = pivot ? _pq.copy(Q0).applyAxisAngle(pivotAxis, pivotAng) : Q0;
     const hS = S.length() - R;
     const hQ = Q.length() - R;
+    const hT = T.length() - R;
+    _dT.copy(T).normalize();
     _dS.copy(S).normalize();
     _dQ.copy(Q).normalize();
     const ang = Math.acos(Math.min(1, Math.max(-1, _dS.dot(_dQ))));
@@ -168,11 +208,12 @@ export class EnterPath {
     // street for somewhere further than the next block, the camera first rises over everything
     // within 9 m (a crane shot up out of the street), so it never travels past upper floors.
     const rQ = this.probe(_dQ, hQ, clearEnv);
-    const rS = sTot > 40 ? START_R : this.probe(_dS, hS, clearEnv);
+    let rS = sTot > 40 ? START_R : this.probe(_dS, hS, clearEnv);
     const lhS = Math.log(Math.max(0.25, hS));
     const lhQ = Math.log(Math.max(0.25, hQ));
     const k = Math.max(-1, Math.min(1, (lhQ - lhS) / Math.log(4)));
     const lowHop = Math.min(18, 0.16 * sTot) * (1 - smooth(12, 40, Math.max(hS, hQ)));
+    const longArc = k < -0.3 || k > 0.3 ? Math.min(16, Math.max(0, 0.13 * sTot - 8)) * (1 - smooth(22, 34, Math.max(hS, hQ))) : 0;
     // Up to something behind the planet (a satellite on the far side): the falling-through-clouds
     // overlay needs it in frame, so the camera stays under the cloud band and travels round toward
     // it until it has risen over the horizon (seen from the bottom of the band), then climbs through.
@@ -191,6 +232,8 @@ export class EnterPath {
     }
     const need = this.need;
     const v = this.env;
+    const sight = sightTo !== null && !!clearEnv.top && sTot > 8 && sTot < 220;
+    this.lastSight = -1;
     // The height profile along a track bulging `bulge` m sideways at its middle (0: the great
     // circle): returns its cost — how much it has to climb over what is in the way, and whether a
     // low hop would end up in the clouds.
@@ -204,8 +247,21 @@ export class EnterPath {
         // (from the city view onto a car it went up a metre before it dived).
         if (k > 0.3) base = Math.min(hQ, Math.max(base, Math.min(hQ, hS + s * CLIMB)));
         else if (k < -0.3) base = Math.min(hS, Math.max(base, Math.min(hS, hQ + (sTot - s) * CLIMB)));
+        // (D1f r2) A long trip low down rises in one arc over the town (never into the band): low
+        // over 180 m the speed limit — a couple of heights a second — alone needed the whole 2.5 s.
+        if (longArc > 0) base = Math.max(base, Math.min(CLOUD_LO - 5, base + longArc * Math.sin(Math.PI * u)));
         // The low route: up to just under the band, along, then a steep climb once the subject shows.
         if (sLow > 0) base = s < sLow ? Math.min(LOW_H, hS + s * CLIMB) : Math.min(hQ, LOW_H + (s - sLow) * LOW_CLIMB);
+        // (D1f r5) Under the cone over T: near the end the track comes down early and glides in, never
+        // high over it looking down (into someone's eyes it stayed high and dropped late, looking
+        // straight down at them for a second). Within ~20 m of T on the ground, at most coneTan × the
+        // ground distance over T; further out the cone opens up fast (what is far off may be looked
+        // down at). What must be cleared still wins.
+        if (coneTan > 0 && i > 0) {
+          this.trackDir(u, ang, bulge, _d);
+          const dg = Math.acos(Math.max(-1, Math.min(1, _d.dot(_dT)))) * R;
+          base = Math.min(base, Math.max(hQ, hT + coneTan * dg + Math.max(0, dg - 20) * 3));
+        }
         let r: number;
         if (i === 0) r = rS;
         else if (i === N) r = rQ;
@@ -214,7 +270,16 @@ export class EnterPath {
           r = Math.max(r, Math.min(4, ds * 0.5)); // what lies between samples
         }
         this.trackDir(u, ang, bulge, _d);
-        need[i] = clearEnv.clear(_d, r);
+        // (Over everything that can stand here — the tallest roof + its margin — nothing to ask.)
+        need[i] = base > CLEAR_CEIL && i > 0 && i < N ? 0 : clearEnv.clear(_d, r);
+        // (D1f r2) The line of sight: from the second third of the way on (the gaze is on the
+        // subject by then), high enough to see the subject over what stands within SIGHT_REACH m
+        // toward it — not looking at it past a roof edge a few metres from the lens (street → a car
+        // round the corner scraped over a roof that filled half the frame). Never into the clouds.
+        if (sight && u > 0.3 && i < N && base < CLEAR_CEIL) {
+          if (i % 3 === 0 || this.lastSight < 0) this.sightNeed(_d, sightTo!, clearEnv);
+          if (this.lastSight > need[i]) need[i] = Math.min(this.lastSight, CLOUD_LO - 6);
+        }
         this.base[i] = i === 0 ? hS : i === N ? hQ : base;
       }
       // Slope-limited envelope of what must be cleared: ramps up toward an obstacle and down
@@ -240,19 +305,57 @@ export class EnterPath {
     };
     // Over or round: a hop that would have to climb over a tower tries a track that swings round
     // it instead, either side, and keeps the cheapest.
-    let bulge = 0;
-    let best = profile(0);
-    if (best > 1 && sTot > 6 && sTot < 500) {
-      const span = Math.min(sTot, 160);
-      for (const f of BULGES) {
-        const c = profile(f * span);
-        if (c < best - 1) {
-          best = c;
-          bulge = f * span;
+    const search = (): number => {
+      let b0 = 0;
+      let best = profile(0);
+      if (best > 1 && sTot > 6 && sTot < 500) {
+        const span = Math.min(sTot, 160);
+        for (const f of BULGES) {
+          const c = profile(f * span);
+          if (c < best - 1) {
+            best = c;
+            b0 = f * span;
+          }
+        }
+        // (D1f r2) A short hop round a block: swings of a block's size either way, so a car round
+        // the corner is reached down the street instead of over a roof that fills the frame.
+        if (sTot < 70) {
+          for (const b of BULGES_ABS) {
+            if (Math.abs(b) <= Math.abs(BULGES[BULGES.length - 1] * span)) continue;
+            const c = profile(b);
+            if (c < best - 1) {
+              best = c;
+              b0 = b;
+            }
+          }
         }
       }
-      profile(bulge);
+      this.dbgBulge = b0;
+      return best;
+    };
+    let best = search();
+    let bulge = this.dbgBulge;
+    // (D1f r5) ...and, leaving a street across town, the same low down — no crane up over the roofs
+    // first — when that is cheaper: down the street to a plaza at its end, the crane up and back down
+    // cost two big pitch turns and half a second.
+    this.dbgCost[0] = best;
+    this.dbgCost[1] = -1;
+    // (Only when it need not climb more than over the street's lamps near the start: past a facade a
+    // metre off, the crane up is the point — it never slides up past the upper floors.)
+    if (rS === START_R && best > 1 && sTot < 120) {
+      rS = this.probe(_dS, hS, clearEnv);
+      const low = search();
+      this.dbgCost[1] = low;
+      profile(this.dbgBulge);
+      let climb = 0;
+      for (let i = 1; i <= N && i * ds < 20; i++) climb = Math.max(climb, v[i] - this.base[i]);
+      this.dbgCost[2] = climb;
+      if (low < best - 1 && climb < 6) {
+        best = low;
+        bulge = this.dbgBulge;
+      } else rS = START_R;
     }
+    profile(bulge);
     this.bulge = bulge;
     this.lastN = N;
     // The (s, h) profile: a vertical rise / drop at the ends where the envelope stands above them.
@@ -263,7 +366,9 @@ export class EnterPath {
       // Subdivide to ≤ 2 m (or 1/300 of the trip) so rounding cuts corners by little.
       if (m > 0) {
         const dl = Math.hypot(s - ps[m - 1], h - ph[m - 1]);
-        const seg = Math.max(2, (sTot + Math.abs(hQ - hS)) / 300);
+        // (≤ 2 m, or 1/160 of a long trip: what the rounding below needs, and planning a trip round
+        // the planet stays a millisecond or two — it runs on a frame of its own, D1f.)
+        const seg = Math.max(2, (sTot + Math.abs(hQ - hS)) / 160);
         const parts = Math.min(64, Math.ceil(dl / seg));
         const s0 = ps[m - 1];
         const h0 = ph[m - 1];
@@ -305,14 +410,64 @@ export class EnterPath {
     this.pz[n - 1] = Q.z;
     const iQ = n - 1;
     const iPop = mPop;
-    const aLen = Q.distanceTo(T);
-    const aParts = Math.max(1, Math.min(40, Math.ceil(aLen / 2), 1100 - n));
+    let aLen = Q.distanceTo(T);
+    if (pivot) {
+      // (The spiral's length: the straight approach plus the arc at about its mean radius.)
+      const rq = _pd.copy(Q0).addScaledVector(pivotAxis, -Q0.dot(pivotAxis)).length();
+      const rt = _pd.copy(T).addScaledVector(pivotAxis, -T.dot(pivotAxis)).length();
+      aLen = Q0.distanceTo(T) + Math.abs(pivotAng) * 0.5 * (rq + rt);
+    }
+    const aParts = Math.max(1, Math.min(pivot ? 90 : 40, Math.ceil(aLen / (pivot ? 1.2 : 2)), 1100 - n));
+    const iA = n;
     for (let j = 1; j <= aParts; j++) {
       const t = j / aParts;
-      this.px[n] = Q.x + (T.x - Q.x) * t;
-      this.py[n] = Q.y + (T.y - Q.y) * t;
-      this.pz[n] = Q.z + (T.z - Q.z) * t;
+      if (pivot) {
+        spiralAt(Q0, T, pivotAxis, pivotAng, t, _pd, pivotLate);
+        this.px[n] = _pd.x;
+        this.py[n] = _pd.y;
+        this.pz[n] = _pd.z;
+      } else {
+        this.px[n] = Q.x + (T.x - Q.x) * t;
+        this.py[n] = Q.y + (T.y - Q.y) * t;
+        this.pz[n] = Q.z + (T.z - Q.z) * t;
+      }
       n++;
+    }
+    this.pivotLen = pivot ? aLen : 0;
+    // The spiral is never inside a roof or a crown: what it would pass through lifts it (radially,
+    // by a slope-limited envelope that is 0 at T), as a last resort — the director picks a pivot
+    // whose spiral is clear (spiralCost).
+    this.pivotLift = 0;
+    if (pivot && aParts > 2) {
+      const need = this.need;
+      const m = Math.min(aParts, need.length - 1);
+      const step = aParts / m;
+      for (let k = 0; k <= m; k++) {
+        const j = iA + Math.min(aParts, Math.round(k * step));
+        _pd.set(this.px[j], this.py[j], this.pz[j]);
+        const h = _pd.length() - R;
+        // (D1f r5: not within pivotTail m of T — the drop into someone's head past a lamp over them;
+        // lifted over it there, the swing ended high over the head and dropped straight down into it.)
+        need[k] = k === m || _pd.distanceTo(T) < pivotTail ? 0 : Math.max(0, clearEnv.clear(_pd.normalize(), 0.8) - h);
+      }
+      const ds = aLen / m;
+      for (let k = 1; k <= m; k++) need[k] = Math.max(need[k], need[k - 1] - RAMP * ds);
+      need[m] = 0;
+      for (let k = m - 1; k >= 0; k--) need[k] = Math.max(need[k], need[k + 1] - RAMP * ds);
+      for (let j = 1; j <= aParts; j++) {
+        const x = (j / aParts) * m;
+        const k0 = Math.min(m - 1, Math.floor(x));
+        const lift = need[k0] + (need[k0 + 1] - need[k0]) * (x - k0);
+        if (lift <= 0) continue;
+        this.pivotLift = Math.max(this.pivotLift, lift);
+        const i = iA + j - 1;
+        _pd.set(this.px[i], this.py[i], this.pz[i]);
+        const r = _pd.length();
+        _pd.multiplyScalar((r + lift) / r);
+        this.px[i] = _pd.x;
+        this.py[i] = _pd.y;
+        this.pz[i] = _pd.z;
+      }
     }
     // The turn onto the approach: rounded over a stretch either side of Q (a curve, not a corner the
     // camera takes at 70 m/s), up to 35 % of the approach and of the way there, ≤ 25 m.
@@ -331,7 +486,7 @@ export class EnterPath {
     const fracQ = eff > 1e-9 ? effQ / eff : 1;
     const fracPop = eff > 1e-9 ? effPop / eff : 0;
     // Round the corners: three Chaikin passes (quarter cuts), the ends kept.
-    for (let pass = 0; pass < 3 && n * 2 <= MAXP; pass++) n = this.chaikin(n);
+    for (let pass = 0; pass < 3 && n * 2 <= Math.min(MAXP, 2400); pass++) n = this.chaikin(n);
     this.n = n;
     // Cumulative effective length, the band entry, the peak.
     const cum = this.cum;
@@ -477,6 +632,32 @@ export class EnterPath {
   }
   private lastN = 0;
 
+  private lastSight = 0;
+  /**
+   * (D1f r2) Lowest camera height (m above sea level) over unit dir d from which the line to X
+   * passes SIGHT_OVER m over everything standing within SIGHT_REACH m toward it (not past 60 % of the
+   * way: what stands right by the subject is the approach's business). 0: nothing in the way.
+   */
+  private sightNeed(d: Vector3, X: Vector3, env: PathEnv): number {
+    const hX = X.length() - R;
+    _sx.copy(X).normalize();
+    const D = Math.acos(Math.max(-1, Math.min(1, d.dot(_sx)))) * R;
+    let need = 0;
+    if (D > 6) {
+      for (let j = 1; j <= SIGHT_STEPS; j++) {
+        const sj = (j * SIGHT_REACH) / SIGHT_STEPS;
+        const f = sj / D;
+        if (f > 0.6) break;
+        _sy.copy(d).lerp(_sx, f).normalize();
+        const top = env.top!(_sy);
+        if (top + SIGHT_OVER <= hX) continue;
+        need = Math.max(need, (top + SIGHT_OVER - hX * f) / (1 - f));
+      }
+    }
+    this.lastSight = need;
+    return need;
+  }
+
   /** True when point X is in sight from h m above unit dir d (the segment clears the planet). */
   private seenFrom(d: Vector3, h: number, X: Vector3): boolean {
     _p.copy(d).multiplyScalar(R + h);
@@ -608,6 +789,49 @@ export class EnterPath {
   }
 }
 
+/**
+ * The pivot's spiral approach at t (0 … 1), into out: along the unswung approach Q0 → T, swung round
+ * unit `axis` (through the planet centre) by what is left of `ang` (eased: it leaves the swung Q
+ * along the swung axis and reaches T along the real one).
+ */
+export function spiralAt(Q0: Vector3, T: Vector3, axis: Vector3, ang: number, t: number, out: Vector3, late = 1): Vector3 {
+  out.copy(Q0).lerp(T, t);
+  if (late !== 1) {
+    // (Its height along the axis comes down late — t^late — so a raised spiral swings round
+    // above the roofs and only then drops in behind.)
+    const a0 = Q0.dot(axis);
+    const a1 = T.dot(axis);
+    out.addScaledVector(axis, (a1 - a0) * (Math.pow(t, late) - t));
+  }
+  return out.applyAxisAngle(axis, ang * (1 - t * t * (3 - 2 * t)));
+}
+
+/**
+ * How far (m, summed over 24 samples) the pivot's spiral would pass under the clearance (or, past
+ * `stop`, at least that far: it stops counting); `maxOut` (optional) gets the largest single
+ * shortfall. Samples within `tail` m of T are not counted (D1f r4: into someone's eyes the lens
+ * drops into the head past whatever stands over it — a lamp head, a crown — and the eyes' near
+ * plane clips it).
+ */
+export function spiralCost(Q0: Vector3, T: Vector3, axis: Vector3, ang: number, env: PathEnv, late = 1, maxOut: number[] | null = null, tail = 0, stop = Infinity): number {
+  let cost = 0;
+  let worst = 0;
+  const tMax = tail > 0 ? 1 - tail / Math.max(tail * 2, Q0.distanceTo(T)) : 1;
+  for (let k = 1; k < 24; k++) {
+    if (k / 24 > tMax) break;
+    spiralAt(Q0, T, axis, ang, k / 24, _sc, late);
+    const h = _sc.length() - R;
+    const need = Math.max(0, env.clear(_sc.normalize(), 0.8) - h);
+    cost += need;
+    worst = Math.max(worst, need);
+    // (D1f r5) Past `stop` the answer is already "no": the caller only asks whether it is clear.
+    if (cost > stop && !maxOut) return cost;
+  }
+  if (maxOut) maxOut[0] = worst;
+  return cost;
+}
+const _sc = new Vector3();
+
 const _cp = new Vector3();
 /** True when the segment a → b clears the planet (sea level + 2 m). */
 export function clearsPlanet(a: Vector3, b: Vector3): boolean {
@@ -706,33 +930,36 @@ export class TimeMap {
       for (let i = 2; i <= N; i++) a[i] = Math.max(a[i], a[i - 1] / 1.18);
       for (let i = N - 1; i >= 1; i--) a[i] = Math.max(a[i], a[i + 1] / 1.18);
     }
-    // The limits may take nearly all the time (the planned pace keeps 8 %). Short of time, the turn
-    // limit gives way first (the drawn camera's follower and the clock's slowing catch it), the speed
-    // limit only if the metres alone overrun.
+    // The limits may take nearly all the time (the planned pace keeps 8 %). (D1f r3) Short of time,
+    // the speed limit gives way first, the turn limit only if the turns alone overrun: it is what keeps the
+    // subject in frame — with the turns squeezed, a long low swing round a boat planned 1370°/s, the
+    // drawn camera's follower held 190°/s and the boat left the frame for 0.8 s while the view
+    // stared into the sea. Low over open ground the camera may stream past faster than 2.8 heights
+    // a second for a moment; it must not lose what it flies to.
     let need = 0;
-    let needV = 0;
+    let needT = 0;
     for (let i = 1; i <= N; i++) {
       need += Math.max(c[i], d[i]);
-      needV += d[i];
+      needT += c[i];
     }
     const stretch = Math.max(1, need / 0.92);
     let sT = 1;
     let sV = 1;
     if (stretch > 1) {
-      if (needV >= 0.92) {
-        sT = 0;
-        sV = 0.92 / needV;
+      if (needT >= 0.92) {
+        sV = 0;
+        sT = 0.92 / needT;
       } else {
         let lo = 0;
         let hi = 1;
         for (let k = 0; k < 30; k++) {
           const m = (lo + hi) / 2;
           let tot = 0;
-          for (let i = 1; i <= N; i++) tot += Math.max(m * c[i], d[i]);
+          for (let i = 1; i <= N; i++) tot += Math.max(c[i], m * d[i]);
           if (tot < 0.92) lo = m;
           else hi = m;
         }
-        sT = lo;
+        sV = lo;
       }
     }
     for (let i = 1; i <= N; i++) t[i] = Math.max(sT * c[i], sV * d[i]);

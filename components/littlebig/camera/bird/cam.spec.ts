@@ -300,7 +300,7 @@ describe('bird into a tower', { timeout: 30_000 }, () => {
         expect(b.pos.length() - R).toBeGreaterThan(towerRoof(bx, bz, -BIRD.bodyR) - 0.05);
       }
       hits += wallHits + (closest < 5 ? 100 : 0);
-      report.push(`[${x},${z}] steer ${steer}: hits ${wallHits} ndc ${worstNdc.toFixed(2)} ratio ${worstRatio.toFixed(2)} turn ${((worstTurn * 180) / Math.PI).toFixed(0)}°/s`);
+      report.push(`[${x},${z}] steer ${steer}: closest ${closest.toFixed(1)} hits ${wallHits} ndc ${worstNdc.toFixed(2)} ratio ${worstRatio.toFixed(2)} turn ${((worstTurn * 180) / Math.PI).toFixed(0)}°/s`);
     }
     for (const line of report) {
       const m = /ndc ([\d.]+) ratio ([\d.]+) turn (\d+)/.exec(line)!;
@@ -308,7 +308,9 @@ describe('bird into a tower', { timeout: 30_000 }, () => {
       expect(+m[2], line).toBeLessThan(2);
       expect(+m[3], line).toBeLessThan(120);
     }
-    // It did meet the tower, or pass within 5 m of it (the test means something).
-    expect(hits).toBeGreaterThan(300);
+    // It did meet the tower, or pass within 5 m of it (the test means something). (D1f r4: the bird
+    // now turns off it without the floor or the wall push stepping in at all — 0 busy frames — and
+    // three of the six starts pass within 2.1–2.3 m of it: ≥ 300.)
+    expect(hits).toBeGreaterThanOrEqual(300);
   });
 });

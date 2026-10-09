@@ -55,8 +55,8 @@ export class BirdCam {
   private rollVel = 0;
   private lift = 0;
   private liftVel = 0;
-  /** Distance cap from buildings between the bird and the camera (m), a spring. */
-  private occ = 1e9;
+  /** Distance cap from buildings between the bird and the camera (m), a spring, in [minDist/2, 1.5 × boom]. */
+  occ = BIRD_CAM.dist * 1.5;
   private occVel = 0;
   private speedS: number = BIRD.cruise;
 
@@ -71,11 +71,14 @@ export class BirdCam {
    * Snap to rest behind the bird. `swing` false: the boom starts straight behind (a launch from where
    * the camera is: the swing away from a facade then eases in).
    */
-  settle(b: BirdFlight, env: RideEnv, out: FramePose, swing = true): void {
-    this.dirS.copy(b.dir);
+  settle(b: BirdFlight, env: RideEnv, out: FramePose, swing = true, along: Vector3 | null = null): void {
+    // (`along`: the boom and the look start along this direction instead of the bird's — a launch
+    // starts along the lens and swings round after a bird heading off elsewhere.)
+    this.dirS.copy(along ?? b.dir);
     this.dirV.set(0, 0, 0);
-    this.aheadS.copy(b.dir);
+    this.aheadS.copy(along ?? b.dir);
     this.aheadV.set(0, 0, 0);
+    this.holdDir = !!along;
     this.yawOff = 0;
     this.yawOffVel = 0;
     this.roll = b.bank * 0.28;
@@ -84,15 +87,19 @@ export class BirdCam {
     this.logDistVel = 0;
     this.lift = 0;
     this.liftVel = 0;
-    this.occ = 1e9;
+    // (Finite: seeded with 1e9 the spring wound up to ±1e6 m when the first blocker appeared and
+    // pinned the boom at its minimum for ~7 s after a street launch. place() clamps it every frame.)
+    this.occ = Math.exp(this.logDistT) * 1.5;
     this.occVel = 0;
     this.speedS = b.speed;
     this.noSwing = !swing;
     this.place(0, b, env, out, true);
     this.place(0, b, env, out, true);
     this.noSwing = false;
+    this.holdDir = false;
   }
   private noSwing = false;
+  private holdDir = false;
 
   update(dt: number, b: BirdFlight, env: RideEnv, out: FramePose): void {
     this.place(dt, b, env, out, false);
@@ -129,8 +136,10 @@ export class BirdCam {
       this.logDistVel = _sp[1];
       this.speedS += (b.speed - this.speedS) * (1 - Math.exp(-dt * 2.5));
     } else {
-      this.dirS.copy(b.dir);
-      this.aheadS.copy(b.dir);
+      if (!this.holdDir) {
+        this.dirS.copy(b.dir);
+        this.aheadS.copy(b.dir);
+      }
       this.roll = b.bank * 0.28;
       this.logDist = this.logDistT;
       this.speedS = b.speed;
@@ -150,7 +159,8 @@ export class BirdCam {
     // in a long carve the bird stays near the middle, a little to the outside, its way ahead in view.
     _f.copy(this.aheadS).addScaledVector(_up, -this.aheadS.dot(_up) * 0.6).normalize();
     // Higher up, the camera rises behind the bird so the planet's limb stays in frame.
-    const el = elevationFor(BIRD_CAM.el, b.pos.length() - R, BIRD_CAM.fov);
+    // (In a dive a little higher still, so the stooping bird keeps its outline against the ground.)
+    const el = elevationFor(BIRD_CAM.el, b.pos.length() - R, BIRD_CAM.fov) + 7 * DEG * b.tuck;
     _d.multiplyScalar(-Math.cos(el)).addScaledVector(_t, Math.sin(el)); // unit offset, bird → camera
     // A facade within WALL_CLEAR of where the camera would be swings the boom round the bird, away
     // from it (the angle that clears it, at most 65°), through a spring.
@@ -179,19 +189,33 @@ export class BirdCam {
     // up in a wall.
     out.pos.copy(b.pos).addScaledVector(_d, want);
     const free = env.free(b.pos, out.pos);
-    const cap = free >= 0.999 ? 1e9 : Math.max(BIRD_CAM.minDist * 0.5, want * free - 0.5);
+    // The occlusion cap lives in [lo, hi]: clear, it rests at hi (just past the boom), so a blocker
+    // pulls it in from there; the spring is clamped to the range and its velocity zeroed where the
+    // clamp bites, so it can never wind up.
+    const lo = BIRD_CAM.minDist * 0.5;
+    const hi = Math.max(lo, want * 1.5);
+    const cap = free >= 0.999 ? hi : Math.min(hi, Math.max(lo, want * free - 0.5));
     if (snap || dt <= 0) {
       this.occ = cap;
       this.occVel = 0;
     } else {
-      const target = Math.min(cap, want * 1.5);
-      springStep(this.occ, this.occVel, target, target < this.occ ? 9 : 2.5, dt, _sp);
+      springStep(this.occ, this.occVel, cap, cap < this.occ ? 9 : 2.5, dt, _sp);
       this.occ = _sp[0];
       this.occVel = _sp[1];
       // (Never through the blocker, whatever the spring is doing.)
-      if (this.occ > cap + 0.4) this.occ = cap + 0.4;
+      if (this.occ > cap + 0.4) {
+        this.occ = cap + 0.4;
+        this.occVel = Math.min(0, this.occVel);
+      }
     }
-    const d = Math.min(want, Math.max(BIRD_CAM.minDist * 0.5, this.occ));
+    if (!(this.occ >= lo)) {
+      this.occ = lo;
+      this.occVel = Math.max(0, this.occVel || 0);
+    } else if (this.occ > hi) {
+      this.occ = hi;
+      this.occVel = Math.min(0, this.occVel);
+    }
+    const d = Math.min(want, this.occ);
     out.pos.copy(b.pos).addScaledVector(_d, d);
     // Last resort: the lens never inside a wall (the swing and the boom see to it nearly always).
     keepOffWalls(out.pos, env, 0.3);

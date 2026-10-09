@@ -9,15 +9,15 @@
 // cycle / fly / exitMode, ctx.services.track and ctx.services.labels. Whatever is missing degrades:
 // a mode with nothing to ride is a disabled button, no labels means no tags.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CameraMode, LBContext, TrackKind, TrackPose, Trackable, Variant, WorldLabel } from '../core/contracts';
 import type { Engine } from '../core/engine';
 import type { NumberParam } from '../core/params';
 import { FollowCard, type CardInfo } from './card';
-import { Coach, Hint, Note } from './coach';
+import { Coach, Hint, Note, type CoachPos, type HintDef, type HintSlot } from './coach';
 import { Dock } from './dock';
 import { HoverTip } from './hover';
-import { circleHitsBox, framedFlyTarget } from './label-math';
+import { circleHitsBox, circleIntoBox, framedFlyTarget, mul4, planetDisc } from './label-math';
 import { LabelLayer } from './labels';
 import { MODES, activeMode, rideCandidates, type ModeId } from './modes';
 import { HUD_CSS } from './styles';
@@ -25,21 +25,22 @@ import { nextTimeTarget, warpRate } from './sun-time';
 import { WORLD } from './theme';
 import { TimeButton, type TimeState } from './time';
 
-// Hint lines (the v1 row, plus one per ride view). *key* is drawn as a keycap chip.
-const HINT_ORBIT = '*drag* to spin · *scroll* to dive · *double-click* to fly';
-const HINT_ORBIT_TOUCH = '*drag* to spin · *pinch* to dive · *double-tap* to fly';
-const HINT_STREET = '*wasd* walk · *drag* to look · *space* jump · *scroll* out to fly';
-const HINT_STREET_PAGE = '*wasd* walk · *click* to look · *space* jump · *scroll* out to fly';
-const HINT_STREET_TOUCH = '*left thumb* walks · *drag* to look · *pinch* out to fly';
-const HINT_SEA = '*scroll* out to fly · *double-click* land to fly there';
-const HINT_SEA_TOUCH = '*pinch* out to fly · *double-tap* land to fly there';
-const HINT_BIRD = '*wasd* steer · *space* flap · *shift* dive · *esc* to land';
-const HINT_BIRD_TOUCH = '*left thumb* steers · *tap* to flap · *×* to land';
-const HINT_CHASE = '*drag* to look around · *scroll* to zoom · *[* *]* next · *esc* to hop off';
-const HINT_EYES = '*drag* to look around · *[* *]* next · *esc* to step out';
-const HINT_SPACE = '*drag* to orbit · *scroll* to zoom · *[* *]* next · *esc* to come home';
-const HINT_RIDE_TOUCH = '*drag* to look · *pinch* to zoom · *×* to hop off';
-const HINT_EYES_TOUCH = '*drag* to look around · *×* to step out';
+// Hint rows (the v1 row, plus one per ride view). *key* is drawn as a keycap chip. The number is how
+// long a segment survives when the row is wider than its slot (higher = kept longer; coach.tsx).
+const HINT_ORBIT: HintDef = [['*drag* to spin', 3], ['*scroll* to dive', 2], ['*double-click* to fly', 1]];
+const HINT_ORBIT_TOUCH: HintDef = [['*drag* to spin', 3], ['*pinch* to dive', 2], ['*double-tap* to fly', 1]];
+const HINT_STREET: HintDef = [['*wasd* walk', 4], ['*drag* to look', 2], ['*space* jump', 1], ['*scroll* out to fly', 3]];
+const HINT_STREET_PAGE: HintDef = [['*wasd* walk', 4], ['*click* to look', 2], ['*space* jump', 1], ['*scroll* out to fly', 3]];
+const HINT_STREET_TOUCH: HintDef = [['*left thumb* walks', 3], ['*drag* to look', 2], ['*pinch* out to fly', 1]];
+const HINT_SEA: HintDef = [['*scroll* out to fly', 2], ['*double-click* land to fly there', 1]];
+const HINT_SEA_TOUCH: HintDef = [['*pinch* out to fly', 2], ['*double-tap* land to fly there', 1]];
+const HINT_BIRD: HintDef = [['*wasd* steer', 4], ['*space* flap', 3], ['*shift* dive', 1], ['*esc* to land', 2]];
+const HINT_BIRD_TOUCH: HintDef = [['*left thumb* steers', 3], ['*tap* to flap', 2], ['*×* to land', 1]];
+const HINT_CHASE: HintDef = [['*drag* to look around', 3], ['*scroll* to zoom', 1], ['*[* *]* next', 2], ['*esc* to hop off', 4]];
+const HINT_EYES: HintDef = [['*drag* to look around', 3], ['*[* *]* next', 2], ['*esc* to step out', 4]];
+const HINT_SPACE: HintDef = [['*drag* to orbit', 3], ['*scroll* to zoom', 1], ['*[* *]* next', 2], ['*esc* to come home', 4]];
+const HINT_RIDE_TOUCH: HintDef = [['*drag* to look', 3], ['*pinch* to zoom', 1], ['*×* to hop off', 2]];
+const HINT_EYES_TOUCH: HintDef = [['*drag* to look around', 2], ['*×* to step out', 1]];
 const HINT_IDLE = 2000;
 const HINT_REPEAT_IDLE = 9000;
 /** After a mode change, its hint shows this soon (ms). */
@@ -53,6 +54,37 @@ const RIDE_KINDS: readonly TrackKind[] = ['plane', 'balloon', 'car', 'bus', 'tru
 const NO_AVAIL: Record<ModeId, boolean> = { explore: true, bird: false, plane: false, drive: false, space: false, people: false };
 
 const AIR: ReadonlySet<TrackKind> = new Set(['plane', 'balloon', 'satellite', 'station']);
+
+/** The planet's screen circle is grown by this (m of glow at the rim) before the coach keeps off it. */
+const PLANET_GLOW = 8;
+/** After a mode change the slow tick runs every frame for this long (ms): the card, the hint's slot
+ *  and the dock settle within a few frames (a review shot taken right away shows the settled HUD). */
+const SETTLE_MS = 600;
+
+/** The layout facts React renders from (the same flags are attributes on the root, for the CSS). */
+interface Lay {
+  rail: boolean;
+  narrow: boolean;
+  compact: boolean;
+  short: boolean;
+  stick: boolean;
+  /** Riding (landscape): the hint went bottom left for this ride (the chased thing is up by the card). */
+  hintLow: boolean;
+}
+const LAY0: Lay = { rail: false, narrow: false, compact: false, short: false, stick: false, hintLow: false };
+const laySig = (l: Lay) => `${+l.rail}${+l.narrow}${+l.compact}${+l.short}${+l.stick}${+l.hintLow}`;
+
+/**
+ * Where the hint row sits. Landscape (the rail): bottom left beside the planet, or under the card
+ * while riding (the chased thing owns the middle and the bottom). Portrait: top centre between the
+ * back link and the time button on a roomy screen, else just above the dock. The touch stick owns
+ * the bottom left: under the back link or the card. No slot ever shares space with another panel.
+ */
+function hintSlot(lay: Lay, card: boolean): HintSlot {
+  if (lay.stick) return 'stack';
+  if (lay.rail) return card && !lay.hintLow ? 'stack' : 'bl';
+  return lay.narrow || lay.compact ? 'bottom' : 'top';
+}
 
 function readFlag(name: string): boolean {
   try {
@@ -89,6 +121,12 @@ function fallbackDetail(kind: TrackKind, pose: TrackPose): string {
   return kind === 'person' ? (kmh < 1 ? 'standing about' : `strolling · ${kmh} km/h`) : `${kmh} km/h`;
 }
 
+/** 'north-east' for a heading (rad, clockwise from north), like traffic/names.ts compass (not imported: canvas chunk). */
+function compass(heading: number): string {
+  const k = Math.round(((((heading / (Math.PI * 2)) % 1) + 1) % 1) * 8) % 8;
+  return ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][k];
+}
+
 function modeOf(kind: TrackKind) {
   return MODES.find((m) => m.kinds.includes(kind));
 }
@@ -106,6 +144,8 @@ function multiKind(kind: TrackKind): boolean {
 }
 
 interface Live {
+  lay: Lay;
+  laySent: string;
   mode: CameraMode;
   ride: string | null;
   modeAt: number;
@@ -113,9 +153,10 @@ interface Live {
   methods: string;
   availSig: string;
   cardSig: string;
-  hintText: string;
+  hintText: HintDef | null;
   hintOn: boolean;
-  hintShown: string;
+  hintSnap: boolean;
+  hintShown: HintDef | null;
   hintSince: number;
   timeSig: string;
   touch: boolean;
@@ -126,8 +167,6 @@ interface Live {
   noteTimer: number;
   lastCard: CardInfo | null;
   leaveTimer: number;
-  /** The hint went to the bottom left for this ride (the chased thing sits under the card's corner). */
-  hintLow: boolean;
   /** A mode asked for while nothing was ridable: retried as the camera dives in. */
   pending: { id: ModeId; since: number; until: number } | null;
   eye: { x: number; y: number; z: number; at: number };
@@ -143,13 +182,20 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
   const [card, setCard] = useState<CardInfo | null>(null);
   // The last card, kept for its exit animation after the ride ends.
   const [leaving, setLeaving] = useState<CardInfo | null>(null);
-  const [hint, setHint] = useState<{ text: string; on: boolean }>({ text: HINT_ORBIT, on: false });
+  const [hint, setHint] = useState<{ text: HintDef; on: boolean; snap: boolean }>({ text: HINT_ORBIT, on: false, snap: false });
   const [time, setTime] = useState<TimeState>({ to: 'evening', progress: null, disabled: false });
   const [coach, setCoach] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [touch, setTouch] = useState(false);
+  const [lay, setLay] = useState<Lay>(LAY0);
+  // Bumped on every resize: the hint re-fits, the coach finds its corner again.
+  const [layVer, setLayVer] = useState(0);
+  const [coachPos, setCoachPos] = useState<CoachPos>('bc');
+  const coachRef = useRef<HTMLDivElement>(null);
   const poseRef = useRef<TrackPose | null>(null);
   const live = useRef<Live>({
+    lay: { ...LAY0 },
+    laySent: laySig(LAY0),
     mode: 'explore',
     ride: null,
     modeAt: 0,
@@ -157,9 +203,10 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
     methods: '',
     availSig: '',
     cardSig: '',
-    hintText: '',
+    hintText: null,
     hintOn: false,
-    hintShown: '',
+    hintSnap: false,
+    hintShown: null,
     hintSince: performance.now(),
     timeSig: '',
     touch: false,
@@ -171,7 +218,6 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
     lastCard: null,
     leaveTimer: 0,
     pending: null,
-    hintLow: false,
     eye: { x: 0, y: 0, z: 0, at: 0 },
     speed: 0,
   });
@@ -356,46 +402,76 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
     if (storageGet(COACH_KEY) === '1' && !readFlag('coach')) L.coachDone = true;
     let W = root.clientWidth;
     let H = root.clientHeight;
+    /** Mirror the layout facts into React (hint slot, coach corner) and re-measure the tags. */
+    const pushLay = () => {
+      const sig = laySig(L.lay);
+      if (sig === L.laySent) return;
+      L.laySent = sig;
+      setLay({ ...L.lay });
+      labels.remeasure();
+    };
     const layout = () => {
       W = root.clientWidth;
       H = root.clientHeight;
       const compact = variant === 'window' || W < 720 || H < 540;
       const narrow = W < 460;
-      root.toggleAttribute('data-compact', compact);
-      root.toggleAttribute('data-narrow', narrow);
       // Landscape: the planet fills the height and leaves the sides empty, so the dock stands up on
       // the right (a rail) and the hint sits bottom left. Portrait: the dock lies along the bottom,
       // under the planet. Either way it never covers the planet or a chased plane.
-      root.toggleAttribute('data-rail', !narrow && W >= H * 1.05);
-      root.toggleAttribute('data-short', H < 470);
+      const rail = !narrow && W >= H * 1.05;
+      const short = H < 470;
+      root.toggleAttribute('data-compact', compact);
+      root.toggleAttribute('data-narrow', narrow);
+      root.toggleAttribute('data-rail', rail);
+      root.toggleAttribute('data-short', short);
+      Object.assign(L.lay, { compact, narrow, rail, short });
+      pushLay();
+      measure();
+      setLayVer((v) => v + 1);
     };
-    layout();
-    const ro = new ResizeObserver(layout);
-    ro.observe(root);
     const reserved: number[] = [];
-    let cardBottom = -1;
+    const vars = { ti: -1, dt: -1 };
     // The panels labels keep clear of (the page's back link lives outside the HUD root).
-    const panels = ['.lbh-dock', '.lbh-card', '.lbh-time', '.lbh-coach', '.lbh-hint:not([data-off])'];
+    const panels = ['.lbh-dock', '.lbh-time', '.lbh-coach', '.lbh-hint:not([data-off])'];
     const measure = () => {
       const rb = root.getBoundingClientRect();
       reserved.length = 0;
       const add = (el: Element | null) => {
-        if (!el) return;
+        if (!el) return null;
         const r = el.getBoundingClientRect();
         if (r.width > 0) reserved.push(r.left - rb.left, r.top - rb.top, r.right - rb.left, r.bottom - rb.top);
+        return r.width > 0 ? r : null;
       };
       for (const sel of panels) add(root.querySelector(sel));
-      if (variant === 'page') add(document.querySelector('a.lb-back'));
+      // The card by its layout box (+ its shadow and the × on its corner), not its rect: its pop-in
+      // scales it from 0.7, and a tag must not sit where the card is about to be.
+      const card = root.querySelector<HTMLElement>('.lbh-card');
+      const col = card?.offsetParent as HTMLElement | null;
+      if (card && col && card.offsetWidth > 0) {
+        const x = col.offsetLeft + card.offsetLeft;
+        const y = col.offsetTop + card.offsetTop;
+        reserved.push(x, y - 14, x + card.offsetWidth + 14, y + card.offsetHeight + 6);
+      }
+      const back = variant === 'page' ? add(document.querySelector('a.lb-back')) : null;
       labels.reserved = reserved;
-      // Riding (landscape): the hint tucks under the card, clear of the chased thing (layout box,
-      // not the pop-in transform).
-      const card = root.querySelector<HTMLElement>('.lbh-card:not([data-out])');
-      const cb = card ? Math.round(card.offsetTop + card.offsetHeight) : 0;
-      if (cb !== cardBottom) {
-        cardBottom = cb;
-        root.style.setProperty('--lbh-cb', `${cb}px`);
+      // The top-centre hint keeps the same inset on both sides, clear of the back link and the time
+      // button; the bottom hint and the coach stand on the dock (layout boxes, not transforms).
+      const time = root.querySelector<HTMLElement>('.lbh-time');
+      const dock = root.querySelector<HTMLElement>('.lbh-dock');
+      const ti = Math.ceil(Math.max(back ? back.right - rb.left + 12 : 12, time ? rb.width - (time.offsetLeft - 12) : 12));
+      const dt = dock ? Math.round(H - dock.offsetTop) : 80;
+      if (ti !== vars.ti) {
+        vars.ti = ti;
+        root.style.setProperty('--lbh-ti', `${ti}px`);
+      }
+      if (dt !== vars.dt) {
+        vars.dt = dt;
+        root.style.setProperty('--lbh-dt', `${dt}px`);
       }
     };
+    layout();
+    const ro = new ResizeObserver(layout);
+    ro.observe(root);
 
     const endWarp = () => {
       const w = L.warp;
@@ -440,6 +516,8 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       if (stick !== L.stick) {
         L.stick = stick;
         root.toggleAttribute('data-stick', stick);
+        L.lay.stick = stick;
+        pushLay();
       }
       // What the dock can offer.
       const methods = `${camSvc.ride ? 'r' : ''}${camSvc.fly ? 'f' : ''}${camSvc.cycle ? 'c' : ''}${camSvc.exitMode ? 'x' : ''}`;
@@ -476,28 +554,38 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
           };
         }
       } else if (L.mode === 'bird') {
-        const e = ctx.camera.position;
-        const dtS = (now - L.eye.at) / 1000;
-        if (L.eye.at > 0 && dtS > 0 && dtS < 1) {
+        // The bird's own speed (camera.subject: the bird, not the chase camera, which swoops in
+        // from orbit at first), over real time live and over sim time in shot mode (the review
+        // tool advances the bird with the sim; between its steps nothing moves).
+        const bird = (camSvc.subject?.(pose.pos) ?? 0) > 0;
+        const e = bird ? pose.pos : ctx.camera.position;
+        const altBird = bird ? Math.hypot(e.x, e.y, e.z) - WORLD.R : v.altSea;
+        const at = ctx.shotMode ? ctx.time.render : now / 1000;
+        const dtS = at - L.eye.at;
+        if (L.eye.at > 0 && dtS > 1e-3 && dtS < 2) {
           const d = Math.hypot(e.x - L.eye.x, e.y - L.eye.y, e.z - L.eye.z);
-          L.speed += (d / dtS - L.speed) * 0.5;
+          L.speed = L.speed > 0 ? L.speed + (d / dtS - L.speed) * 0.5 : d / dtS;
         }
-        L.eye.x = e.x;
-        L.eye.y = e.y;
-        L.eye.z = e.z;
-        L.eye.at = now;
+        if (dtS !== 0 || L.eye.at === 0) {
+          L.eye.x = e.x;
+          L.eye.y = e.y;
+          L.eye.z = e.z;
+          L.eye.at = at;
+        }
         info = {
           key: 'bird',
           kind: 'bird',
           title: 'you, a little bird',
           sub: 'free as a bird · flap to climb',
-          detail: `alt ${Math.max(0, Math.round(v.altSea))} m · ${Math.round(L.speed * 3.6)} km/h`,
+          // (No speed until it has been measured: never a false '0 km/h'.)
+          detail: `alt ${Math.max(0, Math.round(altBird))} m${L.speed > 0 ? ` · ${Math.round(L.speed * 3.6)} km/h` : ''} · flying ${compass(v.heading)}`,
           canCycle: false,
         };
       }
       const cardSig = info ? `${info.key}|${info.title}|${info.sub}|${info.detail}|${info.canCycle}` : '';
       if (cardSig !== L.cardSig) {
-        if (!info && L.lastCard && !ctx.reducedMotion) {
+        // (Shot mode: no exit animation, so a review frame never shows the last ride's card.)
+        if (!info && L.lastCard && !ctx.reducedMotion && !ctx.shotMode) {
           setLeaving(L.lastCard);
           window.clearTimeout(L.leaveTimer);
           L.leaveTimer = window.setTimeout(() => setLeaving(null), 240);
@@ -509,7 +597,7 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       }
       // The hint row.
       const kind = L.ride ? track.get(L.ride) : undefined;
-      let text: string;
+      let text: HintDef;
       if (L.mode === 'bird') text = isTouch ? HINT_BIRD_TOUCH : HINT_BIRD;
       else if (L.mode === 'ride') {
         const eyes = kind?.view === 'eyes';
@@ -543,32 +631,34 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
         on = fresh ? now - L.modeAt > HINT_MODE_DELAY && idle > 400 : idle > (text === L.hintShown && !L.hintOn ? HINT_REPEAT_IDLE : HINT_IDLE);
         if (on) L.hintShown = text;
       }
-      // Never over the chased plane / bus / satellite: riding in landscape the hint sits under the
-      // card, or (for the rest of this ride) bottom left if the thing is up there; else it waits.
+      // While the camera is still flying to a ride (or handing back), the hint waits: the chased
+      // thing sweeps across the screen then, and must not decide the hint's slot for the whole ride.
+      const settled = (camSvc.mode?.().blend ?? 1) >= 1;
+      if (!settled && !ctx.shotMode) on = false;
+      // Never over the chased plane / bus / satellite. Riding in landscape the hint sits under the
+      // card; if the thing is up there it goes bottom left for the rest of the ride; if it is in the
+      // way there too (or in any other slot), the hint waits.
       const hintEl = root.querySelector<HTMLElement>('.lbh-hint');
       const sc = labels.subject;
-      if (on && hintEl && sc.r > 0 && !ctx.shotMode) {
-        const hw = hintEl.offsetWidth;
-        const hh = hintEl.offsetHeight;
-        if (root.hasAttribute('data-rail') && L.lastCard) {
-          const pad = root.hasAttribute('data-compact') ? 10 : 14;
-          const lowY = H - pad - hh;
-          const upY = cardBottom + 12;
-          if (!L.hintLow && circleHitsBox(sc.x, sc.y, sc.r, pad, upY, pad + hw, upY + hh)) {
-            L.hintLow = true;
-            root.toggleAttribute('data-hintlow', true);
+      if (on && settled && hintEl && sc.r > 0) {
+        const rb = root.getBoundingClientRect();
+        const r = hintEl.getBoundingClientRect();
+        if (circleHitsBox(sc.x, sc.y, sc.r, r.left - rb.left, r.top - rb.top, r.right - rb.left, r.bottom - rb.top)) {
+          on = false;
+          if (hintEl.dataset.slot === 'stack' && L.lay.rail && !L.lay.stick && L.lastCard && !L.lay.hintLow) {
+            L.lay.hintLow = true;
+            pushLay();
           }
-          if (L.hintLow && circleHitsBox(sc.x, sc.y, sc.r, pad, lowY, pad + hw, lowY + hh)) on = false;
-        } else {
-          const rb = root.getBoundingClientRect();
-          const r = hintEl.getBoundingClientRect();
-          if (circleHitsBox(sc.x, sc.y, sc.r, r.left - rb.left, r.top - rb.top, r.right - rb.left, r.bottom - rb.top)) on = false;
         }
       }
-      if (text !== L.hintText || on !== L.hintOn) {
+      // Just after a mode change the old hint goes at once (no fade showing the new mode's words
+      // where the old row was); the new one fades in after HINT_MODE_DELAY.
+      const snap = !ctx.shotMode && L.modeAt > 0 && now - L.modeAt < HINT_MODE_DELAY;
+      if (text !== L.hintText || on !== L.hintOn || snap !== L.hintSnap) {
         L.hintText = text;
         L.hintOn = on;
-        setHint({ text, on });
+        L.hintSnap = snap;
+        setHint({ text, on, snap });
       }
       // The time button's destination (where you are looking).
       if (!L.warp) {
@@ -616,9 +706,9 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       if (mode !== L.mode || ride !== L.ride) {
         L.mode = mode;
         L.ride = ride;
-        if (L.hintLow) {
-          L.hintLow = false;
-          root.toggleAttribute('data-hintlow', false);
+        if (L.lay.hintLow) {
+          L.lay.hintLow = false;
+          pushLay();
         }
         L.modeAt = now;
         L.speed = 0;
@@ -631,7 +721,9 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       // offer must not show as disabled).
       if (ctx.services.track.version !== L.trackVer) slowAt = 0;
       // Layout reads first (the previous frame's writes are flushed), then this frame's writes.
-      if (now - slowAt >= 250) {
+      // (Every frame for a moment after a mode change, so the card, the hint's slot and the dock
+      // settle; always in shot mode, where the review tool jumps the view and the clock between frames.)
+      if (now - slowAt >= 250 || now - L.modeAt < SETTLE_MS || ctx.shotMode) {
         slowAt = now;
         slow(now);
       }
@@ -691,7 +783,55 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
     };
   }, [ctx, variant, pickMode, cycle]);
 
+  // ── the coach bubble's corner: the first one clear of the planet (or the least covered) ──
+  const showCoach = (coach && !note) || !!note;
+  useLayoutEffect(() => {
+    const el = coachRef.current;
+    const root = rootRef.current;
+    if (!showCoach || !el || !root) return;
+    // Landscape: a corner beside the planet (bottom left, else top left while no card is there).
+    // Portrait: above the dock, under the planet.
+    const cands: CoachPos[] = lay.rail && !lay.stick ? (card ? ['bl'] : ['bl', 'tl']) : ['bc'];
+    let best = cands[0];
+    let bestW = '';
+    el.style.maxWidth = '';
+    if (lay.rail && !lay.stick) {
+      // Each corner at a few widths, widest first (a narrower bubble is taller but tucks further
+      // into the corner): the first that clears the planet's disc, else the least covered.
+      const cam = ctx.camera;
+      const m = new Float64Array(16);
+      mul4(cam.projectionMatrix.elements, cam.matrixWorldInverse.elements, m);
+      const W = root.clientWidth;
+      const H = root.clientHeight;
+      const disc = planetDisc(m, cam.position, WORLD.R + PLANET_GLOW, cam.projectionMatrix.elements[5], W, H, { x: 0, y: 0, r: 0 });
+      const widths = lay.compact ? [272, 236, 204, 178] : [380, 320, 270];
+      let bestOver = Infinity;
+      search: for (const p of cands) {
+        for (const w of widths) {
+          el.dataset.cpos = p;
+          const mw = `min(${w}px, calc(100% - 40px))`;
+          el.style.maxWidth = mw;
+          // Layout boxes (the pop-in animation scales the bubble), grown by the burst and the sticker.
+          const over = circleIntoBox(disc.x, disc.y, disc.r + 6, el.offsetLeft - 10, el.offsetTop - 10, el.offsetLeft + el.offsetWidth + 10, el.offsetTop + el.offsetHeight + 10);
+          if (over < bestOver - 0.5) {
+            best = p;
+            bestW = mw;
+            bestOver = over;
+          }
+          if (over <= 0) break search;
+        }
+      }
+    }
+    el.dataset.cpos = best;
+    el.style.maxWidth = bestW;
+    setCoachPos(best);
+  }, [ctx, showCoach, note, lay, layVer, card]);
+
   const active = activeMode(cam.mode, cam.kind ?? (cam.ride ? ctx.services.track.get(cam.ride)?.kind : undefined));
+  const slot = hintSlot(lay, !!card);
+  const hintEl = (
+    <Hint hint={hint.text} on={hint.on && !coach && !note} slot={slot} fitKey={`${slot}|${layVer}|${laySig(lay)}`} snap={coach || !!note || hint.snap} />
+  );
   return (
     <div
       ref={rootRef}
@@ -704,11 +844,16 @@ export function Hud({ engine, variant, shotHud }: { engine: Engine; variant: Var
       <style>{HUD_CSS}</style>
       {/* Tab order: the dock, the card, the time; the moving world labels last (CSS stacks them under). */}
       <Dock active={active} avail={avail} onPick={pickMode} />
-      {card ? <FollowCard info={card} onCycle={cycleFromCard} onExit={exitRide} /> : leaving && <FollowCard info={leaving} leaving onCycle={cycleFromCard} onExit={exitRide} />}
+      {/* The top-left column: the card, and the hint under it when that is its slot (no measuring:
+          the hint can never sit under the back link or the card, whatever the card's height). */}
+      <div className="lbh-tl">
+        {card ? <FollowCard info={card} onCycle={cycleFromCard} onExit={exitRide} /> : leaving && <FollowCard info={leaving} leaving onCycle={cycleFromCard} onExit={exitRide} />}
+        {slot === 'stack' && hintEl}
+      </div>
       <TimeButton state={time} onPress={pressTime} />
-      {coach && !note && <Coach touch={touch} onDone={finishCoach} />}
-      {note && <Note text={note} />}
-      <Hint text={hint.text} on={hint.on && !coach && !note} snap={coach || !!note} />
+      {coach && !note && <Coach ref={coachRef} touch={touch} pos={coachPos} onDone={finishCoach} />}
+      {note && <Note ref={coachRef} text={note} pos={coachPos} />}
+      {slot !== 'stack' && hintEl}
       <div ref={labelsRef} className="lbh-labels" />
     </div>
   );

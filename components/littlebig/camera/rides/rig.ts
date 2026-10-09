@@ -83,6 +83,8 @@ export function elevationFor(el: number, h: number, fovDeg: number): number {
 }
 
 const _w = new Vector3();
+const _wp = new Vector3();
+const _wd = new Vector3();
 /** Clearance (m) a third-person camera keeps from facades taller than it. */
 export const WALL_CLEAR = 2.4;
 
@@ -143,6 +145,12 @@ export class RideRig {
   private entryVel = 0;
   /** Near plane the rig wants (m). */
   near = 0.1;
+  /**
+   * (D1f r2) 0 … 1: the heading follows the target this much more tightly (ω up to 9). The director
+   * holds it at 1 while a transition flies in and eases it off after: a car that turned a corner on
+   * the way left the heading spring a quarter turn behind, and it swung on for a second after landing.
+   */
+  stiff = 0;
   /** Distance from the camera to the target (m) after occlusion and floors. */
   camDist = 0;
   /** Smoothed state. */
@@ -159,10 +167,13 @@ export class RideRig {
   private logDist = 0;
   private logDistVel = 0;
   /** Distance cap from occlusion (m) and the floor's extra lift (m), both springs. */
-  private occ = 1e9;
+  private occ = 10;
   private occVel = 0;
   private lift = 0;
   private liftVel = 0;
+  /** (D1f r5) The facade push-out, sprung (world offset, m) and its rate. */
+  private readonly wallOff = new Vector3();
+  private readonly wallVel = new Vector3();
   private speedS = 0;
   readonly anchor = new Vector3();
 
@@ -212,7 +223,7 @@ export class RideRig {
     this.pitch = this.pitchT;
     this.logDist = this.logDistT;
     this.yawVel = this.pitchVel = this.logDistVel = 0;
-    this.occ = 1e9;
+    this.occ = this.distOf(this.logDistT) * 1.5;
     this.occVel = 0;
     this.lift = 0;
     this.liftVel = 0;
@@ -225,6 +236,17 @@ export class RideRig {
 
   update(dt: number, pose: TrackPose, env: RideEnv, out: FramePose): void {
     this.pose(dt, pose, env, out, false);
+  }
+
+  /** Keep the occlusion spring inside [lo, hi] (velocity zeroed where the clamp bites). */
+  private clampOcc(lo: number, hi: number): void {
+    if (!(this.occ >= lo)) {
+      this.occ = lo;
+      this.occVel = Math.max(0, this.occVel || 0);
+    } else if (this.occ > hi) {
+      this.occ = hi;
+      this.occVel = Math.min(0, this.occVel);
+    }
   }
 
   /** Bank of a trackable (rad): its up rolled from the radial up about its travel. */
@@ -247,7 +269,8 @@ export class RideRig {
     _dir.copy(pose.fwd);
     tangent(_dir, _up, this.fwdS);
     if (!snap && dt > 0) {
-      const omega = this.view === 'eyes' ? (reduced ? 3.2 : 4.5) : this.view === 'alongside' ? 1.6 : 3.2;
+      const base = this.view === 'eyes' ? (reduced ? 3.2 : 4.5) : this.view === 'alongside' ? 1.6 : 3.2;
+      const omega = base + (9 - base) * this.stiff;
       const err = -signedAngle(this.fwdS, _dir, _up);
       springStep(err, this.headVel, 0, omega, dt, _sp);
       this.headVel = _sp[1];
@@ -336,20 +359,42 @@ export class RideRig {
     _off.copy(_back).multiplyScalar(Math.cos(el)).addScaledVector(_up, Math.sin(el));
     _t.copy(this.anchor).addScaledVector(_off, want);
     const free = chase ? env.free(this.anchor, _t) : 1;
-    const cap = free >= 0.999 ? 1e9 : Math.max(fr.minDist * 0.6, want * free - 0.6);
+    // (The cap lives in [lo, hi] and the spring is clamped there, velocity zeroed where the clamp
+    // bites: seeded with 1e9 it wound up and pinned the camera at its minimum for seconds.)
+    const lo = fr.minDist * 0.6;
+    const hi = Math.max(lo, want * 1.5);
+    const cap = free >= 0.999 ? hi : Math.min(hi, Math.max(lo, want * free - 0.6));
     if (snap || dt <= 0) {
       this.occ = cap;
       this.occVel = 0;
     } else {
-      const target = Math.min(cap, want * 1.5);
-      springStep(this.occ, this.occVel, target, target < this.occ ? 14 : 2.5, dt, _sp);
+      springStep(this.occ, this.occVel, cap, cap < this.occ ? 14 : 2.5, dt, _sp);
       this.occ = _sp[0];
       this.occVel = _sp[1];
     }
-    const d = Math.min(want, Math.max(fr.minDist * 0.6, this.occ));
+    this.clampOcc(lo, hi);
+    const d = Math.min(want, this.occ);
     out.pos.copy(this.anchor).addScaledVector(_off, d);
     // A facade beside the camera pushes it out into the street (never a wall filling half the frame).
+    // (D1f r5) Through a spring: moving along a block the push stepped by a metre in a frame where
+    // one facade's reach handed over to the next. (D1f r6) Pushed at ω 6 (was 12), let back at ω 3.5:
+    // chasing a truck round a roundabout, a corner pushed the camera 2 m aside and back within 0.6 s,
+    // swinging the view 60°/s just as the trip in landed.
+    _wp.copy(out.pos);
     keepOffWalls(out.pos, env);
+    _wd.subVectors(out.pos, _wp);
+    if (snap || dt <= 0) {
+      this.wallOff.copy(_wd);
+      this.wallVel.set(0, 0, 0);
+    } else {
+      const wOm = _wd.lengthSq() < this.wallOff.lengthSq() ? 3.5 : 6;
+      for (let k = 0; k < 3; k++) {
+        springStep(this.wallOff.getComponent(k), this.wallVel.getComponent(k), _wd.getComponent(k), wOm, dt, _sp);
+        this.wallOff.setComponent(k, _sp[0]);
+        this.wallVel.setComponent(k, _sp[1]);
+      }
+    }
+    out.pos.copy(_wp).add(this.wallOff);
 
     // Floor: the camera stays above terrain, water and roofs (a spring, so a roof sliding under a
     // car chase swells the camera up instead of stepping it).
@@ -415,19 +460,20 @@ export class RideRig {
     if (want > 0.05) {
       _t.copy(this.anchor).addScaledVector(_off, want);
       const free = env.free(this.anchor, _t);
-      const cap = free >= 0.999 ? 1e9 : Math.max(0, want * free - 0.4);
+      const hi = want * 1.5;
+      const cap = free >= 0.999 ? hi : Math.min(hi, Math.max(0, want * free - 0.4));
       if (snap || dt <= 0) {
         this.occ = cap;
         this.occVel = 0;
       } else {
-        const target = Math.min(cap, want * 1.5);
-        springStep(this.occ, this.occVel, target, target < this.occ ? 14 : 2.5, dt, _sp);
+        springStep(this.occ, this.occVel, cap, cap < this.occ ? 14 : 2.5, dt, _sp);
         this.occ = _sp[0];
         this.occVel = _sp[1];
       }
-      d = Math.max(0, Math.min(want, this.occ));
+      this.clampOcc(0, hi);
+      d = Math.min(want, this.occ);
     } else {
-      this.occ = 1e9;
+      this.occ = want * 1.5;
       this.occVel = 0;
     }
     out.pos.copy(this.anchor).addScaledVector(_off, d);

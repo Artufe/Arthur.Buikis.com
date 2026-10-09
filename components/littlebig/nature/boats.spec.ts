@@ -18,19 +18,27 @@ describe('boat loops', () => {
     expect(loops.filter((l) => l.kind === 'fish').length).toBe(1);
   });
 
-  it('keeps every loop on water and clear of the others', () => {
+  it('keeps every loop in open water (deep under the hull and a band round it) and clear of the others', () => {
     const d = { x: 0, y: 0, z: 0 };
+    const depthAt = (l: (typeof loops)[number], th: number, grow: number) => {
+      const x = l.c.x * R + l.e1.x * Math.cos(th) * (l.a + grow) + l.e2.x * Math.sin(th) * (l.b + grow);
+      const y = l.c.y * R + l.e1.y * Math.cos(th) * (l.a + grow) + l.e2.y * Math.sin(th) * (l.b + grow);
+      const z = l.c.z * R + l.e1.z * Math.cos(th) * (l.a + grow) + l.e2.z * Math.sin(th) * (l.b + grow);
+      const m = Math.hypot(x, y, z);
+      d.x = x / m;
+      d.y = y / m;
+      d.z = z / m;
+      return -planet.heightAt(d);
+    };
     for (const l of loops) {
+      // (round 3 sailed the fishing boat over a sand shelf: a pale blob through its chase view)
       for (let s = 0; s < 64; s++) {
         const th = (s / 64) * Math.PI * 2;
-        const x = l.c.x * R + l.e1.x * Math.cos(th) * l.a + l.e2.x * Math.sin(th) * l.b;
-        const y = l.c.y * R + l.e1.y * Math.cos(th) * l.a + l.e2.y * Math.sin(th) * l.b;
-        const z = l.c.z * R + l.e1.z * Math.cos(th) * l.a + l.e2.z * Math.sin(th) * l.b;
-        const m = Math.hypot(x, y, z);
-        d.x = x / m;
-        d.y = y / m;
-        d.z = z / m;
-        expect(planet.heightAt(d)).toBeLessThan(-0.6);
+        expect(depthAt(l, th, 0)).toBeGreaterThan(2.7);
+        expect(depthAt(l, th, 5)).toBeGreaterThan(2);
+        expect(depthAt(l, th, -Math.min(5, 0.7 * l.b))).toBeGreaterThan(2);
+        expect(depthAt(l, th, 13)).toBeGreaterThan(0.8); // no islet beside it, under the chase camera
+        expect(depthAt(l, th, 9.5)).toBeGreaterThan(0.8);
       }
       for (const o of loops) {
         if (o === l) continue;

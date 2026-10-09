@@ -396,7 +396,7 @@ export function createCameraSystem(): System {
   }
 
   function setView(ctx: LBContext, v: ViewSpec, glide?: number) {
-    director.reset();
+    director.reset(ctx);
     exitRelease = -1;
     dirFromLatLon(v.lat, v.lon, s.focus);
     headingVector(s.focus, (v.heading ?? 0) * DEG, s.fwd);

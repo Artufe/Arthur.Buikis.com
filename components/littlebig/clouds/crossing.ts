@@ -10,7 +10,8 @@
 //         inside a puff; cut short once the eye is well clear of the layer (`clear`), so a fast zoom
 //         shows the city rising, not a white wall;
 //   out   a hole opens at the focus of expansion and sweeps outward (`open`), the last puffs
-//         streaming off the edges, `tOut` s, with a short overall fade at its end; then idle.
+//         streaming off the edges, `tOut` s; over its end the hole runs ahead and the last cloud
+//         shrinks away (then a short fade); then idle.
 // Flying BACKWARD (climbing out while looking down: the focus is one of contraction) both fronts run
 // the other way (`dir` = −1, latched when the episode starts): the cloud closes in from the corners
 // like an iris and, leaving, shrinks away into the point the eye climbs from.
@@ -34,12 +35,55 @@ export interface CrossTiming {
 }
 
 /**
- * ~0.3 s with at least half the frame covered; ~0.55 s from the first puff to clear: ~0.2 s of puffs
- * blooming, a short hold, ~0.3 s of the hole opening on the city.
+ * ~0.3 s with at least half the frame covered; ~0.65 s from the first puff to clear: ~0.2 s of puffs
+ * blooming, a short hold, ~0.4 s of the hole opening on the city (the last of it the hole running
+ * ahead while the last cloud shrinks away solid: see `alpha`).
  */
-export const CROSS_TIMING: CrossTiming = { tIn: 0.24, hold: 0.02, tOut: 0.34 };
-/** Reduced motion: a still fade, slower in and out (no brightness flash), a short hold. */
+export const CROSS_TIMING: CrossTiming = { tIn: 0.24, hold: 0.02, tOut: 0.42 };
+/** Reduced motion: a still fade, slower in and out (no brightness flash: see stepRmLevel), a short hold. */
 export const CROSS_TIMING_RM: CrossTiming = { tIn: 0.2, hold: 0.04, tOut: 0.3 };
+
+/** Reduced motion: the still fade's ceiling (the fogged city stays faintly visible). */
+export const RM_CAP = 0.85;
+/**
+ * Reduced motion: the fade's level never rises faster than 0 → 1 in RM_RISE s, nor falls faster than
+ * 1 → 0 in RM_FALL s (≤ 0.14 a frame at 30 fps). Its target (the episode's cover, or the eye's
+ * contact with a puff, which comes in at once) could step 0 → 1 within a frame at dive speed: a
+ * brightness flash, exactly what reduced motion must not show.
+ */
+export const RM_RISE = 0.24;
+export const RM_FALL = 0.3;
+
+/** One frame of the reduced-motion fade: `level` toward `target` (capped at RM_CAP), rate-limited. */
+export function stepRmLevel(level: number, target: number, dt: number): number {
+  const t = Math.min(RM_CAP, Math.max(0, target));
+  if (t > level) return Math.min(t, level + dt / RM_RISE);
+  return Math.max(t, level - dt / RM_FALL);
+}
+
+/**
+ * One frame of the reduced-motion fade, teleports included: a jump (a ride's cut, setView) ramps the
+ * fade out like any other frame instead of zeroing it (0.49 → 0 in a frame was a cut). Only a frozen
+ * frame (dt = 0: the shot tool's setup) takes the target at once.
+ */
+export function rmFadeStep(level: number, target: number, dt: number, jump: boolean): number {
+  if (jump && dt <= 0) return Math.min(RM_CAP, Math.max(0, target));
+  return stepRmLevel(level, target, dt);
+}
+
+/** Moved further than this (m) in one frame: a teleport even with time running (no camera move is that fast). */
+export const JUMP_DIST = 400;
+
+/**
+ * Was this frame's camera move a teleport (setView, a shot, an instant ride: the camera placed on a
+ * frozen frame), which ends any episode? Motion is never one, however fast: a ride's transition climbs
+ * through the layer at 15–25 m a frame at 30 fps, and a distance threshold (25 m) once took its
+ * crossing for a teleport and popped a third-grown overlay off in one frame. `moved2`: the squared
+ * distance moved (m²); `dt`: the frame's time step (s).
+ */
+export function isTeleport(moved2: number, dt: number): boolean {
+  return (dt <= 0 && moved2 > 1) || moved2 > JUMP_DIST * JUMP_DIST;
+}
 
 /** Contact above this keeps an episode in its hold. */
 export const CONTACT_HOLD = 0.45;
@@ -47,8 +91,16 @@ export const CONTACT_HOLD = 0.45;
 const MARGIN = 0.18;
 /** The opening runs from just inside the nearest point to just past the farthest corner. */
 const OPEN_MARGIN = 0.12;
-/** The overall fade runs over the last part of the opening (linear progress). */
+/**
+ * The overall fade runs over the last part of the opening (linear progress). Backward it starts
+ * sooner: the last cloud shrinks away into the focus, and solid it read as a lump sliding out of the
+ * frame for ~5 frames; fading as it goes, it dissolves.
+ */
 const FADE_FROM = 0.72;
+/** How far (front fraction) the hole runs ahead of its sweep by the end of the fade. */
+const RETREAT = 0.22;
+const FADE_FROM_BACK = 0.55;
+const FADE_TO_BACK = 0.95;
 
 /** Episode stages. */
 export const Stage = { Idle: 0, In: 1, Hold: 2, Out: 3 } as const;
@@ -68,14 +120,20 @@ export interface Crossing {
   cover: number;
   fill: number;
   open: number;
-  /** Overall opacity: 1, easing to 0 over the end of the opening (no puff ever pops off). */
+  /** How far the episode has faded: 1, easing to 0 over the end of the opening. */
   fade: number;
+  /**
+   * The overlay's opacity: 1 until the fade is half done, then to 0. The rest of the fade is the hole
+   * opening faster (RETREAT): the last cloud shrinks away solid instead of thinning, since puffs faded
+   * by alpha showed every overlap and ink line through each other (a heap of glass bubbles).
+   */
+  alpha: number;
   /** +1: the fronts run outward from the focus (flying forward); −1: inward (flying backward). */
   dir: number;
 }
 
 export function createCrossing(): Crossing {
-  return { stage: Stage.Idle, fillK: 0, openK: 0, holdLeft: 0, cover: 0, fill: 0, open: -MARGIN, fade: 1, dir: 1 };
+  return { stage: Stage.Idle, fillK: 0, openK: 0, holdLeft: 0, cover: 0, fill: 0, open: -MARGIN, fade: 1, alpha: 1, dir: 1 };
 }
 
 const ease = (x: number) => {
@@ -92,6 +150,7 @@ export function resetCrossing(s: Crossing): void {
   s.fill = 0;
   s.open = -MARGIN;
   s.fade = 1;
+  s.alpha = 1;
 }
 
 /** Hold an episode at a given cover (debug: `clouds.force`, for paired perf A/B and stills). */
@@ -105,6 +164,7 @@ export function forceCrossing(s: Crossing, k: number): void {
   // k < 1 opens a hole of the matching size.
   s.open = (1 - Math.min(1, k)) * (1 + 2 * OPEN_MARGIN) - OPEN_MARGIN;
   s.fade = 1;
+  s.alpha = 1;
 }
 
 /**
@@ -150,6 +210,7 @@ export function stepCrossing(s: Crossing, dt: number, trigger: boolean, contact:
     s.fill = 0;
     s.open = -MARGIN;
     s.fade = 1;
+    s.alpha = 1;
     return;
   }
   // The fill front's radius goes as an eased progress to the ¾ power: the area it covers (∝ r²)
@@ -164,9 +225,15 @@ export function stepCrossing(s: Crossing, dt: number, trigger: boolean, contact:
   const o = s.dir > 0 ? Math.pow(s.openK, 0.75) : Math.pow(s.openK, 0.7);
   s.cover = e * (1 - ease(s.openK));
   s.fill = f * (1 + MARGIN);
+  // (Backward the fade is done a little before the last cloud has shrunk to nothing: its last few
+  // frames were a small translucent scalloped disc at the focus.)
+  const ff = s.dir > 0 ? FADE_FROM : FADE_FROM_BACK;
+  const fe = s.dir > 0 ? 1 : FADE_TO_BACK;
+  s.fade = 1 - ease((s.openK - ff) / (fe - ff));
+  s.alpha = ease(s.fade * 1.6);
   // (Backward the last cloud shrinks to nothing exactly as the opening ends: no margin at the focus.)
-  s.open = o * (1 + (s.dir > 0 ? 2 : 1) * OPEN_MARGIN) - OPEN_MARGIN;
-  s.fade = 1 - ease((s.openK - FADE_FROM) / (1 - FADE_FROM));
+  // While it fades the hole runs ahead (RETREAT), so what is left shrinks away solid.
+  s.open = o * (1 + (s.dir > 0 ? 2 : 1) * OPEN_MARGIN) - OPEN_MARGIN + (1 - s.fade) * RETREAT;
 }
 
 /**
@@ -192,5 +259,5 @@ export function coverageAt(s: Crossing, r: number, soft = 0.12): number {
   if (s.dir < 0) r = 1 - r;
   const inFill = 1 - ease((r - s.fill + soft) / (2 * soft));
   const outOpen = ease((r - s.open + soft) / (2 * soft));
-  return Math.min(inFill, outOpen) * s.fade;
+  return Math.min(inFill, outOpen) * s.alpha;
 }

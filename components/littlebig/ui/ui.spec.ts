@@ -5,7 +5,8 @@ import { CITY_LON, DAY_LENGTH, R, START_HOUR_ANGLE, SUN_DECLINATION } from '../w
 import { pitchForAlt as cameraPitch } from '../camera/model';
 import { dirFromLatLon, headingVector } from '../world/sphere';
 import { eveningTimeAt, sunDirection, sunElevation as worldElevation, timeAtHourAngle } from '../world/sun';
-import { Declutter, altFade, circleHitsBox, framedFlyTarget, headingTangent, limbClearance, mul4, pitchForAlt, project, screenRadius } from './label-math';
+import { Declutter, altFade, circleHitsBox, circleIntoBox, framedFlyTarget, headingTangent, limbClearance, mul4, pitchForAlt, planetDisc, project, screenRadius } from './label-math';
+import { BREAK_SHARE, colsFor, layoutLive } from './live-text';
 import { activeMode, MODES } from './modes';
 import { hourAngle, nextTimeTarget, sunElevation, warpRate } from './sun-time';
 import { C, KIND_COLOR, WORLD } from './theme';
@@ -213,5 +214,119 @@ describe('modes', () => {
   it('every trackable kind belongs to exactly one mode', () => {
     const kinds = ['plane', 'balloon', 'car', 'bus', 'truck', 'train', 'boat', 'ferry', 'person', 'satellite', 'station'] as const;
     for (const k of kinds) expect(MODES.filter((m) => m.kinds.includes(k)).length).toBe(1);
+  });
+});
+
+describe('the live line (follow card)', () => {
+  // Real detail() lines from the trackables (traffic, air, people, space).
+  const LINES = [
+    '13 km/h · on the plaza loop · turning left onto harbour road',
+    'alt 69 m · 57 km/h · over bigtown',
+    '152 m up · 73 km/h · a lap every 1:36 · over land',
+    '4 km/h · on the plaza loop · strolling west',
+    '17 km/h · on acorn close · turning round',
+    'waiting to cross harbour road',
+    'alt 20 m · 0 km/h',
+  ];
+  const UNITS = /\d+ (km\/h|m)\b/g;
+
+  it('a 30-character piece fits whole in a 230 px box of 11 px mono, beside nothing it has to share with', () => {
+    const cols = colsFor(230, 11);
+    expect(cols).toBe(34);
+    // Whole, not broken: breaking it would not save a line.
+    expect(layoutLive('13 km/h · turning left onto harbour road', cols, 3)).toEqual(['13 km/h ·', 'turning left onto harbour road']);
+  });
+
+  it('a piece that must break breaks where a reader would: after a colon, before a preposition, never after an article', () => {
+    // 28 columns: the desktop card, and the window's since round 3.
+    expect(layoutLive('24 km/h · on the ring road · next stop: clockwork avenue', 28, 3)).toEqual(['24 km/h · on the ring road ·', 'next stop: clockwork avenue']);
+    expect(layoutLive('13 km/h · turning left onto harbour road', 28, 3)).toEqual(['13 km/h · turning left', 'onto harbour road']);
+    expect(layoutLive('waiting to cross harbour road', 26, 3)).toEqual(['waiting to cross', 'harbour road']);
+    // One break is forced: it goes in the long piece, the place name stays whole.
+    expect(layoutLive('stopped · on harbour avenue · turning left onto the ring road', 28, 3).some((l) => l.includes('on harbour avenue'))).toBe(true);
+    expect(layoutLive('13 km/h · on the plaza loop · turning left onto harbour road', 28, 3).some((l) => l.includes('on the plaza loop'))).toBe(true);
+    for (let cols = 16; cols <= 40; cols++) for (const l of layoutLive('152 m up · 73 km/h · a lap every 1:36 · over land', cols, 3)) expect(/\b(a|the)$/.test(l)).toBe(false);
+  });
+
+  it('a short piece never takes a whole line when it can share one (the 360 px phone)', () => {
+    // 26 columns: the critic's '13 km/h · / on the plaza loop · / turning left onto harbou…'.
+    const lines = layoutLive(LINES[0], 26, 3);
+    expect(lines.length).toBeLessThanOrEqual(3);
+    expect(lines.join(' ')).toBe('13 km/h · on the plaza loop · turning left onto harbour road');
+    expect(lines[0]).not.toBe('13 km/h ·');
+    expect(layoutLive(LINES[3], 26, 3)).toEqual(['4 km/h · on the plaza', 'loop · strolling west']);
+  });
+
+  it('drops the least important piece instead of clipping it (a phone on its side, two lines)', () => {
+    const lines = layoutLive(LINES[0], 22, 2);
+    expect(lines.join(' ')).toBe('13 km/h · on the plaza loop');
+    const st = layoutLive(LINES[2], 22, 2);
+    expect(st.join(' ')).toBe('152 m up · 73 km/h · a lap every 1:36');
+  });
+
+  it('at every width: within the box, never an ellipsis, never a line starting with a dot, units held to their numbers', () => {
+    // (16 columns and up: the narrowest real box, a 320 px phone at 11 px, holds ~22.)
+    for (const text of LINES) {
+      for (let cols = 16; cols <= 60; cols++) {
+        for (const max of [2, 3]) {
+          const lines = layoutLive(text, cols, max);
+          expect(lines.length).toBeGreaterThan(0);
+          expect(lines.length).toBeLessThanOrEqual(max);
+          for (const l of lines) {
+            expect(l.length).toBeLessThanOrEqual(cols);
+            expect(l.startsWith('·')).toBe(false);
+            expect(l.endsWith('…')).toBe(false);
+          }
+          // Every number + unit of the kept text sits on one line.
+          const kept = lines.join(' ');
+          for (const m of kept.matchAll(UNITS)) expect(lines.some((l) => l.includes(m[0]))).toBe(true);
+          // What is kept is a prefix of the pieces, in order, unbroken in content.
+          expect(text.startsWith(kept)).toBe(true);
+          // The first piece always survives.
+          expect(kept.startsWith(text.split(' · ')[0])).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('keeps short pieces whole and balances the lines', () => {
+    expect(layoutLive(LINES[1], 26, 3)).toEqual(['alt 69 m · 57 km/h ·', 'over bigtown']);
+    expect(layoutLive(LINES[4], 40, 3)).toEqual(['17 km/h · on acorn close · turning round']);
+    // A piece shorter than BREAK_SHARE of the line is never split.
+    const lines = layoutLive(LINES[2], 30, 3);
+    for (const piece of ['152 m up', '73 km/h', 'a lap every 1:36', 'over land']) {
+      if (piece.length <= 30 * BREAK_SHARE) expect(lines.some((l) => l.includes(piece))).toBe(true);
+    }
+  });
+
+  it('only a single piece too long for the box at all is cut, with an ellipsis', () => {
+    const lines = layoutLive('supercalifragilisticexpialidocious-street', 10, 2);
+    expect(lines.length).toBe(2);
+    expect(lines[1].endsWith('…')).toBe(true);
+  });
+});
+
+describe('the coach keeps off the planet', () => {
+  it('planetDisc matches the projected silhouette of the sphere', () => {
+    const cam = new PerspectiveCamera(40, 1280 / 800, 1, 2000);
+    cam.position.set(0, 0, 540);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld();
+    const m = new Float64Array(16);
+    mul4(cam.projectionMatrix.elements, cam.matrixWorldInverse.elements, m);
+    const d = planetDisc(m, cam.position, 168, cam.projectionMatrix.elements[5], 1280, 800, { x: 0, y: 0, r: 0 });
+    expect(d.x).toBeCloseTo(640, 6);
+    expect(d.y).toBeCloseTo(400, 6);
+    // The tangent point of the silhouette, projected: same radius.
+    const a = Math.asin(168 / 540);
+    const t = new Vector3(Math.sin(a) * Math.cos(a) * 540, 0, 540 - Math.cos(a) * Math.cos(a) * 540).project(cam);
+    expect(d.r).toBeCloseTo(t.x * 640, 3);
+    // Inside the sphere: everything is planet.
+    expect(planetDisc(m, { x: 0, y: 0, z: 100 }, 168, 2, 1280, 800, { x: 0, y: 0, r: 0 }).r).toBe(Infinity);
+  });
+  it('circleIntoBox: positive when the circle reaches into the box, ≤ 0 when clear', () => {
+    expect(circleIntoBox(0, 0, 10, 5, -1, 20, 1)).toBeCloseTo(5, 6);
+    expect(circleIntoBox(0, 0, 10, 12, 0, 20, 5)).toBeCloseTo(-2, 6);
+    expect(circleIntoBox(0, 0, 10, -5, -5, 5, 5)).toBe(10);
   });
 });

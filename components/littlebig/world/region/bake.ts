@@ -15,15 +15,21 @@
 /** How an entry's numbers are stored: exact, float32, or fixed point (mm or cm) in 16 bits. */
 export type Enc = 'f64' | 'f32' | 'mm16' | 'cm16';
 
-/** Bump when the bake's binary layout changes. */
-const FORMAT = 1;
+/**
+ * Bump when the bake's layout changes. 2 (v2 R2 refine): the 16-bit entries moved out of the binary
+ * into a text stream of difference residuals (see `encodeAll`).
+ */
+const FORMAT = 2;
 
 export interface Memo {
   /**
    * A cached decision: replayed when the bake holds `key` computed from the same `inputs`, else
    * computed now. The result always went through `enc` (fresh and replayed builds agree exactly).
+   * v2 (R2 refine 2): `compute` null — a production build, whose searches and planners are compiled
+   * out (`process.env.NODE_ENV === 'production' ? null : …`) — replays the baked entry by its key
+   * alone (the canonical seed's bake, whatever the inputs' last bits), and throws if there is none.
    */
-  get(key: string, inputs: ArrayLike<number>, compute: () => ArrayLike<number>, enc?: Enc): Float64Array;
+  get(key: string, inputs: ArrayLike<number>, compute: (() => ArrayLike<number>) | null, enc?: Enc): Float64Array;
   /** The bake string for what this build used (every entry, replayed or fresh). */
   dump(): string;
   readonly stats: { hits: number; misses: number; stale: string[] };
@@ -78,7 +84,8 @@ function through(v: ArrayLike<number>, enc: Enc): Float64Array {
   const out = new Float64Array(v.length);
   for (let i = 0; i < v.length; i++) {
     const x = v[i];
-    out[i] = enc === 'f64' ? x : enc === 'f32' ? Math.fround(x) : enc === 'mm16' ? clamp16(Math.round(x * 1000)) / 1000 : clamp16(Math.round(x * 100)) / 100;
+    // (+ 0: a fixed-point value rounding to −0 reads back as +0, and the chain hash tells them apart)
+    out[i] = enc === 'f64' ? x : enc === 'f32' ? Math.fround(x) : enc === 'mm16' ? clamp16(Math.round(x * 1000)) / 1000 + 0 : clamp16(Math.round(x * 100)) / 100 + 0;
   }
   return out;
 }
@@ -110,13 +117,43 @@ function fromB64(s: string): Uint8Array {
   return out;
 }
 
-/** Layout: u16 format, u32 fingerprint, u32 count, then per entry u32 key, u32 inputs, u8 enc, u32 n, payload (little endian). */
+// ── the fixed-point entries' stream ──
+// A 16-bit entry holds smooth data (centrelines, profiles, skeletons) to the mm or cm: its successive
+// differences (of order 1–3, at a stride of 1–3 for interleaved tuples, whichever is shortest) are
+// mostly a few units, written as zigzag varints of 5 bits per character. Runs of small residuals are
+// what gzip compresses best; the base64 of the raw int16s hardly compressed at all.
+const C64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function residuals(q: ArrayLike<number>, ord: number, st: number): Int32Array {
+  const r = Int32Array.from(q);
+  for (let o = 0; o < ord; o++) for (let i = r.length - 1; i >= st * (o + 1); i--) r[i] -= r[i - st];
+  return r;
+}
+function varints(r: Int32Array): string {
+  let out = '';
+  for (let i = 0; i < r.length; i++) {
+    let z = ((r[i] << 1) ^ (r[i] >> 31)) >>> 0;
+    while (z >= 32) {
+      out += C64[32 | (z & 31)];
+      z >>>= 5;
+    }
+    out += C64[z];
+  }
+  return out;
+}
+
+/**
+ * Layout: base64 of (u16 format, u32 fingerprint, u32 count, then per entry u32 key, u32 inputs, u8 enc,
+ * u32 n, and the payload for f64 / f32, or for mm16 / cm16 a u8 mode = order · 4 + stride), a '.',
+ * then the 16-bit entries' residual streams in entry order.
+ */
 function encodeAll(fp: number, entries: Entry[]): string {
+  const is16 = (e: Entry) => e.enc === 'mm16' || e.enc === 'cm16';
   let size = 10;
-  for (const e of entries) size += 13 + e.values.length * BYTES[e.enc];
+  for (const e of entries) size += 13 + (is16(e) ? 1 : e.values.length * BYTES[e.enc]);
   const buf = new ArrayBuffer(size);
   const dv = new DataView(buf);
   let o = 0;
+  let text = '';
   dv.setUint16(o, FORMAT, true);
   dv.setUint32((o += 2), fp, true);
   dv.setUint32((o += 4), entries.length, true);
@@ -127,22 +164,40 @@ function encodeAll(fp: number, entries: Entry[]): string {
     dv.setUint8(o + 8, ENCS.indexOf(e.enc));
     dv.setUint32(o + 9, e.values.length, true);
     o += 13;
+    if (is16(e)) {
+      const sc = e.enc === 'mm16' ? 1000 : 100;
+      const q = Array.from(e.values, (x) => clamp16(Math.round(x * sc)));
+      let best = '';
+      let mode = 0;
+      for (let ord = 1; ord <= 3; ord++)
+        for (let st = 1; st <= 3; st++) {
+          const t = varints(residuals(q, ord, st));
+          if (!mode || t.length < best.length) (best = t), (mode = ord * 4 + st);
+        }
+      dv.setUint8(o, mode);
+      o += 1;
+      text += best;
+      continue;
+    }
     for (let i = 0; i < e.values.length; i++) {
-      const x = e.values[i];
-      if (e.enc === 'f64') dv.setFloat64(o, x, true);
-      else if (e.enc === 'f32') dv.setFloat32(o, x, true);
-      else dv.setInt16(o, clamp16(Math.round(x * (e.enc === 'mm16' ? 1000 : 100))), true);
+      if (e.enc === 'f64') dv.setFloat64(o, e.values[i], true);
+      else dv.setFloat32(o, e.values[i], true);
       o += BYTES[e.enc];
     }
   }
-  return toB64(new Uint8Array(buf));
+  return toB64(new Uint8Array(buf)) + '.' + text;
 }
 
 function decodeAll(s: string): { fp: number; entries: Map<number, Entry> } | null {
   try {
-    const b = fromB64(s);
+    const dot = s.indexOf('.');
+    if (dot < 0) return null;
+    const b = fromB64(s.slice(0, dot));
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
     if (dv.getUint16(0, true) !== FORMAT) return null;
+    const look = new Int8Array(128).fill(-1);
+    for (let i = 0; i < 64; i++) look[C64.charCodeAt(i)] = i;
+    let t = dot + 1;
     const fp = dv.getUint32(2, true);
     const n = dv.getUint32(6, true);
     const entries = new Map<number, Entry>();
@@ -154,9 +209,29 @@ function decodeAll(s: string): { fp: number; entries: Map<number, Entry> } | nul
       const len = dv.getUint32(o + 9, true);
       o += 13;
       const values = new Float64Array(len);
-      for (let i = 0; i < len; i++) {
-        values[i] = enc === 'f64' ? dv.getFloat64(o, true) : enc === 'f32' ? dv.getFloat32(o, true) : dv.getInt16(o, true) / (enc === 'mm16' ? 1000 : 100);
-        o += BYTES[enc];
+      if (enc === 'mm16' || enc === 'cm16') {
+        const mode = dv.getUint8(o);
+        o += 1;
+        const ord = mode >> 2, st = mode & 3;
+        const r = new Int32Array(len);
+        for (let i = 0; i < len; i++) {
+          let z = 0;
+          for (let sh = 0; ; sh += 5) {
+            const c = look[s.charCodeAt(t++)];
+            if (c < 0) return null;
+            z += (c & 31) * 2 ** sh;
+            if (c < 32) break;
+          }
+          r[i] = z % 2 ? -(z + 1) / 2 : z / 2;
+        }
+        for (let q = ord - 1; q >= 0; q--) for (let i = st * (q + 1); i < len; i++) r[i] += r[i - st];
+        const sc = enc === 'mm16' ? 1000 : 100;
+        for (let i = 0; i < len; i++) values[i] = r[i] / sc + 0;
+      } else {
+        for (let i = 0; i < len; i++) {
+          values[i] = enc === 'f64' ? dv.getFloat64(o, true) : dv.getFloat32(o, true);
+          o += BYTES[enc];
+        }
       }
       entries.set(key, { key, inputs, enc, values });
     }
@@ -183,9 +258,11 @@ export function createMemo(fingerprint: number, baked?: string): Memo {
       const ih = hashNums(inputs);
       const hit = store?.get(kh);
       let values: Float64Array;
-      if (hit && hit.inputs === ih && hit.enc === enc) {
+      if (hit && hit.enc === enc && (hit.inputs === ih || !compute)) {
         values = hit.values;
         stats.hits++;
+      } else if (!compute) {
+        throw new Error(`region: no baked ${key} (regenerate world/region/baked.ts)`);
       } else {
         values = through(compute(), enc);
         stats.misses++;
@@ -194,6 +271,7 @@ export function createMemo(fingerprint: number, baked?: string): Memo {
       used.push({ key: kh, inputs: ih, enc, values });
       return values;
     },
-    dump: () => encodeAll(fingerprint, used),
+    // (the bake writer: bake.spec.ts only, compiled out of a production build)
+    dump: process.env.NODE_ENV === 'production' ? () => '' : () => encodeAll(fingerprint, used),
   };
 }

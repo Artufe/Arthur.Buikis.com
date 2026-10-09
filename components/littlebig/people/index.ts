@@ -16,13 +16,18 @@
 // v2 (L1): every walker is a Trackable ('person:<i>', view 'eyes'; people/track.ts). The one being
 // ridden (ctx.view.ride) is simulated and drawn at any altitude, never dithered at the eye, never
 // sent home at night; while the camera is inside it (setRidden) its head is hidden in the colour
-// pass only (its shadow keeps its head), and its dog trots on. The sim keeps everyone a camera's
-// berth from it (people/sim.ts `rider`, wider round a kid's low eye), holds it on zebras, keeps it
-// on the far side of the pavement from the cars and well back from a kerb, and has it skip long
-// kerb waits, so no face, back or turning car fills the lens. Walkers waiting at a kerb glance at
-// the traffic (left, right, left), and so does the eyes ride, at 60 %. Outside 'explore' the camera
-// is no pedestrian: walkers neither dodge it nor clear its lens; after a ride the walker just
-// ridden walks on out of the camera (PeopleSim.free).
+// pass only (its shadow keeps its head), and its dog trots at heel just behind, out of the frame.
+// A ride starts through PeopleSim.startRide: on its first frame, if the camera is already in the
+// head (a settled ride) or still far off, people close in its view step out of it at once; flying
+// in from close by they turn away and keep further off, and step round the camera coming down.
+// The sim keeps everyone a camera's berth from it (people/sim.ts `rider`, wider round a kid's low
+// eye) measured about where the ride camera looks (riderVx/Vz, the smoothed yaw): no face, back,
+// lamp post, bench or turning car fills the lens (people/ride.spec.ts measures it). Walkers waiting
+// at a kerb glance at the traffic (left, right, left), and so does the eyes ride, at 60 %, starting
+// over at each kerb. Outside 'explore' the camera is no pedestrian: walkers neither dodge it nor
+// clear its lens; after a ride the walker just ridden walks on out of the camera (PeopleSim.free).
+// In shot mode meshes[0].userData.peopleLens() reports what the lens shows on the real camera
+// (people/lens-report.ts, its own chunk).
 
 import {
   BufferAttribute,
@@ -43,14 +48,14 @@ import { LAYER_NO_INK, type LBContext, type System, type TrackPose } from '../co
 import { PALETTE } from '../render/palette';
 import { CITY_SURFACE_R, SEED } from '../world/config';
 import { CITY_CHART as CC, planFrame, planHeadingToWorld, toSphere } from '../world/city/frame';
-import { hash3, Rng } from '../world/rng';
+import { hash3 } from '../world/rng';
 import { v3 } from '../world/sphere';
 import { CITY_DIR, nightFactor, sunDirection } from '../world/sun';
 import { dogGeometry, J, personGeometry, POSE_LEASH, posedHand } from './figure';
-import { makeIdlers } from './idlers';
+import { makeCrowd } from './crowd';
 import { peoplePatch } from './shader';
-import { LensWatch, LookFlag, makeLooks, makeTraits, PeopleSim, Pose, SETTLE_STEPS, type Look, type WalkerTraits } from './sim';
-import { eyeToWorld, HeightFollower, kerbGlance, kerbWait, walkerCards, walkerEye, walkPlace, YawFollower, type PlanPose } from './track';
+import { LensWatch, LookFlag, PeopleSim, Pose, RIDER_GLANCE_RATE, RIDER_KID_K, SETTLE_STEPS, type Look, type WalkerTraits } from './sim';
+import { eyeToWorld, GazeAvert, headLook, HeightFollower, kerbGlance, kerbWait, walkerCards, walkerEye, walkPlace, YawFollower, type PlanPose } from './track';
 import { compass, kmh } from '../traffic/names';
 
 /** Altitude band (m, ViewState.altTerrain): everyone is in below POP_LO, nobody above POP_HI. */
@@ -61,7 +66,6 @@ const SHADOW_ALT = 36;
 /** Sea-level radius of the city ground (m) and a person's height, for the horizon distance. */
 const GROUND_R = 162;
 const WALKERS = 230;
-const DOG_SHARE = 0.11;
 const TEX_W = 5;
 /** LOD distances (m at a 70° field of view; scaled with the view's FOV so they follow screen size). */
 const NEAR_R = 10;
@@ -73,8 +77,6 @@ const THIN_IDLE = 0.55;
 const FEAT_FAR = 40;
 /** Share of the kerb glance the eyes ride turns the view by. */
 const GLANCE_CAM = 0.6;
-/** The berth's scale riding a kid's eyes (people/sim.ts riderK). */
-const KID_BERTH = 1.3;
 /** Seconds after a ride in which the camera does not hold up the walker just ridden. */
 const FREE_S = 4;
 
@@ -154,12 +156,17 @@ export function createPeopleSystem(): System {
   const uRide = { value: -1 };
   const follow = new YawFollower();
   const lift = new HeightFollower();
+  /** The ride looks past strangers close at the edge of its view (people/track.ts GazeAvert). */
+  const avert = new GazeAvert();
   let followFor = -1;
   let followFrame = -1;
   /** The walker last ridden, and how long it still walks through the camera after the ride. */
   let lastRid = -1;
   let freeT = 0;
+  /** A ride just started: on its first frame, check whether the camera is there at once (a cut). */
+  let cutCheck = -1;
   const pe: PlanPose = { x: 0, z: 0, h: 0, fx: 0, fz: 0, speed: 0 };
+  const eyeOut = { pos: new Vector3(), fwd: new Vector3(), up: new Vector3(), speed: 0 };
   const placeCache = new Map<number, string>();
 
   // scratch
@@ -285,15 +292,22 @@ export function createPeopleSystem(): System {
     let fz = pe.fz;
     if (ridden) {
       // (the camera takes 60 % of the head's kerb glance: the look round without the whip pan)
-      const target = Math.atan2(fz, fx) + GLANCE_CAM * gw[i] * kerbGlance(ctx.time.render + gph[i]);
+      // (its glance starts over at each kerb: left, right, then it steps off; people/sim.ts riderLook)
+      const face = Math.atan2(fz, fx);
+      const glance = GLANCE_CAM * gw[i] * kerbGlance(sim.riderLook * RIDER_GLANCE_RATE);
+      let target = face + glance;
       // the ground under the feet (kerbs), eased; the eye's own height and bob stay on top
       const ground = sim.ph[i] + (sim.h[i] - sim.ph[i]) * ctx.time.alpha;
       if (followFor !== i) {
+        avert.reset();
         follow.reset(target);
         lift.reset(ground);
         followFor = i;
         followFrame = ctx.time.frame;
       } else if (followFrame !== ctx.time.frame) {
+        // (and past a stranger close at the edge of the view, as people look past each other)
+        const half = Math.atan(Math.tan((ctx.camera.fov * Math.PI) / 360) * ctx.camera.aspect);
+        target = face + avert.step(sim, looks, i, pe.x, pe.z, face, glance, half, ctx.time.dt);
         follow.step(target, ctx.time.dt);
         lift.step(ground, ctx.time.dt);
         followFrame = ctx.time.frame;
@@ -334,12 +348,16 @@ export function createPeopleSystem(): System {
           }
           if (d2 < 16) {
             // someone in front within 4 m walking at them, or right in front: a ride landing in
-            // their eyes would open on a face
+            // their eyes would open on a face; a back within 3 m in front going their way, on
+            // someone's heels
             const d = Math.sqrt(d2) || 1e-6;
             const ij = -(s.hx[i] * dx + s.hz[i] * dz) / d; // j in front of i
             const ji = (s.hx[j] * dx + s.hz[j] * dz) / d; // i in front of j
             if (ij > 0.7 && (ji > 0.6 || d < 1.8)) facing[i] = 1;
             if (ji > 0.7 && (ij > 0.6 || d < 1.8)) facing[j] = 1;
+            const same = s.hx[i] * s.hx[j] + s.hz[i] * s.hz[j] > 0.75;
+            if (same && ij > 0.8 && d < 3) facing[i] |= 2;
+            if (same && ji > 0.8 && d < 3) facing[j] |= 2;
           }
         }
       }
@@ -353,7 +371,11 @@ export function createPeopleSystem(): System {
       const d = Math.sqrt((s.x[i] - fx) * (s.x[i] - fx) + (s.z[i] - fz) * (s.z[i] - fz));
       const sp = Math.sqrt(s.vx[i] * s.vx[i] + s.vz[i] * s.vz[i]);
       const k = f.e.kind;
-      const score = Math.min(d, FEAT_FAR) - 3.5 * Math.min(crowd[i], 6) - (sp > 1 ? 8 : sp > 0.6 ? 3 : 0) - (k === 'plaza' || k === 'park' ? 6 : 0) + 12 * facing[i];
+      // (round 4: a path that squeezes past a lamp post or a bench with someone on it, and a kid's
+      // low eye, count against too; the critic's ride from orbit opened behind a bench, in a kid's eyes)
+      const tight = s.riderRoom[s.edge[i]] < -0.2 || s.riderRoom[s.next[i]] < -0.2;
+      const kid = (looks[i].flags & LookFlag.Kid) !== 0;
+      const score = Math.min(d, FEAT_FAR) - 3.5 * Math.min(crowd[i], 6) - (sp > 1 ? 8 : sp > 0.6 ? 3 : 0) - (k === 'plaza' || k === 'park' ? 6 : 0) + 12 * (facing[i] & 1) + 6 * (facing[i] >> 1) + (tight ? 8 : 0) + (kid ? 4 : 0);
       if (i === featured) cur = score;
       if (score < bs) {
         bs = score;
@@ -412,30 +434,11 @@ export function createPeopleSystem(): System {
       const plan = ctx.world.city;
       const index = ctx.world.cityIndex;
       const nW = Math.round(WALKERS * Math.max(0.65, Math.min(1, ctx.q.density)));
-      const idlers = makeIdlers(plan, index, SEED, nW);
-      looks = makeLooks(SEED, nW + idlers.length);
-      for (const p of idlers) {
-        const l = looks[p.id];
-        l.pose = p.pose;
-        l.flags &= ~(LookFlag.Umbrella | LookFlag.Phone | (p.pose === Pose.Stand ? 0 : LookFlag.Backpack | LookFlag.Bag));
-        if (p.pose === Pose.Lean) {
-          // the one leaning over the fountain rim is a kid
-          l.flags = (l.flags & ~LookFlag.Dress) | LookFlag.Kid | LookFlag.Shorts;
-          l.scale = 0.66;
-        }
-      }
-      // dog walkers: grown-ups with a free left hand
-      const rng = Rng.for(SEED, 'people-dogs');
-      const own: number[] = [];
-      for (let i = 0; i < nW; i++) {
-        const l = looks[i];
-        if (!(l.flags & (LookFlag.Kid | LookFlag.Bag)) && rng.float() < DOG_SHARE) {
-          l.flags |= LookFlag.Leash;
-          own.push(i);
-        }
-      }
+      const made = makeCrowd(plan, index, SEED, nW);
+      const { idlers, own } = made;
+      looks = made.looks;
       await ctx.yield();
-      traits = makeTraits(SEED, looks, nW);
+      traits = made.traits;
       sim = new PeopleSim(plan, index, SEED, traits, idlers, own);
       idleOn = new Uint8Array(idlers.length).fill(1);
       planFrame(0, 0, fr);
@@ -518,7 +521,14 @@ export function createPeopleSystem(): System {
 
       ctx.scene.add(...meshes, leash);
       // review scripts (shot mode only) read the crowd through the scene graph
-      if (ctx.shotMode) meshes[0].userData.peopleSim = sim;
+      if (ctx.shotMode) {
+        meshes[0].userData.peopleSim = sim;
+        // (what the eyes ride's lens shows, on the real camera: review scripts only, its own chunk)
+        const m0 = meshes[0];
+        void import('./lens-report').then((m) => {
+          m0.userData.peopleLens = () => (sim ? m.lensReport(ctx, sim, looks, rideOf(ctx)) : null);
+        });
+      }
       for (const m of meshes) m.count = 1; // warm the program with something drawn
       await ctx.compile();
       for (const m of meshes) m.count = 0;
@@ -535,17 +545,39 @@ export function createPeopleSystem(): System {
       lens.update(ctx.time.fixedDt, v.cityX, v.cityZ, v.altTerrain, v.mode === 'explore' && v.cityDist < ctx.world.city.radius);
       const r = rideOf(ctx);
       if (r >= 0) sim.on[r] = 1;
-      // the ridden walker keeps a camera's berth from everyone (people/sim.ts RIDER_GAP), wider
-      // in front of a kid's low eye
-      sim.rider = r;
-      sim.riderK = r >= 0 && looks[r].flags & LookFlag.Kid ? KID_BERTH : 1;
+      // The ridden walker keeps a camera's berth from everyone (people/sim.ts RIDER_GAP), wider
+      // in front of a kid's low eye. A ride's start: if the camera is already in the head (a cut:
+      // a settled ride) or still far off (from orbit, the street round them a few pixels), people
+      // close in its view step along their paths out of it at once; flying in from close by they
+      // turn away and keep further off while it comes (RIDER_FRESH).
+      // (whether the camera is there at once is known in update, once the camera has moved: cutCheck)
+      if (r !== sim.rider) {
+        if (r >= 0) {
+          sim.startRide(r, looks[r].flags & LookFlag.Kid ? RIDER_KID_K : 1, false);
+          cutCheck = r;
+        } else sim.endRide();
+      }
+      let approach = false;
+      if (r >= 0) {
+        // "in the lens" is about where the ride camera looks (the smoothed yaw), its facing until then
+        sim.riderVx = followFor === r ? Math.cos(follow.yaw) : sim.hx[r];
+        sim.riderVz = followFor === r ? Math.sin(follow.yaw) : sim.hz[r];
+        // (flying in to a walker's eyes, the camera low over the street is in people's way: they
+        // step round where it is, as round a pedestrian, so no head brushes past the lens)
+        if (v.altTerrain < 4.5 && v.cityDist < ctx.world.city.radius) {
+          walkerEye(sim, looks[r], r, 1, true, pe);
+          eyeToWorld(pe, pe.fx, pe.fz, eyeOut);
+          approach = ctx.camera.position.distanceTo(eyeOut.pos) > 0.6;
+        }
+      }
       // the walker just ridden walks on out of the camera, which is no obstacle to it a while
       if (r >= 0) {
         lastRid = r;
         freeT = FREE_S;
       } else if (freeT > 0) freeT -= ctx.time.fixedDt;
       sim.free = freeT > 0 ? lastRid : -1;
-      sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, lens.x, lens.z, lens.on, lens.r, lens.lens);
+      if (approach) sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, v.cityX, v.cityZ, true, 1.1, false);
+      else sim.step(ctx.time.fixedDt, ctx.time.t, cr.busy, cr.blocked, lens.x, lens.z, lens.on, lens.r, lens.lens);
     },
 
     onTimeJump(ctx) {
@@ -572,6 +604,18 @@ export function createPeopleSystem(): System {
       if (jx * jx + jy * jy + jz * jz > 16) clearView(ctx);
       // the ridden walker (and its dog) is drawn at any altitude, the crowd only near the city
       const ri = rideOf(ctx);
+      if (cutCheck >= 0) {
+        // A ride's first frame: the camera already in the head (a settled ride: a cut) or still far
+        // off (from orbit) — people close in its view step out of it at once (invisible), else
+        // they turn away as it flies in (people/sim.ts RIDER_FRESH).
+        if (cutCheck === ri && sim.rider === ri) {
+          walkerEye(sim, looks[ri], ri, ctx.time.alpha, true, pe);
+          eyeToWorld(pe, pe.fx, pe.fz, eyeOut);
+          const d = eye.distanceTo(eyeOut.pos);
+          if (d < 1.5 || d > 40) sim.clearRide();
+        }
+        cutCheck = -1;
+      }
       if (followFor >= 0 && ri !== followFor) followFor = -1;
       const crowd = alt < POP_HI && v.cityDist < ctx.world.city.radius + 60 + alt;
       const show = crowd || ri >= 0;
@@ -726,13 +770,13 @@ export function createPeopleSystem(): System {
         writeMatrix(arr[m], k);
         // glance at a nearby player: continuous in distance and angle, so it never snaps
         let look = 0;
-        if (street && d2 < 64 && (l.seed & 3) !== 0) {
+        if (street && d2 < 64 && ((l.seed & 3) !== 0 || (riding && !ridden && dist < 3.8))) {
           const o = k * 16;
           const A = arr[m];
           const ang = Math.atan2(-(A[o] * ex + A[o + 1] * ey + A[o + 2] * ez), -(A[o + 8] * ex + A[o + 9] * ey + A[o + 10] * ez));
-          // (riding someone's eyes, passers-by close to the lens look where they are going: a
-          // stare into the camera at arm's length is a face filling the frame)
-          look = Math.max(-1.1, Math.min(1.1, ang)) * smooth(7.5, 3.5, dist) * smooth(2.0, 1.3, Math.abs(ang)) * (riding ? smooth(1.8, 3, dist) : 1);
+          // (riding someone's eyes, passers-by only glance at the camera from over 4 m, and closer
+          // anyone facing the lens looks a little away from it: people/track.ts headLook)
+          look = ridden ? 0 : headLook(ang, dist, l.seed, riding);
         }
         // a walker waiting at a kerb checks the traffic (shader yaw: + = turn left)
         if (walker && gw[i] > 0.01) look = Math.max(-1.1, Math.min(1.1, look - gw[i] * kerbGlance(ctx.time.render + gph[i])));

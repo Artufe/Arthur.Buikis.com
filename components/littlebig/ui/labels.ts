@@ -23,7 +23,7 @@ const FULL_DIST = 170;
 /** A moving anchor's tag (the station) sits this far (px) above the top of its model's screen circle. */
 const TRACK_GAP = 5;
 /** The followed thing's keep-out circle: its bounding radius on screen × this, plus a margin (px). */
-const SUBJECT_SCALE = 0.92;
+const SUBJECT_SCALE = 1; // (0.92 in round 2 let a tag sit on a chased plane's wingtip)
 const SUBJECT_PAD = 10;
 
 interface Item {
@@ -340,9 +340,20 @@ export class LabelLayer {
       it.shown = shown;
       const target = shown ? it.vis : 0;
       it.alpha += (target - it.alpha) * (target > it.alpha ? kIn : kOut);
-      if (target === 0 && it.alpha < 0.03) it.alpha = 0;
+      if (target === 0 && (it.alpha < 0.03 || (it.alpha > 0 && this.onPanel(it)))) it.alpha = 0;
       this.write(it);
     }
+  }
+
+  /** A tag fading out while its anchor slides under a panel (a fast camera move): gone at once, never drawn over the HUD. */
+  private onPanel(it: Item): boolean {
+    const x0 = it.x - it.w / 2;
+    const y0 = it.y - it.h + DOT;
+    const x1 = x0 + it.w;
+    const y1 = y0 + it.h;
+    const r = this.reserved;
+    for (let i = 0; i + 3 < r.length; i += 4) if (x0 < r[i + 2] && x1 > r[i] && y0 < r[i + 3] && y1 > r[i + 1]) return true;
+    return false;
   }
 
   private write(it: Item) {
@@ -373,6 +384,11 @@ export class LabelLayer {
       it.wa = a;
       el.style.opacity = a.toFixed(3);
     }
+  }
+
+  /** The tags' sizes changed (touch, compact): measure them again on the next update. */
+  remeasure(): void {
+    for (const it of this.list) it.w = 0;
   }
 
   dispose(): void {

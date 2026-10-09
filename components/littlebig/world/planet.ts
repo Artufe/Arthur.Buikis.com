@@ -36,9 +36,13 @@ import {
 } from './config';
 import { createNoise3, type Noise3 } from './noise';
 import { buildRegion } from './region/build';
-import type { Region, SurfaceHit } from './region/types';
+import { cutDist } from './region/pad';
+import { WALL_BAND, WALL_FOOT, type Region, type SurfaceHit } from './region/types';
 import { Rng } from './rng';
-import { angleBetween, cross3, dirFromLatLon, normalize3, tangentFrame, v3, type Vec3 } from './sphere';
+import { angleBetween, cross3, dirFromLatLon, dirToChart, normalize3, tangentFrame, v3, type Vec3 } from './sphere';
+
+/** v2 (R2 refine 2): a sea wall's stone band narrows to nothing over this far past either end of its line (m). */
+const WALL_TAPER = 3;
 
 /** Biome ids. Numeric so they pack into vertex attributes. */
 export const Biome = {
@@ -75,9 +79,13 @@ export interface PlanetAnchors {
   /** The alpine valley's meadow centre (in the hollow between the peaks) and the unit tangent there along its pass, toward the city (VALLEY). */
   readonly valley: Vec3;
   readonly passAxis: Vec3;
-  /** v2 (R1): the farm village's shelf beside the windmill hill and the harbour's cape on the south coast (SHELF, CAPE). */
+  /** v2 (R1): the farm village's land and the harbour's (v2 R2: aliases of land.downs and land.point). */
   readonly shelf: Vec3;
   readonly cape: Vec3;
+  /** v2 (R2): the centres of the land each town stands on (TOWN_LAND), by name ('downs', 'point', …). */
+  readonly land: Readonly<Record<string, Vec3>>;
+  /** v2 (R2): the resort's bay's centre (BAY). */
+  readonly bay: Vec3;
   /** The two small headlands off the city's coast, away from the range. */
   readonly headlands: readonly Vec3[];
   /** The islands in the city's sea (5); v2 (R1): the first is the island resort's. */
@@ -134,16 +142,53 @@ const easeOut = (x: number) => {
  * radii round the hollow; the pass corridor along the axis toward the city: the saddle's distance
  * and height, the ramp's foot and height there, the corridor's half width at the saddle and on the
  * ramp, its centre's offset across the axis (toward the side the hairpins turn on), its lateral fade.
+ * v2 (R2): the meadow floor tilts (`tilt`, valleyFloor) up away from the pass, `town` / `townU` place the
+ * village's centre in the pass frame, `grassR` is the meadow's grass radius (beyond it, and wherever the
+ * ground rises `slopeRock` m over the floor inside the meadow's rim, the slopes are rock and scree).
  */
-/** v2 (R1): the farm village's shelf and the harbour's cape (compass bearing from the city, arc m, blob radius rad, height k). */
-export const SHELF = { deg: 248, m: 141, r: 0.22, k: 0.26 } as const;
 /** v2 (R1): extra moisture (forest) on the wild third land mass. */
 export const WILD_WET = 0.12;
 /** v2 (R1): how much further out (rad) the island resort's island stands than v1's. */
-export const ISLE_OUT = 0.045;
-export const CAPE = { deg: 174, m: 133, r: 0.21, k: 0.26 } as const;
+export const ISLE_OUT = 0.12;
+/**
+ * v2 (R2): land for the towns, beyond the capital's lagoon ring (V2 §1.1: every town its own
+ * silhouette, ≥ 30 m of countryside or sea from the plateau's blend ring and from each other). Each
+ * entry is a blob: centre by compass bearing (deg, 0 = north, clockwise) and arc distance (m) from
+ * `from` (the city, or the far continent's centre), radius r (rad) and height k (planet blobs).
+ */
+export const TOWN_LAND: Readonly<Record<string, { from: 'city' | 'second'; deg: number; m: number; r: number; k: number }>> = {
+  // the farmland beyond the windmill hill: millbrook among its fields, the mills on the hill behind
+  downs: { from: 'city', deg: 262, m: 178, r: 0.32, k: 0.24 },
+  // the south-west point: port pebble's harbour on its seaward shore
+  point: { from: 'city', deg: 221, m: 173, r: 0.3, k: 0.22 },
+  // the west isle across a strait from the downs: puffin bay's (over the isle bridge)
+  isle: { from: 'city', deg: 268, m: 282, r: 0.2, k: 0.24 },
+  // the resort island's east shore, filled out round the back of coral cove's pad
+  cove: { from: 'city', deg: 69.5, m: 201, r: 0.085, k: 0.2 },
+  // the shoulder seaward of the alpine valley: snowberry's meadow reaches its rim before the coast falls away
+  alps: { from: 'city', deg: 122, m: 198, r: 0.24, k: 0.45 },
+  // the far continent: far haven's north-east coast, the west lobe (the lookout)
+  reach: { from: 'second', deg: 32, m: 96, r: 0.46, k: 0.22 },
+  west: { from: 'second', deg: 292, m: 100, r: 0.26, k: 0.26 },
+};
 
-export const VALLEY = { meadowH: 13.5, meadowIn: 26, meadowOut: 38, saddle: 30, passH: 14.5, rampEnd: 56, rampH: 2.3, passHalf: 17, rampHalf: 32, passShift: -5, fade: 16 } as const;
+/**
+ * v2 (R2): the resort's bay: a round bite out of the island resort's island on its seaward side (away
+ * from the capital), so coral cove's promenade curves round a beach crescent. `out` (rad) from the
+ * island's centre, radius `r` (rad), `depth` subtracted from the continent field at its middle.
+ */
+export const BAY = { out: 0.15, r: 0.095, depth: 0.42 } as const;
+
+export const VALLEY = { townU: -1, town: -5, meadowH: 13.5, tilt: 0.07, meadowIn: 29, meadowOut: 41, grassR: 32, slopeRock: 2, saddle: 30, passH: 11.5, rampEnd: 56, rampH: 2.3, passHalf: 17, rampHalf: 32, passShift: -5, fade: 16 } as const;
+
+/**
+ * v2 (R2): the alpine meadow's floor height (m) at `v` m along the pass axis from the valley's centre
+ * (+ toward the pass): VALLEY.meadowH at the village's centre, rising VALLEY.tilt per metre away from
+ * the pass, so the village climbs its slope toward the peaks behind it (the road comes in at its low end).
+ */
+export function valleyFloor(v: number): number {
+  return VALLEY.meadowH - VALLEY.tilt * (v - VALLEY.town);
+}
 
 const cache = new Map<number, Planet>();
 
@@ -223,16 +268,18 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
   const headlands = [pointAt(cityDir, 0.74, rangeBearing + 2.3), pointAt(cityDir, 0.72, rangeBearing - 2.0)];
   blobs.push({ c: headlands[0], r: 0.13, k: 0.14 });
   blobs.push({ c: headlands[1], r: 0.12, k: 0.13 });
-  // v2 (R1): land for two towns standing well clear of the plateau (V2 §1.1: separate silhouettes,
-  // not suburbs), placed by compass bearing from the city (0 = north, clockwise; metres of arc):
-  //   - a broad shelf south-west of the windmill hill, where the farm village stands among its fields;
-  //   - a cape on the south coast, the harbour town's (in the afternoon light, face-on in the orbit view).
-  // The SW headland's tip, the N headland (and so the lighthouse's pick), the windmill hill are v1's.
-  const atCompass = (m: number, deg: number) => pointAt(cityDir, m / R, Math.PI / 2 - (deg * Math.PI) / 180);
-  const shelf = atCompass(SHELF.m, SHELF.deg);
-  const cape = atCompass(CAPE.m, CAPE.deg);
-  blobs.push({ c: shelf, r: SHELF.r, k: SHELF.k });
-  blobs.push({ c: cape, r: CAPE.r, k: CAPE.k });
+  // v2 (R2): land for the towns (TOWN_LAND), by compass bearing from the city or the far continent.
+  // The N headland (and so the lighthouse's pick), the windmill hill, the range are v1's.
+  const atCompass = (from: Vec3, m: number, deg: number) => pointAt(from, m / R, Math.PI / 2 - (deg * Math.PI) / 180);
+  const land: Record<string, Vec3> = {};
+  const addLand = (from: 'city' | 'second', at: Vec3) => {
+    for (const [name, L] of Object.entries(TOWN_LAND)) {
+      if (L.from !== from) continue;
+      land[name] = atCompass(at, L.m, L.deg);
+      blobs.push({ c: land[name], r: L.r, k: L.k });
+    }
+  };
+  addLand('city', cityDir);
   // Islands in the city's sea, east and south of it (beside the city as seen from orbit). Each is
   // two or three overlapping blobs so none is a round dot.
   const islands: Vec3[] = [];
@@ -255,10 +302,21 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     islands.push(c);
     island(c, r);
   }
+  // v2 (R2): the resort's bay on the island's seaward side (BAY)
+  const bay = (() => {
+    const isl = islands[0];
+    const c = cityDir.x * isl.x + cityDir.y * isl.y + cityDir.z * isl.z;
+    const away = normalize3(v3(isl.x - cityDir.x * c, isl.y - cityDir.y * c, isl.z - cityDir.z * c));
+    // (tangent at the island pointing away from the city)
+    const t = normalize3(v3(away.x - isl.x * (away.x * isl.x + away.y * isl.y + away.z * isl.z), away.y - isl.y * (away.x * isl.x + away.y * isl.y + away.z * isl.z), away.z - isl.z * (away.x * isl.x + away.y * isl.y + away.z * isl.z)));
+    return normalize3(v3(isl.x * Math.cos(BAY.out) + t.x * Math.sin(BAY.out), isl.y * Math.cos(BAY.out) + t.y * Math.sin(BAY.out), isl.z * Math.cos(BAY.out) + t.z * Math.sin(BAY.out)));
+  })();
+  const cosBay = Math.cos(BAY.r);
   // The far side: a second continent and an archipelago arcing away from it.
   const anti = v3(-cityDir.x, -cityDir.y, -cityDir.z);
   const second = pointAt(anti, 0.45, rng.range(0, Math.PI * 2));
   blobs.push({ c: second, r: 0.72, k: 0.55 });
+  addLand('second', second);
   const archBearing = rng.range(0, Math.PI * 2);
   const archipelago: Vec3[] = [];
   for (let i = 0; i < 6; i++) {
@@ -297,6 +355,12 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     // Coves and spits at a ~20-40 m scale, strongest at the waterline.
     const cn = nContinent.fbm3(d.x * 6.5 + 11, d.y * 6.5, d.z * 6.5 - 7, 3);
     c += 0.075 * cn;
+    // v2 (R2): the resort's bay
+    const cb = d.x * bay.x + d.y * bay.y + d.z * bay.z;
+    if (cb > cosBay) {
+      const x = (1 - cb) / (1 - cosBay);
+      c -= BAY.depth * (1 - x) * (1 - x);
+    }
     // Guarantee land around the plateau: the blend ring and a few metres beyond it are always land
     // (the noise still shapes the coast right after, so it is not a circle).
     const cosCity = d.x * cityDir.x + d.y * cityDir.y + d.z * cityDir.z;
@@ -363,14 +427,16 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     const u = (d.x * passSide.x + d.y * passSide.y + d.z * passSide.z) * R;
     let out = h;
     const wm = (1 - smooth(VALLEY.meadowIn, VALLEY.meadowOut, r)) * shore;
-    if (wm > 0) out += (VALLEY.meadowH + 0.5 * nDetail.simplex3(d.x * 13, d.y * 13, d.z * 13) - out) * wm;
+    // (v2 R2: the floor tilts up away from the pass, valleyFloor)
+    const floor = valleyFloor(v);
+    if (wm > 0) out += (floor + 0.5 * nDetail.simplex3(d.x * 13, d.y * 13, d.z * 13) - out) * wm;
     if (v > VALLEY.meadowIn - 6 && v < VALLEY.rampEnd + 9) {
       const half = VALLEY.passHalf + (VALLEY.rampHalf - VALLEY.passHalf) * smooth(VALLEY.saddle, VALLEY.saddle + 9, v);
       const wl = (1 - smooth(half, half + VALLEY.fade, Math.abs(u - VALLEY.passShift))) * (1 - smooth(VALLEY.rampEnd, VALLEY.rampEnd + 9, v)) * smooth(VALLEY.meadowIn - 6, VALLEY.meadowIn, v) * shore;
       if (wl > 0) {
         const f =
           v < VALLEY.saddle
-            ? VALLEY.meadowH + (VALLEY.passH - VALLEY.meadowH) * smooth(VALLEY.meadowIn - 4, VALLEY.saddle, v)
+            ? floor + (VALLEY.passH - floor) * smooth(VALLEY.meadowIn - 4, VALLEY.saddle, v)
             : VALLEY.passH - (VALLEY.passH - VALLEY.rampH) * Math.min(1, (v - VALLEY.saddle) / (VALLEY.rampEnd - VALLEY.saddle));
         out += (f - out) * wl;
       }
@@ -455,20 +521,58 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     return cosT > cosWild0 ? Math.min(1, m + WILD_WET * smooth(cosWild0, cosWild1, cosT)) : m;
   }
 
-  const cosValleyGrass = Math.cos((VALLEY.meadowOut + 4) / R);
-  /** v2 (R1): inside the alpine valley's meadow or on its pass (grass, not rock). */
-  function inValley(d: Vec3): boolean {
+  const cosValleyGrass = Math.cos(VALLEY.grassR / R);
+  const cosValleyRim = Math.cos((VALLEY.meadowOut + 4) / R);
+  /**
+   * v2 (R1): inside the alpine valley's meadow or on its pass (grass, not rock). v2 (R2): the meadow's
+   * grass reaches VALLEY.grassR; out to its rim the slopes rising VALLEY.slopeRock m over its floor are
+   * rock and scree (seen from the village: the rock band, then the snow, right behind its top street).
+   */
+  function inValley(d: Vec3, h: number): boolean {
     const cv = d.x * valley.x + d.y * valley.y + d.z * valley.z;
-    if (cv >= cosValleyGrass) return true;
     if (cv < cosValleyReach) return false;
     const v = (d.x * passAxis.x + d.y * passAxis.y + d.z * passAxis.z) * R;
+    if (cv >= cosValleyGrass) return true;
+    if (cv >= cosValleyRim && h < valleyFloor(v) + VALLEY.slopeRock) return true;
     const u = (d.x * passSide.x + d.y * passSide.y + d.z * passSide.z) * R;
     return v > 0 && v < VALLEY.rampEnd + 4 && Math.abs(u - VALLEY.passShift) < VALLEY.rampHalf + 4;
   }
   const _hit: SurfaceHit = { cls: 'free', roadDist: 0, edge: -1, settlement: -1 };
+  const _wq = { x: 0, z: 0 };
+  /**
+   * v2 (R2 refine): true if `d` lies within WALL_BAND m seaward of a sea wall's face or under its block
+   * (QuayWall.depth inland), along the wall's reach: the ground there — the wall's footing under the
+   * water, the ramp under its deck — is dressed stone. A terrain facet takes its corners' majority
+   * biome and the cells are ≈ 2.8 m, so both rows of corners beside the wall must be stone or the face
+   * comes out a sawtooth of grey and green teeth (the band is ≥ 1.25 cells each side). (v2 R2 refine 2:
+   * from the line's first point to its last, the band narrowing to nothing over WALL_TAPER m past
+   * either end — it had ended square on a circle round the pad, a serrated stub in the grass.)
+   */
+  function seaWallBand(d: Vec3): boolean {
+    if (!region) return false;
+    for (const s of region.settlements) {
+      const w = s.wall;
+      if (!w) continue;
+      if (d.x * s.dir.x + d.y * s.dir.y + d.z * s.dir.z < Math.cos((s.padR + WALL_BAND + WALL_TAPER) / R)) continue;
+      const q = dirToChart(s.chart, d, _wq);
+      const cd = cutDist(s, q.x, q.z);
+      if (!(cd >= -w.depth && cd <= WALL_BAND)) continue;
+      const L = w.line;
+      const n = L.length;
+      const ex = L[n - 2] - L[0], ez = L[n - 1] - L[1];
+      const len = Math.hypot(ex, ez) || 1;
+      const u = ((q.x - L[0]) * ex + (q.z - L[1]) * ez) / len;
+      const past = u < 0 ? -u : u > len ? u - len : 0;
+      if (past >= WALL_TAPER) continue;
+      const k = 1 - past / WALL_TAPER;
+      if (cd >= -w.depth * k && cd <= WALL_BAND * k) return true;
+    }
+    return false;
+  }
   function biomeAt(d: Vec3, hIn?: number): BiomeId {
     const h = hIn ?? heightAt(d);
     if (h < -3.5) return Biome.DeepOcean;
+    if (region && withRegion && h > WALL_FOOT - 0.6 && h < 2.6 && seaWallBand(d)) return Biome.Rock;
     if (h < 0) return Biome.Shallows;
     if (plateauWeight(d) >= 1) return Biome.City;
     // v2 (R1): the region's paved ground (town pads, gate plazas, runways, carriageways) is built
@@ -479,10 +583,23 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
       const cls = region.surface(d, _hit).cls;
       if (cls !== 'free' && cls !== 'verge' && cls !== 'pad') return Biome.City;
       pad = cls === 'pad';
+      // v2 (R2 refine 2): a road's causeway built out over the sea (a bridge's approach, a road across
+      // a shallow inlet) is banked in rock, a revetment, not a grassy spit (nor a lighthouse's point:
+      // nature/landmarks.ts picks the grassy or sandy spot with the most sea round it)
+      if ((cls === 'verge' || cls === 'free') && _hit.roadDist < 16 && h < 2.2 && baseHeightAt(d) < -0.4) return Biome.Rock;
       // v2 (R1): ground the region built up (pads, verges, fills over the shallows) is grass down to a
       // thin sand rim at the water, never a sand / grass mosaic on a flat (the old sawtooth): the
       // biome follows the carve, not the carved height against the beach line.
       built = h > 0.35 && (cls !== 'free' || h - baseHeightAt(d) > 0.25);
+    }
+    // (v2 R2: a harbour's sea wall — the ground the region cut down or banked between a walled pad's
+    // quay and the water — is dressed stone, not a sand / grass mosaic at the waterline)
+    if (region && withRegion && !pad && h < 1.4) {
+      for (const s of region.settlements) {
+        if (!s.cut?.wall) continue;
+        if (d.x * s.dir.x + d.y * s.dir.y + d.z * s.dir.z < Math.cos((s.padR + 3) / R)) continue;
+        if (Math.abs(h - baseHeightAt(d)) > 0.3) return Biome.Rock;
+      }
     }
     // Beaches ring every shore (the city's bays too), wider in some coves than others.
     if (!built && h < 1.25 + 0.4 * nDetail.simplex3(d.x * 6.5, d.y * 6.5, d.z * 6.5)) return Biome.Beach;
@@ -490,9 +607,10 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     // Snow: a cap on every peak (a line at 18.5 m left 2–3 stray white facets on a grey blob from
     // above), lower in the heart of the range, with a ragged (not single-facet) edge.
     const jitter = 1.3 * nDetail.simplex3(d.x * 17, d.y * 17, d.z * 17);
-    if (h + jitter > 16.2 - 1.6 * smooth(0.45, 0.9, m)) return Biome.Snow;
+    // (v2 R2: never on a town's pad: the alpine village's top street stands just under the snowline)
+    if (!pad && h + jitter > 16.2 - 1.6 * smooth(0.45, 0.9, m)) return Biome.Snow;
     // (v2 R1: the alpine valley's meadow and its pass stay grass, the village's pastures, below the snowline)
-    if (m > 0.35 && h > 8 && !inValley(d)) return Biome.Rock;
+    if (!pad && m > 0.35 && h > 8 && !inValley(d, h)) return Biome.Rock;
     const moist = moistureAt(d);
     // (v2 R1: a town's pad is cleared ground, open grass and the odd tree, never forest; T1 builds on it)
     if (moist > 0.58 && h > 2.2 && !pad) return Biome.Forest;
@@ -534,7 +652,7 @@ export function createPlanet(seed: number, opts: { region?: boolean; regionBake?
     return normalize3(out);
   }
 
-  const anchors: PlanetAnchors = { range: rangeCentre, ridge: ridgeT, windHill, neck, shoulder, valley, passAxis, shelf, cape, headlands, islands, second, archipelago, third };
+  const anchors: PlanetAnchors = { range: rangeCentre, ridge: ridgeT, windHill, neck, shoulder, valley, passAxis, shelf: land.downs, cape: land.point, land, bay, headlands, islands, second, archipelago, third };
 
   const self: Planet = {
     seed,

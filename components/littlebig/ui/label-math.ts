@@ -76,6 +76,31 @@ export function screenRadius(r: number, w: number, p5: number, h: number): numbe
   return w > 1e-6 ? ((r * p5) / w) * h * 0.5 : 0;
 }
 
+/** How far (px) the circle (cx, cy, r) reaches into the box [x0, y0]–[x1, y1]; ≤ 0: clear of it. */
+export function circleIntoBox(cx: number, cy: number, r: number, x0: number, y0: number, x1: number, y1: number): number {
+  const dx = cx < x0 ? x0 - cx : cx > x1 ? cx - x1 : 0;
+  const dy = cy < y0 ? y0 - cy : cy > y1 ? cy - y1 : 0;
+  return r - Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * The planet (a sphere of radius r at the origin) as a screen circle (CSS px) seen from `eye`
+ * through the view-projection `m` (p5: projection element [5]). The silhouette's true angular
+ * radius, asin(r / d), so it is right close in too; r = Infinity when the eye is inside the sphere,
+ * 0 when the planet is behind the camera.
+ */
+export function planetDisc(m: ArrayLike<number>, eye: V3, r: number, p5: number, w: number, h: number, out: { x: number; y: number; r: number }): typeof out {
+  const d = Math.sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z);
+  const sp: ScreenPoint = { x: 0, y: 0, w: 0, z: 0 };
+  project(m, 0, 0, 0, w, h, sp);
+  out.x = sp.x;
+  out.y = sp.y;
+  if (d <= r * 1.0005) out.r = Infinity;
+  else if (sp.w <= 0) out.r = 0;
+  else out.r = (p5 * h * 0.5 * r) / Math.sqrt(d * d - r * r);
+  return out;
+}
+
 // ── fly-to framing (a label click) ──
 
 type V3 = { x: number; y: number; z: number };

@@ -169,9 +169,18 @@ export function blendPose(a: FramePose, b: FramePose, e: number, lift: LiftProfi
   return out;
 }
 
-/** The arc's position at e with a given lift (log units), no look, no lens. Into out. */
-export function arcPoint(a: Vector3, b: Vector3, e: number, lift: number, out: Vector3): Vector3 {
-  return around(a, b, e, lift, true, out);
+/**
+ * The arc's position at e with a given lift (log units), no look, no lens. Into out. `logH` false:
+ * the height is interpolated linearly (then lifted by exp(lift)), so a climb rises evenly.
+ */
+export function arcPoint(a: Vector3, b: Vector3, e: number, lift: number, out: Vector3, logH = true): Vector3 {
+  if (logH) return around(a, b, e, lift, true, out);
+  around(a, b, e, 0, false, out);
+  if (lift !== 0 && e > 0 && e < 1) {
+    const r = out.length();
+    out.multiplyScalar((R + Math.max(ALT_FLOOR, r - R) * Math.exp(lift)) / r);
+  }
+  return out;
 }
 
 const LIFT_N = 48;

@@ -17,8 +17,15 @@
 // connectors) are built in a chart round their node.
 //
 // ── Heights ──
-// A settlement stands on a PAD: a flat disc (Settlement.h, ±0.05) of radius padR, blended into the
-// natural terrain over `blend` metres with a smoothstep (no cliff), like the capital's plateau.
+// A settlement stands on a PAD: a disc of radius padR, blended into the natural terrain over `blend`
+// metres with a smoothstep (no cliff), like the capital's plateau. v2 (R2): a pad's surface is a
+// PLANE (±0.05): Settlement.h at its centre, rising `grade` m per m toward compass `upHeading` (0 =
+// flat: the farms, the capital). A harbour's town climbs gently back from its quay, an alpine
+// village's up its slope; padHeight(s, x, z) (world/region/pad.ts) gives the surface at a plan
+// point. A waterfront pad (harbour, metro, resort) is CUT on its seaward side by its quay (or
+// promenade) line: the pad is the disc minus a bite (Settlement.cut), so the town meets the water
+// along a straight quay (a harbour's sea wall: the terrain drops into the sea right at it) or the
+// curve of a beach crescent (a resort's promenade, the beach below it).
 // Roads are graded (≤ ~12 %) and carved: the terrain eases to the road bed (path h − ROAD_H) across
 // the carriageway, sidewalks and shoulders, then blends back to nature on the verges. Bridges are
 // NOT carved (the terrain under a bridge is the natural seabed / ground). Path heights (`WPath.h`)
@@ -87,9 +94,24 @@ export interface Settlement {
    * The capital's is CITY_CHART.
    */
   chart: Chart;
-  /** Flat pad radius (m, plan) and the blend ring beyond it. The capital: CITY_PLAN_RADIUS / plateau blend. */
+  /** Pad radius (m, plan) and the blend ring beyond it. The capital: CITY_PLAN_RADIUS / plateau blend. */
   padR: number;
   blend: number;
+  /**
+   * v2 (R2): the pad's plane: it rises `grade` m per m (0 = flat) toward compass heading `upHeading`
+   * (rad). Surface height at plan (x, z) (+x east, +z south): h + grade · (x · sin up − z · cos up);
+   * padHeight(s, x, z) computes it. The capital: 0.
+   */
+  grade: number;
+  upHeading: number;
+  /**
+   * v2 (R2): a waterfront pad's seaward side: the pad is the disc minus a bite, the disc of radius
+   * `r` whose near edge crosses the town's main axis `f` m from the centre, toward `heading` (r =
+   * Infinity: a straight quay line square to the axis; finite: a promenade curving round a beach
+   * crescent). `wall`: the edge is a sea wall (the terrain drops into the water within ~1.5 m:
+   * harbours, the metro's docks); otherwise a beach slopes down from it. Absent: a full disc.
+   */
+  cut?: { f: number; r: number; wall: boolean };
   /** Compass heading (rad) of the town's main axis: from its gate in along the main street. */
   heading: number;
   /** Land mass (index into Region.components). */
@@ -101,12 +123,89 @@ export interface Settlement {
   gates: number[];
   /** The town's open square / green (plan x, z, radius), if its style has one: T1 keeps it free. */
   square?: { x: number; z: number; r: number };
-  /** Harbour styles: the quay line along the water (plan x, z interleaved) at pad height. */
+  /**
+   * Waterfront styles: the quay (or promenade) edge along the water, plan (x, z) interleaved, on the
+   * cut's line; its surface is padHeight there (v2 R2: a harbour's quay ≈ 1.1 m above the sea, the
+   * water right below its edge, so boats moor alongside).
+   */
   quay?: Float64Array;
+  /**
+   * v2 (R2 refine): a walled waterfront's sea wall (harbours, the metro's docks; absent on a beach),
+   * for H1 to extrude as a dedicated mesh: the terrain under it is far coarser than the wall (its
+   * cells ≈ 2.8 m), so the stone face is never left to the terrain's triangles.
+   */
+  wall?: QuayWall;
   /** Pier ids (Region.piers) and airport ids (Region.airports) that belong to it. */
   piers: number[];
   airports: number[];
+  /**
+   * v2 (R2 refine 2): what each of the town's dead ends is for (absent: none): its turning circle is a
+   * paved yard, plan (x, z) at the end node and radius r (the turning circle and its sidewalk), that
+   * T1 rings with buildings of its `kind` — a farm's barns and sheds round its farmyard, a boatyard's
+   * sheds and slip, the chalets round their yard, the villas round their drive, the fish market, the
+   * school's playground, a clifftop lookout's bench. N2 keeps it clear (it is 'pad' to Region.surface).
+   */
+  yards?: Yard[];
 }
+
+/** v2 (R2 refine 2): a dead end's purpose (Settlement.yards). */
+export type YardKind = 'farm' | 'boat' | 'chalet' | 'villa' | 'market' | 'school' | 'lookout';
+
+export interface Yard {
+  /** The end node (RNode id, place 'end'). */
+  node: number;
+  kind: YardKind;
+  /** Plan position (the node's) and radius (m), in the settlement's chart. */
+  x: number;
+  z: number;
+  r: number;
+}
+
+/**
+ * v2 (R2 refine): a sea wall along a walled quay (Settlement.wall). H1 extrudes it: a vertical stone face
+ * on the seaward side of `line` from `foot` up to the deck (`top`), capped by a coping stone `coping` m
+ * wide (inland from the face) standing `lip` m proud of the deck. Behind it the paved apron runs `apron`
+ * m inland to the quay street's carriageway (Region.surface: 'plaza'; KEEP.plaza). The terrain is cut
+ * to the water within SEA_WALL (≈ 1 m) outside the face and dressed as stone ±WALL_BAND m either side
+ * (planet.ts biomeAt), so nothing green or sandy touches the wall.
+ */
+export interface QuayWall {
+  /** The face's top edge, plan (x, z) interleaved in the settlement's chart: the quay line (Settlement.quay). */
+  line: Float64Array;
+  /** The same vertices as unit directions (x, y, z interleaved). */
+  dir: Float32Array;
+  /** Deck height above sea level at each vertex (m): the pad's surface on the quay line. */
+  top: Float32Array;
+  /** The face's foot (m above sea level: below the water, so the face meets the dredged basin). */
+  foot: number;
+  /** Coping stone: width (m inland from the face) and height above the deck (m). */
+  coping: number;
+  lip: number;
+  /** The paved apron behind the face: from it to the quay street's carriageway edge (m). */
+  apron: number;
+  /**
+   * v2 (R2 refine 2): the wall is a solid block this deep (m inland from the face, ≥ the apron): its
+   * deck is the pad's surface (`top` at the face), its face drops to `foot`. Under it the terrain ramps
+   * down from the deck at its back to WALL_LOW at the face (so no terrain facet stands proud of the
+   * face, at either terrain detail): a renderer caps the block, it is not the ground.
+   */
+  depth: number;
+  /** Unit plan normal (x, z) of the face, pointing out to sea (the cut's axis). */
+  nx: number;
+  nz: number;
+}
+
+/** v2 (R2 refine): the sea wall's foot (m above sea level: R2 refine 2, under the 2.2 m basin) and its coping (m). */
+export const WALL_FOOT = -2.3;
+export const WALL_COPING = 0.6;
+export const WALL_LIP = 0.22;
+/** Paved quay apron: the quay line to the quay street's carriageway (QUAY_SET 5.2 − its 2.5 m half width + 0.3). */
+export const QUAY_APRON = 3.0;
+/** biomeAt dresses the ground ±WALL_BAND m either side of a sea wall as stone (≥ 1.5 terrain cells; inland, to the block's back). */
+export const WALL_BAND = 4.5;
+/** v2 (R2 refine 2): the sea wall's block depth (QuayWall.depth, m) and the terrain's height at its face under it (m). */
+export const WALL_DEPTH = 3.5;
+export const WALL_LOW = -0.8;
 
 /**
  * Where the capital meets the region. The capital's gate avenue (a v1 cul-de-sac run out to the rim,
@@ -186,7 +285,38 @@ export interface Bridge {
   /** Lowest deck height over water (m above sea level) and the clearance under it at the lowest point over water. */
   deckMin: number;
   clearance: number;
+  /** v2 (R2 refine): its two abutments, at s0 and at s1 (H1 clads them: BridgeAbutment). */
+  abutments: [BridgeAbutment, BridgeAbutment];
 }
+
+/**
+ * v2 (R2 refine): a bridge end. The approach's fill stops at the span's abutment plane and the ground
+ * falls away under the deck's first metres (to the water, or a beach), the fill's end fanning out to
+ * either side: that drop is a built face, not terrain — H1 clads the box as a stone abutment (its face
+ * across the road, wing walls flaring out and back along both sides of the approach's fill): `half` m
+ * either side of the centreline, from `back` m behind the face (on the approach) to `depth` m into the
+ * span, from `foot` up to the deck. Every bank near a bridge end steeper than the carve's rule lies
+ * inside one (spec'd).
+ */
+export interface BridgeAbutment {
+  /** Arc length of the face on the edge's centreline (the span's s0 or s1). */
+  s: number;
+  /** Unit direction of the face's centre on the centreline, and the unit tangent pointing into the span. */
+  dir: Vec3;
+  into: Vec3;
+  /** Half-width of the box across the road, its depth into the span and its reach back along the approach (m). */
+  half: number;
+  depth: number;
+  back: number;
+  /** Deck height at the face, and the lowest ground in the box (m above sea level). */
+  top: number;
+  foot: number;
+}
+
+/** v2 (R2 refine): an abutment box reaches this far either side beyond the road's verge, this far into the span and this far back along the approach (m). */
+export const ABUT_WING = 10;
+export const ABUT_DEPTH = 3.5;
+export const ABUT_BACK = 9;
 
 export interface REdge {
   id: number;
@@ -353,6 +483,12 @@ export interface RailLine {
 /** What lies at a surface point, for N2's scatter and anyone placing things outside the capital. */
 export type RegionClass = 'road' | 'verge' | 'pad' | 'plaza' | 'runway' | 'free';
 
+/** v2 (R2): what Region.keepOut tests (bit flags; KEEP_ALL by default). */
+export const KEEP = { road: 1, pad: 2, plaza: 4, runway: 8, pier: 16 } as const;
+export const KEEP_ALL = 31;
+/** v2 (R2 refine): the largest margin Region.keepOut honours (m; larger ones are clamped): a big tree's crown, the camera's radius. */
+export const KEEP_MARGIN_MAX = 8;
+
 /** Output of Region.surface(): class, distance to the nearest road centreline (m), its edge id (−1 if none within reach). */
 export interface SurfaceHit {
   cls: RegionClass;
@@ -385,8 +521,16 @@ export interface Region {
    * planet's heightAt() calls it; nobody else needs to. Zero-alloc.
    */
   carve(dir: Vec3, base: number): number;
-  /** Classify a surface point (zero-alloc: writes and returns `out`). */
+  /** Classify a surface point (zero-alloc: writes and returns `out`). v2 (R2 refine): a walled quay's apron (QUAY_APRON m inland of the wall) is 'plaza'. */
   surface(dir: Vec3, out: SurfaceHit): SurfaceHit;
+  /**
+   * v2 (R2): the fast keep-out test for scatter (a tree, a rock, a field) and the camera: true if unit
+   * `dir` lies within `margin` m of a carriageway or its verge, a town pad (its quay included), a
+   * plaza or turnaround (a walled quay's paved apron too), a runway strip or apron, or a pier deck. `mask` picks which (KEEP flags,
+   * default all). `margin` is clamped to KEEP_MARGIN_MAX. One grid-cell lookup (its own buckets, built on
+   * the first call) and a few primitives; zero-alloc, ≤ 1 µs: fine per tree and per frame.
+   */
+  keepOut(dir: Vec3, margin?: number, mask?: number): boolean;
   /** Build time (ms), for the boot log and the budget spec. */
   readonly buildMs: number;
 }

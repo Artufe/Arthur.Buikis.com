@@ -17,8 +17,8 @@ import { turningRadius } from '../city/graph';
 import { hermitePoints } from '../city/path';
 import { VEHICLE_CLEARANCE } from '../city/types';
 import { chartToDir, dirToChart, tangentFrame, v3, type Chart, type Vec3 } from '../sphere';
-import { woffset, wpath, wreverse, wtrim } from './path';
-import type { Bridge, NodePlace, RConnector, REdge, RegionRoadKind, RLane, RNode, RTurn, WPath } from './types';
+import { woffset, wpath, wreverse, wsample, wsampleOut, wtrim } from './path';
+import { ABUT_BACK, ABUT_DEPTH, ABUT_WING, type Bridge, type BridgeAbutment, type NodePlace, type RConnector, type REdge, type RegionRoadKind, type RLane, type RNode, type RTurn, type WPath } from './types';
 
 export interface NodeSpec {
   dir: Vec3;
@@ -66,12 +66,25 @@ const FILLET = 0.6;
 const SHOULDER = 0.6;
 /** Tightest turn a connector may make (m, lane centre). Cars are 4 m long. */
 export const RHO_MIN = 4;
+/**
+ * v2 (R2): the tightest turn at a town junction (slow streets, ≤ 6 m/s): a T of town streets then needs a
+ * patch of only √((RHO_TOWN + o)² + o²) at a right angle (o the lane offset, 1.25 m on a 5 m street:
+ * ≈ 4.95 m), a street corner, not a plaza. (0.05 over the connectors' 3.5 m floor: the sampled paths
+ * measure a hair tighter than the arc.)
+ */
+export const RHO_TOWN = 3.55;
 /** A U-turn's lane centre runs this far inside the turning circle's carriageway edge (m). */
 export const U_INSET = 1.5;
 /** Radius of a U-turn's swing-out and swing-in fillets (m). */
 const U_FILLET = 3.8;
 /** Largest patch radius the search may reach (m). */
 const R_MAX = 11;
+/**
+ * v2 (R2 refine 2): a town lane's dead end turns round a smaller circle than a street's (the critic: every
+ * village lane ended in the same 5.4 m disc, a lollipop): carriageway radius 4.6 m, the U-turn's lane
+ * centre at 3.1 m (slow, ≤ 5 m/s: a toy car's tight turn in a farmyard or a boatyard).
+ */
+export const LANE_TURN_R = 4.6;
 
 /** A chart centred on unit direction `d` at radius r (+x east, +z south), like createChart. */
 export function chartAt(d: Vec3, r: number): Chart {
@@ -98,6 +111,34 @@ interface P2 {
  * to the tangent lines' intersection; 0 when no forward fillet exists (the intersection is behind).
  */
 function filletRadius(a: P2, b: P2): number {
+  const f = arcRadius(a, b);
+  // (a gentle bend through a junction whose lanes don't line up for an arc: a smooth Hermite instead,
+  // when it turns no tighter, v2 R2: town streets curve through their crossings)
+  if (f < RHO_MIN * 1.5 && a.tx * b.tx + a.tz * b.tz > 0.55) return Math.max(f, hermiteRadius(a, b));
+  return f;
+}
+
+/** The tightest radius (m) of the Hermite connector from a to b (hermitePoints, tangent scale 0.5). */
+function hermiteRadius(a: P2, b: P2): number {
+  const chord = Math.hypot(b.x - a.x, b.z - a.z);
+  const m = chord;
+  let best = Infinity;
+  for (let i = 1; i < 20; i++) {
+    const t = i / 20;
+    // first and second derivatives of the cubic Hermite
+    const d1x = (6 * t * t - 6 * t) * a.x + (3 * t * t - 4 * t + 1) * m * a.tx + (-6 * t * t + 6 * t) * b.x + (3 * t * t - 2 * t) * m * b.tx;
+    const d1z = (6 * t * t - 6 * t) * a.z + (3 * t * t - 4 * t + 1) * m * a.tz + (-6 * t * t + 6 * t) * b.z + (3 * t * t - 2 * t) * m * b.tz;
+    const d2x = (12 * t - 6) * a.x + (6 * t - 4) * m * a.tx + (-12 * t + 6) * b.x + (6 * t - 2) * m * b.tx;
+    const d2z = (12 * t - 6) * a.z + (6 * t - 4) * m * a.tz + (-12 * t + 6) * b.z + (6 * t - 2) * m * b.tz;
+    const sp = Math.hypot(d1x, d1z);
+    const k = Math.abs(d1x * d2z - d1z * d2x) / (sp * sp * sp || 1);
+    if (k > 1e-9) best = Math.min(best, 1 / k);
+  }
+  return best;
+}
+
+/** The arc fillet's radius alone (see filletRadius). */
+function arcRadius(a: P2, b: P2): number {
   const cr = a.tx * b.tz - a.tz * b.tx;
   const dt = a.tx * b.tx + a.tz * b.tz;
   const dx = b.x - a.x;
@@ -119,6 +160,8 @@ function filletRadius(a: P2, b: P2): number {
 
 /** Samples (x, z interleaved, ≤ 0.5 m) of the fillet from a to b (see filletRadius). */
 function filletPoints(a: P2, b: P2): number[] {
+  const f = arcRadius(a, b);
+  if (f < RHO_MIN * 1.5 && a.tx * b.tx + a.tz * b.tz > 0.55 && hermiteRadius(a, b) > f) return hermitePoints(a.x, a.z, a.tx, a.tz, b.x, b.z, b.tx, b.tz, 0.5, 0.5);
   const cr = a.tx * b.tz - a.tz * b.tx;
   const dt = a.tx * b.tx + a.tz * b.tz;
   const dx = b.x - a.x;
@@ -383,7 +426,7 @@ export function buildNetwork(nodeSpecs: NodeSpec[], edgeSpecs: EdgeSpec[]): Netw
     if (n.kind === 'end') {
       const e = edgeSpecs[n.edges[0]];
       const half = e.width / 2;
-      n.turnR = turningRadius(half);
+      n.turnR = e.kind === 'lane' ? LANE_TURN_R : turningRadius(half);
       const base = Math.sqrt(n.turnR * n.turnR - half * half);
       // the U-turn's swing-out starts where the lane ends: the lane must reach that far
       const rc = n.turnR - U_INSET;
@@ -412,32 +455,47 @@ export function buildNetwork(nodeSpecs: NodeSpec[], edgeSpecs: EdgeSpec[]): Netw
       }
       // a roundabout's ring nodes: the curb corner between the arm and the ring is all it needs
       if (n.control === 'roundabout') r0 = Math.min(r0, 4.2);
+      if (typeof process !== 'undefined' && process.env.LB_NET_DEBUG === String(n.id)) console.log('[net] dep', n.id, n.edges.map((id) => `${id}:${((dep.get(id)! * 180) / Math.PI).toFixed(0)}`).join(' '), 'r0', r0.toFixed(2));
     }
-    // the search: the smallest radius at which every connector here is a fillet ≥ RHO_MIN
+    // the search: the smallest radius at which every connector here is a fillet ≥ RHO_MIN (a town
+    // junction's RHO_TOWN, searched finely: its patch is a street corner)
+    const town = n.settlement >= 0 && n.control !== 'roundabout';
+    const rho = town ? RHO_TOWN : RHO_MIN;
+    const dr = town ? 0.05 : 0.25;
     let r = r0;
     const dbg = typeof process !== 'undefined' && process.env.LB_NET_DEBUG === String(n.id);
-    for (; r < R_MAX; r += 0.25) {
-      const { inn, out } = laneEnds(n, r);
-      if (dbg) for (const a of inn) for (const b of out) if (a.edge !== b.edge) console.log('[net]', n.id, 'r', r.toFixed(2), 'e', a.edge, '->', b.edge, classify(a, b, false), filletRadius(a, b).toFixed(2), JSON.stringify([a, b].map((q) => [q.x.toFixed(2), q.z.toFixed(2), q.tx.toFixed(2), q.tz.toFixed(2)])));
-      let ok = true;
+    const fits = (rr: number) => {
+      const { inn, out } = laneEnds(n, rr);
+      if (dbg) for (const a of inn) for (const b of out) if (a.edge !== b.edge) console.log('[net]', n.id, 'r', rr.toFixed(2), 'e', a.edge, '->', b.edge, classify(a, b, false), filletRadius(a, b).toFixed(2), JSON.stringify([a, b].map((q) => [q.x.toFixed(2), q.z.toFixed(2), q.tx.toFixed(2), q.tz.toFixed(2)])));
       for (const a of inn) {
         for (const b of out) {
           if (a.edge === b.edge) continue;
           // (two different arms leaving nearly together read as a U-turn: grow the patch until they part)
-          if (classify(a, b, false) === 'uturn' && r < R_MAX - 0.5) {
-            ok = false;
-            break;
-          }
-          if (filletRadius(a, b) < RHO_MIN) {
-            ok = false;
-            break;
-          }
+          if (classify(a, b, false) === 'uturn' && rr < R_MAX - 0.5) return false;
+          if (filletRadius(a, b) < rho) return false;
         }
-        if (!ok) break;
       }
-      if (ok) break;
+      return true;
+    };
+    for (; r < R_MAX; r += dr) if (fits(r)) break;
+    // (a town junction's patch, bisected down to 5 mm inside the last step: a street corner exactly)
+    if (town && r < R_MAX && r - dr >= r0) {
+      let lo = r - dr, hi = r;
+      for (let it = 0; it < 4; it++) {
+        const mid = (lo + hi) / 2;
+        if (fits(mid)) hi = mid;
+        else lo = mid;
+      }
+      r = hi;
     }
     n.radius = Math.min(r, R_MAX);
+    if (typeof process !== 'undefined' && process.env.LB_NET_DEBUG === 'big' && r >= R_MAX - 0.3) {
+      const names = n.edges.map((id) => `${id}:${edgeSpecs[id].name}`).join(' | ');
+      const { inn, out } = laneEnds(n, r0 + 1);
+      const bad: string[] = [];
+      for (const a of inn) for (const b of out) if (a.edge !== b.edge && (filletRadius(a, b) < RHO_MIN || classify(a, b, false) === 'uturn')) bad.push(`${a.edge}->${b.edge} ${classify(a, b, false)} ${filletRadius(a, b).toFixed(2)}`);
+      console.log('[net] big', n.id, 'r0', r0.toFixed(2), names, '\n   ', bad.join('; '));
+    }
   }
 
   // ── Edges: trim the raw centreline to the node patches (chord distance from the node's centre) ──
@@ -465,7 +523,14 @@ export function buildNetwork(nodeSpecs: NodeSpec[], edgeSpecs: EdgeSpec[]): Netw
     };
     (e.bridges ?? []).forEach(([b0, b1], k) => {
       const bid = bridges.length;
-      bridges.push({ id: bid, edge: id, s0: Math.max(0, b0 - s0), s1: Math.min(centre.length, b1 - s0), deckMin: e.bridgeInfo?.[k]?.deckMin ?? 0, clearance: e.bridgeInfo?.[k]?.clearance ?? 0 });
+      const bs0 = Math.max(0, b0 - s0), bs1 = Math.min(centre.length, b1 - s0);
+      // (v2 R2 refine) its abutments: the face on the centreline, into the span; `foot` is filled in by
+      // build.ts from the final terrain (the network reads none)
+      const abutAt = (sv: number, sign: number): BridgeAbutment => {
+        const q = wsample(centre, sv, wsampleOut());
+        return { s: sv, dir: v3(q.dx, q.dy, q.dz), into: v3(q.tx * sign, q.ty * sign, q.tz * sign), half: e.width / 2 + 1.8 + ABUT_WING, depth: ABUT_DEPTH, back: ABUT_BACK, top: q.h, foot: q.h };
+      };
+      bridges.push({ id: bid, edge: id, s0: bs0, s1: bs1, deckMin: e.bridgeInfo?.[k]?.deckMin ?? 0, clearance: e.bridgeInfo?.[k]?.clearance ?? 0, abutments: [abutAt(bs0, 1), abutAt(bs1, -1)] });
       edge.bridges.push(bid);
     });
     edges.push(edge);

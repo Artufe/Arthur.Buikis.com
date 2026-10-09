@@ -20,24 +20,31 @@
 //     replacing it in one frame) starts an episode (crossing.ts): inked cartoon puffs stream outward
 //     from the point the eye flies toward, fill the frame, hold (~0.3 s at least half covered) and
 //     part again from the middle, on screen wherever the eye flies (flying backward, the other way
-//     round: in from the corners, away into the focus) (shaders.ts: a scalloped body + one instanced
-//     sprite per puff). Inside a puff the same overlay holds as the white-out. It is ONE overlay
-//     (the v1 veil is gone), drawn last in the scene pass at the near plane, except in a window round
-//     the followed thing (camera subject / ridden Trackable) where it sits just behind it, so that
-//     thing stays on top, pixel-exact; the puffs in front of it dissolve and the white-out fog is
-//     pushed past it. Reduced motion: the body alone fades.
+//     round: in from the corners, away into the focus) (shaders.ts: a scalloped body, speed streaks
+//     and one instanced sprite per puff, in log-polar cells round the focus or, with the focus
+//     off-screen, a lateral grid streaming across). Inside a puff the same overlay holds as the
+//     white-out. It is ONE overlay (the v1 veil is gone), drawn last in the scene pass over
+//     everything at one far depth; the followed thing (camera subject / ridden Trackable) is then
+//     drawn again on top of it (its owner's objects re-drawn, scissored to it: pixel-exact, no window, no porthole; found by
+//     subject.ts), with a POP target ring when its body is a few pixels; the puffs in front of it
+//     dissolve and the white-out fog is pushed past it. Reduced motion: the body alone fades,
+//     rate-limited both ways, through teleports too (never a flash, never a cut).
 
 import {
+  type BufferAttribute,
   BufferGeometry,
+  Camera,
   Color,
   DataTexture,
   Float32BufferAttribute,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
+  InstancedMesh,
   LinearFilter,
   Matrix3,
   Matrix4,
   Mesh,
+  type Object3D,
   Quaternion,
   RedFormat,
   ShaderMaterial,
@@ -45,12 +52,13 @@ import {
   UniformsLib,
   UniformsUtils,
   UnsignedByteType,
+  AlwaysDepth,
   Vector2,
   Vector3,
   Vector4,
 } from 'three';
 import { PALETTE } from '../render/palette';
-import { LAYER_NO_INK, type LBContext, type System, type TrackPose } from '../core/contracts';
+import { LAYER_NO_INK, type LBContext, type System, type Trackable, type TrackPose } from '../core/contracts';
 import { CLOUD_MAX, CLOUD_MIN, R } from '../world/config';
 import { addScaled3, cross3, dirFromLatLon, dot3, headingVector, normalize3, v3, type Vec3 } from '../world/sphere';
 import { moonDirection } from '../world/sun';
@@ -58,8 +66,9 @@ import { cloudsShotView, DIVE_CROSS_T, diveCrossing } from './dive-anchors';
 import { CITY_AXIS, type CloudAnchor, coverageMapSteps, layoutClouds, SHELL_R } from './layout';
 import { airSpace, cloudLift, CLOUD_PAL_BELLY, CLOUD_PAL_E, CLOUD_PAL_LIT, CLOUD_PAL_RIM, CLOUD_PAL_SHADE, cloudPalette, mistBlend, mistColor, mix, skyDipSin, smooth, spaceAmount } from '../sky/rig';
 import { PuffLod } from './puffs';
-import { crossBodyFrag, crossBodyVert, crossPuffFrag, crossPuffVert, puffFrag, puffVert } from './shaders';
-import { createCrossing, CROSS_TIMING, CROSS_TIMING_RM, forceCrossing, frontRange, resetCrossing, Stage, stepCrossing } from './crossing';
+import { crossBodyFrag, crossBodyVert, crossMarkFrag, crossMarkVert, crossPuffFrag, crossPuffVert, crossStreakFrag, crossStreakVert, puffFrag, puffVert } from './shaders';
+import { SubjectObjects } from './subject';
+import { createCrossing, CROSS_TIMING, CROSS_TIMING_RM, forceCrossing, frontRange, isTeleport, resetCrossing, RM_CAP, rmFadeStep, Stage, stepCrossing } from './crossing';
 import { hyp3 } from '../world/hyp';
 
 const DEG = Math.PI / 180;
@@ -98,16 +107,21 @@ const CROSS_LEAD_FLY = 0.8;
 /** The eye this far (m) outside the band ends the hold early (a fast zoom shows the city rising). */
 const CROSS_CLEAR = 6;
 /**
- * Riding something that is off-screen when the crossing fires (a ride transition still turning to
- * it): the episode waits up to this long (s) for it to come into frame, so the thing you follow is
- * on top of the clouds, not lost behind them; if it never shows, the crossing passes without one
- * (contact with a real puff still whites out).
+ * Riding something that is off-screen when the crossing fires and cannot be re-drawn on top of the
+ * overlay (no objects found): the episode waits up to this long (s) for it to come into frame, so
+ * it is not lost behind the clouds; if it never shows, the crossing passes without one (contact
+ * with a real puff still whites out). A subject that is re-drawn never waits.
  */
 const CROSS_WAIT = 0.4;
-/** During an episode the clouds keep streaming at least this fast (m/s): the hold never freezes. */
-const STREAM_MIN = 8;
-/** Reduced motion: the still fade's ceiling (the fogged city stays faintly visible). */
-const RM_CAP = 0.85;
+/**
+ * During an episode the clouds keep streaming at least this fast (m/s): the hold never freezes, the
+ * lumps visibly rush outward past the edges (at 8 the held frame read as a still wall of circles).
+ */
+const STREAM_MIN = 14;
+/** The puffs' smear along the motion: at rest, and added at full speed (shaders.ts uStretch). */
+const STRETCH = [0.05, 0.2];
+/** Speed streaks over the puffs (shaders.ts crossStreak*): count (high, low tier). */
+const STREAKS = [44, 24];
 /** Contact (the eye inside a puff, 0..1) rising past this starts an episode too. */
 const CONTACT_TRIGGER = 0.3;
 /**
@@ -125,16 +139,44 @@ const SPRITES = [
   { cols: 11, rows: 11 },
   { cols: 6, rows: 7 },
 ];
-/** The overlay's depth outside the subject's window: this much beyond the near plane (× near). */
-const NEAR_K = 1.0002;
-/** Depth step between the overlay's layers (NDC): near puffs, far puffs, body. */
-const Z_EPS = 2e-6;
-/** The subject's window: its bounding circle × this, and the log-depth ramp round it (px, or × height). */
-const WIN_K = 1.08;
-const WIN_RAMP_PX = 40;
-const WIN_RAMP_H = 0.05;
-/** A window bigger than this share of the frame means the subject is close: one depth, no window. */
-const WIN_MAX = 0.3;
+/**
+ * The lateral set (shaders.ts crossPuffVert, the focus off-screen): grid columns × rows per layer
+ * (far, near), enough to cover the frame's diagonal at their cell size (0.26, 0.36 of the height)
+ * with a cell of margin; the closing caps (backward, the last gap) are three more near puffs.
+ */
+const LATERAL = [
+  { cols: 10, rows: 10 },
+  { cols: 8, rows: 8 },
+];
+const CAPS = 3;
+/**
+ * The lateral set takes over as the focus leaves the frame: from LAT_OUT[0] to LAT_OUT[1] outside it
+ * (height units), eased over LAT_EASE s.
+ */
+const LAT_OUT = [0.02, 0.2];
+const LAT_EASE = 0.08;
+/**
+ * The overlay's one depth (NDC): just short of the far plane (4 steps of a 24-bit buffer), so post
+ * sees one flat far surface over the whole overlay (no ink inside it, no night grade by a fake
+ * height) and the followed thing re-drawn over it is inked against it like against the sky.
+ */
+const Z_FAR = 1 - 5e-7;
+/** The re-draw's scissor round the followed thing: its projected bounding circle × this, + px. */
+const CLIP_K = 1.15;
+const CLIP_PX = 6;
+/**
+ * A far subject (its body's radius under MARK_PX[1] px, fading in from MARK_PX[0]: an on/off
+ * decision, a pale half-faded ring looked washed out) gets a POP target ring round it while covered:
+ * amber between ink lines, MARK_MIN to MARK_MAX px from its centre (a subject that cannot be re-drawn
+ * once got a 260 px ring, sized by its bounding radius with no cap).
+ */
+const MARK_PX = [12, 10];
+const MARK_MIN = 11;
+const MARK_MAX = 40;
+/** The scan for the objects drawing a subject that declares none: instance or mesh centre within this of its pose (m, + radius × 0.8). */
+const SCAN_REACH = 1.8;
+/** …in instanced meshes up to this many instances (ground cover and forests are never it). */
+const SCAN_MAX_INSTANCES = 3000;
 /**
  * Flying into a puff is seen coming this far ahead (× the fill time), at closing speeds above
  * ANT_SPEED (m/s): the episode starts before contact, so the puffs bloom out of the cloud the eye is
@@ -147,15 +189,31 @@ const PUFF_FOG_MIN = 30;
 
 export function createCloudsSystem(): System {
   let lod: PuffLod | null = null;
-  // The overlay's draws, each in two programs: plain (at the near plane) and LB_WINDOW (per-pixel
-  // depth with a window round the followed thing); one of each pair is visible.
+  // The overlay's draws: body, far puffs, speed streaks, near puffs; then the ring round the followed
+  // thing, whose onAfterRender re-draws that thing on top (redrawSubject, below).
   let crossBody: Mesh | null = null;
   let crossPuffs: Mesh | null = null;
-  let crossBodyW: Mesh | null = null;
-  let crossPuffsW: Mesh | null = null;
+  let crossPuffsFar: Mesh | null = null;
+  let crossStreaks: Mesh | null = null;
+  let crossMark: Mesh | null = null;
   let puffMat: ShaderMaterial | null = null;
   let bodyMat: ShaderMaterial | null = null;
   const crossMeshes: Mesh[] = [];
+  // The followed thing's own scene objects (contract `Trackable.objects`, else found by a scan at
+  // its pose), re-drawn over the overlay; the scissor round it (drawing-buffer px; z < 0: none).
+  const subjects = new SubjectObjects();
+  const subjObjs = subjects.objects;
+  // Per instanced mesh drawing a subject: a one-instance stand-in sharing its geometry's buffers and
+  // its material, into which the subject's instance is copied each frame, so that instance alone is
+  // re-drawn (null: cannot be done, e.g. interleaved instance data; the whole mesh is drawn, scissored).
+  const proxies = new Map<InstancedMesh, { mesh: InstancedMesh; pairs: Array<[BufferAttribute, BufferAttribute]> } | null>();
+  let subjBody = 0;
+  let redraw = false;
+  const scissor = new Vector4(0, 0, -1, 0);
+  const scissorRT = new Vector4();
+  const mark = new Vector4();
+  const markC = new Vector2();
+  let rmS = 0;
   let tex: DataTexture | null = null;
   let puffs: Float32Array | null = null;
   /** Per puff: its cluster's flat base altitude (the white-out test squashes like the shader). */
@@ -172,6 +230,7 @@ export function createCloudsSystem(): System {
   let tHold = { value: CROSS_TIMING.hold };
   let tOut = { value: CROSS_TIMING.tOut };
   let force = { value: 0 };
+  let forceLat = { value: 0 };
   let crossParts = { value: 3 };
   const timing = { ...CROSS_TIMING };
   let ready = false;
@@ -188,13 +247,14 @@ export function createCloudsSystem(): System {
   let prevContact = 0;
   let lastSign = 1;
   const range = new Vector2(0, 1);
-  const win = new Vector4(0, 0, -1, WIN_RAMP_PX);
-  const lnW = new Vector2();
-  const nf = new Vector2(0.1, 1000);
   const dbSize = new Vector2();
   const step3 = new Vector3();
   const ndc = new Vector3();
   const phase = new Vector2();
+  const phaseL = new Vector2();
+  const flow = new Vector2(0, 1);
+  let latS = 0;
+  let wasShown = false;
   let streak = 0;
   const prevEye = new Vector3();
   const vel = new Vector3();
@@ -244,6 +304,170 @@ export function createCloudsSystem(): System {
     return t.radius;
   };
 
+  const standIns = new Set<Mesh>();
+  const scanOpts = { reach: SCAN_REACH, maxInstances: SCAN_MAX_INSTANCES, skip: (m: Mesh) => crossMeshes.includes(m) || standIns.has(m) || (lod?.meshes.includes(m as InstancedMesh) ?? false) };
+
+  /**
+   * The scene objects that draw the followed thing into subjObjs (subject.ts): its Trackable's
+   * `objects` or the camera's `subjectObjects()` (the bird), else a scan for the mesh at its pose,
+   * retried by frames (every frame while `urgent`) until found.
+   */
+  const resolveObjects = (ctx: LBContext, sr: number, urgent: boolean) => {
+    const id = ctx.view.ride;
+    const key = id ?? (ctx.view.mode === 'bird' ? 'bird' : '');
+    const t: Trackable | undefined = id ? ctx.services.track.get(id) : undefined;
+    const declared = t?.objects?.length ? t.objects : !id ? ctx.services.camera.subjectObjects?.() : undefined;
+    subjBody = t?.bodyRadius ?? sr;
+    subjects.update(ctx.scene, key, declared, subj, sr, urgent, scanOpts);
+    if (process.env.NODE_ENV !== 'production') (ctx.debug as unknown as { cloudsSubject?: unknown }).cloudsSubject = subjects.debug();
+  };
+
+  /**
+   * The stand-in for an instanced mesh (built once, on its first re-draw): a one-instance copy that
+   * shares its geometry's buffers and its material (so its program), kept in the scene at a count of
+   * 0, so three uploads what is copied into it in the frame's projection and draws nothing then; the
+   * re-draw draws it with a count of 1. (renderBufferDirect alone uploads nothing.)
+   */
+  const proxyFor = (ctx: LBContext, src: InstancedMesh) => {
+    let p = proxies.get(src);
+    if (p !== undefined) return p;
+    p = null;
+    const g = src.geometry;
+    const geo = new BufferGeometry();
+    const pairs: Array<[BufferAttribute, BufferAttribute]> = [];
+    let ok = true;
+    for (const name in g.attributes) {
+      const at = g.attributes[name] as BufferAttribute & { isInterleavedBufferAttribute?: boolean; isInstancedBufferAttribute?: boolean; meshPerAttribute?: number };
+      if (at.isInterleavedBufferAttribute) {
+        ok = false;
+        break;
+      }
+      if (at.isInstancedBufferAttribute) {
+        const Arr = at.array.constructor as new (n: number) => Float32Array;
+        const dst = new InstancedBufferAttribute(new Arr(at.itemSize), at.itemSize, at.normalized, at.meshPerAttribute);
+        geo.setAttribute(name, dst);
+        pairs.push([at, dst]);
+      } else geo.setAttribute(name, at);
+    }
+    if (ok) {
+      if (g.index) geo.setIndex(g.index);
+      for (const gr of g.groups) geo.addGroup(gr.start, gr.count, gr.materialIndex);
+      geo.setDrawRange(g.drawRange.start, g.drawRange.count);
+      const mesh = new InstancedMesh(geo, src.material, 1);
+      if (src.instanceColor) {
+        mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(src.instanceColor.itemSize), src.instanceColor.itemSize);
+        pairs.push([src.instanceColor, mesh.instanceColor]);
+      }
+      pairs.push([src.instanceMatrix, mesh.instanceMatrix]);
+      // (The object flags three keys programs by match the owner's: no new program.)
+      mesh.receiveShadow = src.receiveShadow;
+      mesh.castShadow = false;
+      mesh.frustumCulled = false;
+      mesh.matrixAutoUpdate = false;
+      mesh.layers.mask = src.layers.mask;
+      mesh.count = 0;
+      mesh.visible = false;
+      mesh.name = `${src.name} (re-drawn over the clouds)`;
+      ctx.scene.add(mesh);
+      standIns.add(mesh);
+      p = { mesh, pairs };
+    } else geo.dispose();
+    proxies.set(src, p);
+    return p;
+  };
+
+  /**
+   * Right before the scene is projected (scene.onBeforeRender: after every system's update, so the
+   * owners' instances are this frame's, and before three uploads buffers): find the subject's
+   * instance in each instanced object and copy it into that object's stand-in.
+   */
+  let subjR = 0;
+  const beforeRender = (ctx: LBContext) => {
+    for (const p of proxies.values()) if (p) p.mesh.visible = false;
+    if (!redraw) return;
+    subjects.locate(subj, subjR, SCAN_REACH);
+    for (let k = 0; k < subjObjs.length; k++) {
+      const src = subjObjs[k] as InstancedMesh;
+      const i = subjects.instance[k] ?? -1;
+      if (!src.isInstancedMesh || i < 0 || !src.visible) continue;
+      const p = proxyFor(ctx, src);
+      if (!p) continue;
+      for (const [from, to] of p.pairs) {
+        const n = from.itemSize;
+        const fa = from.array;
+        const ta = to.array as Float32Array;
+        for (let c = 0; c < n; c++) ta[c] = fa[i * n + c];
+        to.needsUpdate = true;
+      }
+      p.mesh.matrixWorld.copy(src.matrixWorld);
+      p.mesh.visible = true;
+    }
+  };
+  let sceneHookPrev: Object3D['onBeforeRender'] | null = null;
+  let sceneHook: Object3D['onBeforeRender'] | null = null;
+
+  /**
+   * Draw the followed thing's objects again, now (the ring mesh's onAfterRender: after the overlay,
+   * inside the scene pass), scissored to its projected bounding circle: depth-tested against the
+   * overlay's far plane, so it lands on top of it, self-occluded. An instanced owner mesh is drawn
+   * through its stand-in, holding the subject's instance alone (other cars in the square stay under
+   * the clouds). As three's own renderObject does it, minus the after-hook.
+   */
+  const redrawSubject = (ctx: LBContext, camera: Camera) => {
+    if (!redraw || !subjObjs.length) return;
+    const r = ctx.renderer;
+    const rt = r.getRenderTarget();
+    const scissorWas = rt ? rt.scissorTest : r.getScissorTest();
+    const clip = scissor.z > 0 && !scissorWas;
+    // Unfogged: over the overlay the aerial fog that hides a far plane against the sky made it a
+    // pale ghost (three refreshes a material's fog uniforms from scene.fog when it switches to it).
+    const fog = ctx.services.sky.fog;
+    const fogNear = fog?.near ?? 0;
+    const fogFar = fog?.far ?? 0;
+    if (fog) {
+      fog.near = 1e7;
+      fog.far = 2e7;
+    }
+    if (clip) {
+      // (Drawing-buffer px; a render target of another size, scaled.)
+      const k = rt ? rt.width / Math.max(1, dbSize.x) : 1;
+      r.state.scissor(scissorRT.set(Math.floor(scissor.x * k), Math.floor(scissor.y * k), Math.ceil(scissor.z * k), Math.ceil(scissor.w * k)));
+      r.state.setScissorTest(true);
+    }
+    for (let k = 0; k < subjObjs.length; k++) {
+      const src = subjObjs[k] as Mesh;
+      if (!src.visible) continue;
+      let m: Mesh = src;
+      if ((src as InstancedMesh).isInstancedMesh) {
+        // Its instance alone, from the stand-in (none in reach this frame: not drawn; no stand-in
+        // possible: the whole mesh, scissored).
+        if ((subjects.instance[k] ?? -1) < 0) continue;
+        const p = proxies.get(src as InstancedMesh);
+        if (p) {
+          if (!p.mesh.visible) continue;
+          p.mesh.count = 1;
+          m = p.mesh;
+        }
+      }
+      src.onBeforeRender(r, ctx.scene, camera, src.geometry, src.material as never, null as never);
+      m.modelViewMatrix.multiplyMatrices(camera.matrixWorldInverse, m.matrixWorld);
+      m.normalMatrix.getNormalMatrix(m.modelViewMatrix);
+      const geo = m.geometry;
+      if (Array.isArray(m.material)) {
+        for (const grp of geo.groups) {
+          const mt = m.material[grp.materialIndex ?? 0];
+          if (mt?.visible) r.renderBufferDirect(camera, ctx.scene, geo, mt, m, grp);
+        }
+      } else if (m.material.visible) r.renderBufferDirect(camera, ctx.scene, geo, m.material, m, null as never);
+      if (m !== src) (m as InstancedMesh).count = 0;
+    }
+    if (clip) r.state.setScissorTest(false);
+    if (fog) {
+      fog.near = fogNear;
+      fog.far = fogFar;
+    }
+  };
+
   return {
     name: 'clouds',
     stage: 2,
@@ -256,6 +480,7 @@ export function createCloudsSystem(): System {
       tHold = ctx.params.number('clouds.crossHold', { label: 'cloud crossing: hold (s)', min: 0, max: 2, value: CROSS_TIMING.hold });
       tOut = ctx.params.number('clouds.crossOut', { label: 'cloud crossing: ease out (s)', min: 0.05, max: 2, value: CROSS_TIMING.tOut });
       force = ctx.params.number('clouds.force', { label: 'debug: hold a crossing at this cover (perf A/B)', min: 0, max: 1, value: 0 });
+      forceLat = ctx.params.number('clouds.forceLat', { label: 'debug: with clouds.force, the focus off-screen (the lateral puff set; perf A/B)', min: 0, max: 1, value: 0 });
       crossParts = ctx.params.number('clouds.crossParts', { label: 'debug: overlay parts drawn (1 body, 2 puffs, 3 both; perf A/B)', min: 0, max: 3, value: 3 });
 
       const layout = layoutClouds({ seed: ctx.world.seed, clusters: 30, anchors: anchors(drift.value) });
@@ -375,8 +600,9 @@ export function createCloudsSystem(): System {
       lod = new PuffLod([nearGeo, farGeo, tinyGeo], puffMat, layout.puffs, { aInfo: info, aCluster: clus }, { spheres, of: layout.cluster }, 64);
       ctx.scene.add(...lod.meshes);
 
-      // The falling-through-the-clouds overlay, drawn last in the scene pass at the followed thing's
-      // depth (shaders.ts): a full-screen body and one instanced sprite per cartoon puff.
+      // The falling-through-the-clouds overlay, drawn last in the scene pass over everything at one far
+      // depth (shaders.ts): a full-screen body, one instanced sprite per cartoon puff, speed streaks;
+      // then the ring round the followed thing, whose onAfterRender re-draws it on top.
       const cu = {
         uFill: { value: 0 },
         uOpen: { value: 0 },
@@ -385,20 +611,22 @@ export function createCloudsSystem(): System {
         uFoe: { value: foe },
         uAspect: { value: 1.6 },
         uPhase: { value: phase },
+        uPhaseL: { value: phaseL },
+        uFlow: { value: flow },
+        uLat: { value: 0 },
         uDir: { value: 1 },
-        uSubj: { value: win },
-        uLnW: { value: lnW },
-        uNF: { value: nf },
-        uZ: { value: -0.9999 },
-        uZEps: { value: Z_EPS },
+        uZ: { value: Z_FAR },
         uTone: { value: 1 },
-        uL3: { value: light3 },
+        uStretch: { value: STRETCH[0] },
         uBellyT: { value: bellyT },
         uRimK: { value: rimK },
         uBodyC: { value: bodyC },
         uKBS: { value: kbs },
         uRes: { value: dbSize },
         uInk: { value: new Color().copy(PALETTE.ink) },
+        uMark: { value: mark },
+        uMarkC2: { value: markC },
+        uMarkC: { value: new Color('#FFB84D') },
         uFade: { value: 1 },
         uLight: { value: light },
         uStreak: { value: 0 },
@@ -407,48 +635,77 @@ export function createCloudsSystem(): System {
         uBelly: { value: palBelly },
         uRim: { value: palRim },
       };
-      // (Reduced motion: a still opacity fade, so no depth write; post's veil fades the ink instead.)
-      const overlay = { transparent: true, depthTest: true, depthWrite: !ctx.reducedMotion, uniforms: cu };
-      const W = { defines: { LB_WINDOW: '' } };
+      // Over the scene whatever its depth, writing the one far depth. (Reduced motion: a still opacity
+      // fade, so no depth write; post's veil fades the ink instead.)
+      const overlay = { transparent: true, depthTest: true, depthFunc: AlwaysDepth, depthWrite: !ctx.reducedMotion, uniforms: cu };
       bodyMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing', vertexShader: crossBodyVert, fragmentShader: crossBodyFrag, ...overlay }));
-      const bodyMatW = ctx.track(new ShaderMaterial({ name: 'cloud crossing (window)', vertexShader: crossBodyVert, fragmentShader: crossBodyFrag, ...overlay, ...W }));
       const spriteMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing puffs', vertexShader: crossPuffVert, fragmentShader: crossPuffFrag, ...overlay }));
-      const spriteMatW = ctx.track(new ShaderMaterial({ name: 'cloud crossing puffs (window)', vertexShader: crossPuffVert, fragmentShader: crossPuffFrag, ...overlay, ...W }));
+      const streakMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing streaks', vertexShader: crossStreakVert, fragmentShader: crossStreakFrag, uniforms: cu, transparent: true, depthTest: false, depthWrite: false }));
+      const markMat = ctx.track(new ShaderMaterial({ name: 'cloud crossing mark', vertexShader: crossMarkVert, fragmentShader: crossMarkFrag, uniforms: cu, transparent: true, depthTest: false, depthWrite: false }));
       const vgeo = ctx.track(new BufferGeometry());
       vgeo.setAttribute('position', new Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-      const sgeo = ctx.track(new InstancedBufferGeometry());
-      // Each sprite an octagon round the puff's three domes (they reach 1.48 of the base dome's radius;
-      // shaders.ts maps position × 1.5 to dome units): ~20 % fewer fragments than the square it was,
-      // the overlay's cost being its overdraw.
-      const oct: number[] = [];
-      for (let i = 0; i < 8; i++) {
-        const a = ((i + 0.5) / 8) * Math.PI * 2;
-        oct.push((Math.cos(a) * 1.49) / Math.cos(Math.PI / 8) / 1.5, (Math.sin(a) * 1.49) / Math.cos(Math.PI / 8) / 1.5, 0);
-      }
-      sgeo.setAttribute('position', new Float32BufferAttribute(oct, 3));
-      sgeo.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7]);
-      const cells: number[] = [];
-      // Front to back (shaders.ts: each row slot a depth step behind the last): the near layer, outer
-      // rows (big, nearest the eye) first, then the far layer likewise; the body behind them all.
-      for (const layer of [1, 0]) {
+      // Each sprite a quad the vertex shader fits round the puff's domes (shaders.ts). Two meshes,
+      // the far layer and the near one, so the speed streaks run between them. Back to front (the
+      // order they blend in), in each: radial, inner rows (small, near the focus) first; then lateral,
+      // upstream rows first; the near mesh ends with the caps. Only one of the radial and lateral
+      // sets draws at a time (the other's sprites collapse to nothing in the vertex shader). Low tier
+      // (phones): the near layer only, the body filling between: about half the overlay's overdraw,
+      // the cost it has.
+      const quad = new Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3);
+      const puffGeo = (layer: number) => {
+        const g = ctx.track(new InstancedBufferGeometry());
+        g.setAttribute('position', quad);
+        g.setIndex([0, 1, 2, 0, 2, 3]);
+        const cells: number[] = [];
         const L = SPRITES[layer];
-        for (let j = L.rows - 1; j >= 0; j--) for (let i = 0; i < L.cols; i++) cells.push(layer, i, j);
+        for (let j = 0; j < L.rows; j++) for (let i = 0; i < L.cols; i++) cells.push(layer, i, j, 0);
+        const T = LATERAL[layer];
+        for (let j = 0; j < T.rows; j++) for (let i = 0; i < T.cols; i++) cells.push(layer, i, j, 1);
+        if (layer === 1) for (let i = 0; i < CAPS; i++) cells.push(1, i, 0, 2);
+        g.setAttribute('aCell', new InstancedBufferAttribute(new Float32Array(cells), 4));
+        g.instanceCount = cells.length / 4;
+        return g;
+      };
+      // Streaks: a quad each (x 0..1 along, y −1..1 across); per streak an angle (evenly spread,
+      // jittered), a phase and a size.
+      const tgeo = ctx.track(new InstancedBufferGeometry());
+      tgeo.setAttribute('position', new Float32BufferAttribute([0, -1.6, 0, 1, -1.6, 0, 1, 1.6, 0, 0, 1.6, 0], 3));
+      tgeo.setIndex([0, 1, 2, 0, 2, 3]);
+      const nS = STREAKS[hi ? 0 : 1];
+      const st = new Float32Array(nS * 3);
+      for (let i = 0; i < nS; i++) {
+        const h1 = frac(Math.sin(i * 12.9898 + 4.1) * 43758.5453);
+        const h2 = frac(Math.sin(i * 78.233 + 1.3) * 43758.5453);
+        const h3 = frac(Math.sin(i * 37.719 + 7.7) * 43758.5453);
+        st[i * 3] = ((i + 0.15 + 0.7 * h1) / nS) * Math.PI * 2;
+        st[i * 3 + 1] = h2;
+        st[i * 3 + 2] = h3;
       }
-      sgeo.setAttribute('aCell', new InstancedBufferAttribute(new Float32Array(cells), 3));
-      // Low tier (phones): the near layer only (it comes first), the body filling between: about half
-      // the overlay's overdraw, the cost it has.
-      sgeo.instanceCount = hi ? cells.length / 3 : SPRITES[1].cols * SPRITES[1].rows;
+      tgeo.setAttribute('aStreak', new InstancedBufferAttribute(st, 3));
+      tgeo.instanceCount = nS;
       crossBody = new Mesh(vgeo, bodyMat);
-      crossBodyW = new Mesh(vgeo, bodyMatW);
-      crossPuffs = new Mesh(sgeo, spriteMat);
-      crossPuffsW = new Mesh(sgeo, spriteMatW);
-      crossMeshes.push(crossPuffs, crossBody, crossPuffsW, crossBodyW);
-      crossMeshes.forEach((m, k) => {
-        m.name = ['cloud crossing puffs', 'cloud crossing', 'cloud crossing puffs (window)', 'cloud crossing (window)'][k];
+      crossPuffsFar = hi ? new Mesh(puffGeo(0), spriteMat) : null;
+      crossPuffs = new Mesh(puffGeo(1), spriteMat);
+      crossStreaks = new Mesh(tgeo, streakMat);
+      crossMark = new Mesh(vgeo, markMat);
+      // The thing followed, on top of it all: right after the ring, inside the scene pass.
+      crossMark.onAfterRender = (_r, _s, camera) => redrawSubject(ctx, camera);
+      // Back to front: the body, the far puffs, the streaks rushing past over them, the near puffs,
+      // the ring (and the re-draw).
+      const parts: Array<[Mesh | null, string]> = [
+        [crossBody, 'cloud crossing'],
+        [crossPuffsFar, 'cloud crossing far puffs'],
+        [crossStreaks, 'cloud crossing streaks'],
+        [crossPuffs, 'cloud crossing puffs'],
+        [crossMark, 'cloud crossing mark'],
+      ];
+      parts.forEach(([m, name], k) => {
+        if (!m) return;
+        m.name = name;
         m.frustumCulled = false;
-        // Puffs, then the body behind them; the window's pair after (they draw disjoint pixels).
         m.renderOrder = 1000 + k;
         m.layers.set(LAYER_NO_INK);
+        crossMeshes.push(m);
         ctx.scene.add(m);
       });
 
@@ -463,11 +720,19 @@ export function createCloudsSystem(): System {
       order.forEach((o, k) => (rank[o.i] = k / Math.max(1, nC - 1)));
       for (let i = 0; i < puffCount; i++) lod.reveal[i] = start + rank[layout.cluster[i]] * REVEAL_SPAN + layout.phase[i] * 0.22;
       lod.refresh();
+      // The re-draw's stand-ins are filled right before the scene is projected (beforeRender).
+      sceneHookPrev = ctx.scene.onBeforeRender;
+      const prevHook = sceneHookPrev;
+      sceneHook = function (this: Object3D, ...a: Parameters<Object3D['onBeforeRender']>) {
+        prevHook.apply(this, a);
+        beforeRender(ctx);
+      };
+      ctx.scene.onBeforeRender = sceneHook;
       ready = true;
     },
 
     update(ctx: LBContext) {
-      if (!ready || !lod || !puffMat || !bodyMat || !crossBody || !crossPuffs || !crossBodyW || !crossPuffsW || !puffs || !puffBase) return;
+      if (!ready || !lod || !puffMat || !bodyMat || !crossBody || !crossPuffs || !crossStreaks || !crossMark || !puffs || !puffBase) return;
       const v = ctx.view;
       const u = ctx.uniforms;
       const pu = puffMat.uniforms;
@@ -563,7 +828,8 @@ export function createCloudsSystem(): System {
       // The overlay's clock: real time live; in shot mode sim time, so the review tool's warm frames
       // (frozen sim, real rAFs) never age an episode and the /play clip shows it as a player sees it.
       const dt = ctx.shotMode ? ctx.time.dt : ctx.time.realDt;
-      const jump = !hasPrev || tmp.copy(v.eye).sub(prevEye).lengthSq() > 25 * 25;
+      // A teleport ends any episode; motion, however fast, never does (crossing.ts isTeleport).
+      const jump = !hasPrev || isTeleport(tmp.copy(v.eye).sub(prevEye).lengthSq(), dt);
       // This frame's motion (world), and whether it is forward or backward in view (the overlay's
       // streams and fronts run outward from a focus of expansion, or inward to one of contraction).
       const moved = !jump && dt > 0 ? vel.copy(v.eye).sub(prevEye).length() : 0;
@@ -571,9 +837,11 @@ export function createCloudsSystem(): System {
         velV.copy(vel).multiplyScalar(1 / moved).transformDirection(ctx.camera.matrixWorldInverse);
         lastSign = -velV.z >= -0.1 ? 1 : -1;
       }
-      // Where the eye will be ANT_LEAD fill-times ahead (cloud frame), when moving fast enough.
+      // Where the eye will be ANT_LEAD fill-times ahead (cloud frame), when moving fast enough. (Also
+      // under reduced motion: it only decides when the fade starts, so it is up before the eye goes
+      // in, instead of contact stepping it up in one frame.)
       const lead = timing.tIn * ANT_LEAD;
-      const antOn = !ctx.reducedMotion && moved / Math.max(dt, 1e-4) > ANT_SPEED;
+      const antOn = moved / Math.max(dt, 1e-4) > ANT_SPEED;
       if (antOn) step3.copy(vel).applyQuaternion(qInv).multiplyScalar(lead / dt);
       else step3.set(0, 0, 0);
       const segLen = step3.length();
@@ -657,8 +925,15 @@ export function createCloudsSystem(): System {
         subjDist = subj.distanceTo(v.eye);
         ndc.copy(subj).project(ctx.camera);
         subjV.copy(subj).applyMatrix4(ctx.camera.matrixWorldInverse);
-        subjOn = subjV.z < 0 && Math.abs(ndc.x) < 0.95 && Math.abs(ndc.y) < 0.95;
-      }
+        // (Re-drawn on top of the overlay, it counts as in frame wherever it is: it lands on top
+        // whenever it comes into view. Only a subject that cannot be re-drawn is waited for.)
+        // Urgent (scan every frame until found): an episode runs, or one may start soon (the eye or
+        // the subject near the layer, or the white-out fog closing in).
+        const sAlt = subj.length() - R;
+        const nearBand = (a: number) => a > CROSS_BAND[0] - 2 * CROSS_CLEAR && a < CROSS_BAND[1] + 2 * CROSS_CLEAR;
+        resolveObjects(ctx, sr, ep.stage !== Stage.Idle || veilS > 0.002 || mistS > 0.002 || ahead || nearBand(altSea) || nearBand(sAlt));
+        subjOn = subjects.drawn || (subjV.z < 0 && Math.abs(ndc.x) < 0.95 && Math.abs(ndc.y) < 0.95);
+      } else if (subjects.key) subjects.clear();
 
       // Episode triggers: a real crossing of the layer (see CROSS_BAND), or entering a puff. A
       // teleport ends any episode.
@@ -688,7 +963,7 @@ export function createCloudsSystem(): System {
         if (dir !== 0) {
           if (dir < 0) armedDown = false;
           else armedUp = false;
-          // Riding something that is not in frame yet: wait for it (CROSS_WAIT).
+          // Riding something not in frame that cannot be re-drawn on top: wait for it (CROSS_WAIT).
           if (subjOn) trigger = true;
           else {
             wait = CROSS_WAIT;
@@ -712,11 +987,17 @@ export function createCloudsSystem(): System {
       const clear = altSea < CROSS_BAND[0] - CROSS_CLEAR || altSea > CROSS_BAND[1] + CROSS_CLEAR;
       if (dt > 0 || trigger || jump) stepCrossing(ep, dt, trigger, veilS, timing, clear, lastSign);
       if (force.value > 0) forceCrossing(ep, force.value);
+      // The hole opens onto a clear city, not a lavender fog: the mist releases ahead of the hole (it
+      // lingered ~0.2 s after it, at the money shot of the dive), mostly gone by its first frame.
+      if (ep.stage === Stage.Out) mistS = Math.min(mistS, Math.max(veilS, 1 - (ep.openK + 0.15) * 3.5));
 
       const cover = ep.cover;
       if (process.env.NODE_ENV !== 'production') (ctx.debug as unknown as { clouds?: unknown }).clouds = ep;
-      const show = ep.stage !== Stage.Idle || veilS > 0.002;
-      const rmLevel = Math.min(RM_CAP, Math.max(cover, veilS));
+      // Reduced motion: the still fade's level, rate-limited both ways, through teleports too
+      // (crossing.ts rmFadeStep); shown until it has faded out, after the episode has ended.
+      rmS = !rm ? Math.min(RM_CAP, Math.max(cover, veilS)) : rmFadeStep(rmS, Math.max(cover, veilS), dt, jump);
+      const rmLevel = rmS;
+      const show = ep.stage !== Stage.Idle || veilS > 0.002 || (rm && rmLevel > 0.002);
       ctx.services.sky.veil = rm ? rmLevel : veilS;
       ctx.services.sky.mist = mistS;
       ctx.services.sky.cross = rm ? rmLevel : Math.max(cover, smooth(0.15, 0.85, veilS)) * (ep.stage === Stage.Idle ? 1 : ep.fade);
@@ -746,16 +1027,27 @@ export function createCloudsSystem(): System {
         const stream = !rm && (ep.stage !== Stage.Idle || veilS > 0.002) ? Math.max(dist, STREAM_MIN * dt) : rm ? 0 : dist;
         phase.x += lastSign * stream * STREAM_NEAR;
         phase.y += lastSign * stream * STREAM_FAR;
-        // Ease the focus (exponential, frame-rate independent): a turn swings the streams round.
-        foe.lerp(foeT, 1 - Math.exp(-dt / 0.06));
+        // The lateral set scrolls at the radial set's on-screen speed at the frame's centre.
+        const rC = Math.max(0.3, Math.hypot((0.5 - foe.x) * ctx.camera.aspect, 0.5 - foe.y));
+        phaseL.x += lastSign * stream * STREAM_NEAR * rC;
+        phaseL.y += lastSign * stream * STREAM_FAR * rC;
+        // Ease the focus (exponential, frame-rate independent): a turn swings the streams round. Not
+        // while the hole opens: the fronts are drawn round the focus, and a ride settling onto its
+        // target (the climb turning into a chase) swung it across the frame mid-opening, sliding the
+        // last cloud over the scene from the middle to a corner in one frame.
+        if (ep.stage !== Stage.Out) foe.lerp(foeT, 1 - Math.exp(-dt / 0.06));
       }
       if (!rm && dt > 0) {
         // A slow drift so the inside of a cloud still breathes while hovering.
         phase.x += dt * 0.12;
         phase.y += dt * 0.05;
+        phaseL.x += dt * 0.1;
+        phaseL.y += dt * 0.04;
       }
       prevEye.copy(v.eye);
       hasPrev = true;
+      const shown = wasShown;
+      wasShown = show;
 
       if (show) {
         const cu = bodyMat.uniforms;
@@ -771,15 +1063,27 @@ export function createCloudsSystem(): System {
         } else {
           cu.uFill.value = ep.fill;
           cu.uOpen.value = ep.open;
-          cu.uFade.value = ep.stage === Stage.Idle ? 1 : ep.fade;
+          cu.uFade.value = ep.stage === Stage.Idle ? 1 : ep.alpha;
           // Speed lines: with the motion, and a floor while covered so the hold keeps moving.
           cu.uStreak.value = Math.max(streak, ep.stage !== Stage.Idle ? 0.45 : 0) * smooth(0.05, 0.4, Math.max(cover, veilS));
         }
         cu.uContact.value = smooth(0.15, 0.85, veilS);
+        // The puffs smear along the motion, more with speed.
+        cu.uStretch.value = STRETCH[0] + STRETCH[1] * streak;
         cu.uDir.value = ep.dir;
         cu.uAspect.value = aspect;
+        if (force.value > 0 && forceLat.value > 0) foe.set(0.5, -0.3);
         // The fronts' on-screen radius range (height units): nearest screen point → farthest corner.
         frontRange(foe.x, foe.y, aspect, range);
+        // The focus off-screen: the lateral puff set, flowing from the focus's side across the frame
+        // (set at once when the overlay comes up, eased after).
+        const out = Math.hypot(Math.max(0, -foe.x, foe.x - 1) * aspect, Math.max(0, -foe.y, foe.y - 1));
+        const latT = smooth(LAT_OUT[0], LAT_OUT[1], out);
+        latS = !shown ? latT : latS + (latT - latS) * (1 - Math.exp(-dt / LAT_EASE));
+        cu.uLat.value = latS;
+        flow.set((0.5 - foe.x) * aspect, 0.5 - foe.y);
+        if (flow.lengthSq() < 1e-6) flow.set(0, 1);
+        flow.normalize();
         cloudPalette(eyeSun, palLit, palShade, palBelly, palRim);
         // Shading contrast: deeper as the lit colour darkens (dusk, night).
         const tone = Math.min(1.9, Math.max(1, 0.82 / Math.max(0.05, palLit.r * 0.2126 + palLit.g * 0.7152 + palLit.b * 0.0722)));
@@ -794,50 +1098,62 @@ export function createCloudsSystem(): System {
         light3.set(light.x * 0.8, light.y * 0.8, 0.55).normalize();
       }
 
-      // The followed thing: in a window round it the overlay sits just behind it (so it stays on top,
-      // pixel-exact; everywhere else the overlay is at the near plane and covers everything), the
-      // puffs in front of it dissolve, the white-out fog is pushed past it.
+      // The followed thing: re-drawn on top of the overlay, scissored to it (redrawSubject); far or
+      // impossible to re-draw, a POP ring round it. The puffs in front of it dissolve, the white-out fog
+      // is pushed past it.
       holeW.w = 0;
-      win.z = -1;
+      subjR = sr;
+      mark.x = 0;
+      scissor.z = -1;
+      redraw = false;
       const cam = ctx.camera;
       ctx.renderer.getDrawingBufferSize(dbSize);
-      nf.set(cam.near, cam.far);
-      lnW.y = -Math.log(cam.near * NEAR_K);
-      {
-        const pe = cam.projectionMatrix.elements;
-        const D = cam.near * NEAR_K;
-        bodyMat.uniforms.uZ.value = (pe[10] * -D + pe[14]) / D;
-      }
       if (sr > 0) {
         const sAlt = subj.length() - R;
         if (sAlt > CLOUD_MIN - sr - 6 && sAlt < CLOUD_MAX + 16 + sr) holeW.set(subj.x, subj.y, subj.z, sr);
-        const D = -subjV.z + sr;
-        if (show && subjV.z < 0 && D > cam.near * 1.5) {
+        // (Not from inside it: a walker's eyes.)
+        if (show && subjV.z < 0 && -subjV.z + sr > cam.near * 1.5 && subjDist > sr) {
           const tanHalf = Math.tan((cam.fov * DEG) / 2);
-          const rs = sr * WIN_K;
-          const rpx = subjDist > rs ? (Math.tan(Math.asin(rs / subjDist)) / tanHalf) * dbSize.y * 0.5 : 1e5;
-          const ramp = Math.max(WIN_RAMP_PX, WIN_RAMP_H * dbSize.y);
-          if (Math.PI * (rpx + ramp) * (rpx + ramp) < WIN_MAX * dbSize.x * dbSize.y) {
-            win.set((ndc.x * 0.5 + 0.5) * dbSize.x, (ndc.y * 0.5 + 0.5) * dbSize.y, rpx, ramp);
-            lnW.x = -Math.log(Math.min(D, cam.far * 0.999));
-          } else {
-            // Close (a chase or alongside view: nothing between the eye and it): the whole overlay
-            // just behind it, one depth, no window (it would cover the frame, every pixel paying for
-            // gl_FragDepth).
-            const pe = cam.projectionMatrix.elements;
-            bodyMat.uniforms.uZ.value = Math.min(0.9999, (pe[10] * -D + pe[14]) / D);
-          }
+          const r0 = (Math.tan(Math.asin(Math.min(0.999, sr / subjDist))) / tanHalf) * dbSize.y * 0.5;
+          const cx = (ndc.x * 0.5 + 0.5) * dbSize.x;
+          const cy = (ndc.y * 0.5 + 0.5) * dbSize.y;
+          // (Its instance found and not hidden by its owner: a ridden walker's collapsed body is not
+          // drawn, so it gets the ring instead.)
+          subjects.locate(subj, sr, SCAN_REACH);
+          redraw = subjects.located;
+          // The ring: while what reads as its body (Trackable.bodyRadius: a satellite's box, not its
+          // panels' reach) is under MARK_PX on screen, or whenever it cannot be re-drawn (nothing
+          // found: at least show where it is), never wider than MARK_MAX.
+          const rb0 = r0 * Math.min(1, subjBody / sr);
+          const mk = redraw ? 1 - smooth(MARK_PX[1], MARK_PX[0], rb0) : 1;
+          markC.set(cx, cy);
+          if (mk > 0) mark.set(mk * (rm ? rmLevel / 0.85 : ep.stage === Stage.Idle ? 1 : ep.alpha), Math.min(MARK_MAX, Math.max(MARK_MIN, rb0 * 1.35 + 5)), 2.6, 0);
+          // The re-draw's scissor: the projected bounding circle's square.
+          const ext = r0 * CLIP_K + CLIP_PX;
+          const x0 = Math.max(0, Math.floor(cx - ext));
+          const y0 = Math.max(0, Math.floor(cy - ext));
+          const x1 = Math.min(dbSize.x, Math.ceil(cx + ext));
+          const y1 = Math.min(dbSize.y, Math.ceil(cy + ext));
+          if (x1 > x0 && y1 > y0) scissor.set(x0, y0, x1 - x0, y1 - y0);
+          else redraw = false;
+
         }
       }
-      // The window's pair only while following something on screen (the plain pair skips its pixels).
+      if (process.env.NODE_ENV !== 'production') (ctx.debug as unknown as { cloudsX?: unknown }).cloudsX = { redraw, ring: Math.round(mark.x * 100) / 100, ringR: Math.round(mark.y), sc: Math.round(scissor.z), lat: Math.round(latS * 100) / 100, sx: Math.round(markC.x), sy: Math.round(markC.y) };
       // (Reduced motion: the still body alone fades; translucent puffs would stack like discs.)
-      const w = win.z >= 0;
       const bodyOn = show && (Math.round(crossParts.value) & 1) !== 0;
       const puffsOn = show && !rm && (Math.round(crossParts.value) & 2) !== 0;
       crossBody.visible = bodyOn;
-      crossBodyW.visible = bodyOn && w;
       crossPuffs.visible = puffsOn;
-      crossPuffsW.visible = puffsOn && w;
+      if (crossPuffsFar) crossPuffsFar.visible = puffsOn;
+      // The one far depth only while the overlay is mostly opaque: fading out at the end of an
+      // episode, the scene under a translucent remnant keeps its own depth, so post's ink and night
+      // grade stay on it (written, the city under a 30 % remnant lost its outlines).
+      const writeZ = !rm && (ep.stage === Stage.Idle || ep.alpha > 0.6);
+      bodyMat.depthWrite = writeZ;
+      (crossPuffs.material as ShaderMaterial).depthWrite = writeZ;
+      crossStreaks.visible = puffsOn && (bodyMat.uniforms.uStreak.value as number) > 0.01;
+      crossMark.visible = show && (redraw || mark.x > 0.004);
 
       pu.uFogMin.value = mistS > 0.002 ? PUFF_FOG_MIN : 0;
       if (mistS > 0.002) {
@@ -882,7 +1198,18 @@ export function createCloudsSystem(): System {
       puffMat?.dispose();
       tex?.dispose();
       lod = null;
-      crossBody = crossPuffs = crossBodyW = crossPuffsW = null;
+      crossBody = crossPuffs = crossPuffsFar = crossStreaks = crossMark = null;
+      subjects.clear();
+      if (sceneHook && ctx.scene.onBeforeRender === sceneHook && sceneHookPrev) ctx.scene.onBeforeRender = sceneHookPrev;
+      sceneHook = sceneHookPrev = null;
+      for (const p of proxies.values()) {
+        if (!p) continue;
+        p.mesh.removeFromParent();
+        p.mesh.geometry.dispose();
+      }
+      proxies.clear();
+      standIns.clear();
+      redraw = false;
       puffMat = bodyMat = null;
       tex = null;
       ready = false;
@@ -963,4 +1290,8 @@ function anchors(driftDeg: number): CloudAnchor[] {
     out.push({ dir: normalize3(e), radius: 7, base: CLOUD_MIN - 2 });
   }
   return out;
+}
+
+function frac(x: number): number {
+  return x - Math.floor(x);
 }

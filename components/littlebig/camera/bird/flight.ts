@@ -70,8 +70,11 @@ export const BIRD = {
   span: 1.8,
 } as const;
 
-/** Look-ahead times (s) for the soft floor. */
-const AHEAD = [0.25, 0.6, 1.0, 1.6];
+/**
+ * Look-ahead times (s) for the soft floor. (D1f r4: dense enough that a crown ~5 m across is never
+ * between two samples at a dive's speed: at 0.25 / 0.6 a dive at 16 m/s skimmed through one.)
+ */
+const AHEAD = [0.12, 0.25, 0.4, 0.6, 0.8, 1.0, 1.3, 1.6];
 /** A floor ahead asking for more than this climb (rad) makes the bird look left and right, and swerve. */
 const SWERVE_FROM = 16 * DEG;
 /** How far to each side it looks (rad off the heading). */
@@ -88,8 +91,10 @@ const WALL_TURN = 1.3;
  * Walls ahead: the bird keeps this far (m) off a facade taller than it, steering away from one its
  * turning path would meet within WALL_LOOK s (the player's steer into it is overruled smoothly).
  */
-const WALL_KEEP = 2.8;
-const WALL_LOOK = [0.18, 0.4, 0.7, 1.0] as const;
+const WALL_KEEP = 3.4;
+/** (D1f r5) The soft wall (m): a body inside it is eased back out (sub()). */
+const WALL_SOFT = 3.8;
+const WALL_LOOK = [0.18, 0.4, 0.7, 1.0, 1.3] as const;
 const SUBSTEP = 1 / 60;
 /** Fastest heading turn (rad/s). */
 const TURN_MAX = 1.25;
@@ -145,9 +150,17 @@ export class BirdFlight {
   private swerveAge = 0;
   /** The wall avoidance's own steer (−1 … 1). */
   wallAvoid = 0;
+  /**
+   * 0 … 1: a take-off in progress (set by the director): the swerve round what lies ahead is held
+   * off by it — climbing out of a street, the lamp heads and crowns ahead are climbed over, not
+   * swerved round (it turned the bird straight off the heading it launched along).
+   */
+  calm = 0;
   /** True on the frame the soft floor (or the hard floor / a wall) had to step in. */
   floorBusy = false;
   hardHits = 0;
+  /** Review: substeps the body had to be pushed out of a facade (a scrape). */
+  wallHits = 0;
   /** Height above sea level and the floor under the bird, last step. */
   alt = 40;
   floorH = 0;
@@ -168,11 +181,21 @@ export class BirdFlight {
     this.flapAmp = 0.6;
     this.tuck = 0;
     this.hardHits = 0;
+    this.wallHits = 0;
     this.swerve = 0;
     this.swerveSide = 0;
     this.swerveAge = 0;
     this.wallAvoid = 0;
+    this.calm = 0;
     this.frame();
+  }
+
+  /** Set the wall avoidance to what the walls ahead ask for now (a launch: no ease-in). */
+  primeWalls(env: BirdEnv): void {
+    _up.copy(this.pos).normalize();
+    tangent(this.fwd, _up);
+    _right.crossVectors(this.fwd, _up).normalize();
+    this.wallAvoid = this.wallSteer(this.pos.length() - R, env);
   }
 
   /** Advance dt seconds (sub-stepped at ≤ 1/60 s). */
@@ -212,10 +235,11 @@ export class BirdFlight {
    * The climb angle (rad) that clears the soft floor (+ margin) along unit tangent `dir` from here,
    * over the look-ahead samples (on the arc of the current turn).
    */
-  private needAlong(dir: Vector3, hNow: number, margin: number, env: BirdEnv, turn = 0): number {
+  private needAlong(dir: Vector3, hNow: number, margin: number, env: BirdEnv, turn = 0, tMax = Infinity): number {
     let need = -Infinity;
     for (let i = 0; i < AHEAD.length; i++) {
       const t = AHEAD[i];
+      if (t > tMax) break;
       this.ahead(dir, turn, t, hNow, _a);
       const g = Math.atan2(env.floor(_a) + margin - hNow, Math.max(1, this.speed * t));
       if (g > need) need = g;
@@ -242,7 +266,7 @@ export class BirdFlight {
       // (Head-on, the push is straight back: steer the way it is already turning.)
       const lat = Math.abs(_w2.normalize().dot(_right));
       const dirn = lat > 0.25 ? side : this.turn !== 0 ? Math.sign(this.turn) : side;
-      const k = Math.min(1, depth / WALL_KEEP) * (1.15 - t);
+      const k = Math.min(1, depth / WALL_KEEP) * Math.max(0.1, 1.45 - t);
       if (Math.abs(k) > Math.abs(s)) s = dirn * k;
     }
     return Math.max(-1, Math.min(1, s * 1.6));
@@ -271,15 +295,19 @@ export class BirdFlight {
       const k = smooth((need - SWERVE_FROM) / (25 * DEG));
       // Pick a side (the clearer one, or the way the player already leans), then keep it for a
       // while unless the other side becomes clearly better: never a left-right dither.
-      const pref = Math.abs(nl - nr) > 3 * DEG ? Math.sign(nl - nr) : steer !== 0 ? Math.sign(steer) : this.swerveSide || 1;
+      // (A wall ahead already steering it one way picks that side: D1f r4, the two fought.)
+      const pref = Math.abs(this.wallAvoid) > 0.3 ? Math.sign(this.wallAvoid) : Math.abs(nl - nr) > 3 * DEG ? Math.sign(nl - nr) : steer !== 0 ? Math.sign(steer) : this.swerveSide || 1;
       if (this.swerveSide === 0 || (pref !== this.swerveSide && this.swerveAge > SWERVE_HOLD && Math.abs(nl - nr) > 10 * DEG)) {
         this.swerveSide = pref;
         this.swerveAge = 0;
       }
-      swerveT = this.swerveSide * Math.max(0.5, Math.min(1, Math.abs(nl - nr) / (20 * DEG))) * k;
-      // The chosen side is the way: ask only for the climb that side needs.
+      swerveT = this.swerveSide * Math.max(0.5, Math.min(1, Math.abs(nl - nr) / (20 * DEG))) * k * (1 - this.calm);
+      // The chosen side is the way: ask only for the climb that side needs — but what lies on the arc
+      // it is actually flying within 0.6 s is climbed over all the same (D1f r4: a dive swerving for
+      // a crown it could not turn round in time went through the top of it).
       const nSide = this.swerveSide > 0 ? nr : nl;
-      need = Math.min(need, Math.max(nSide, need - k * Math.max(0, need - nSide)));
+      const nNear = this.needAlong(this.fwd, hNow, margin, env, this.turn, 0.6);
+      need = Math.max(nNear, Math.min(need, Math.max(nSide, need - k * (1 - this.calm) * Math.max(0, need - nSide))));
     } else if (this.swerveAge > 0.4) this.swerveSide = 0;
     const ds = SWERVE_RATE * h;
     this.swerve += Math.max(-ds, Math.min(ds, swerveT - this.swerve));
@@ -291,7 +319,9 @@ export class BirdFlight {
     this.wallAvoid += Math.max(-dw, Math.min(dw, wT - this.wallAvoid));
     if (this.wallAvoid !== 0) {
       const a = Math.min(1, Math.abs(this.wallAvoid));
-      const into = Math.sign(steer) === -Math.sign(this.wallAvoid) ? steer * (1 - a) : steer;
+      // (D1f r5: the player's steer into the wall gives way twice as fast — held into a facade it
+      // still won by half and the bird climbed the wall 1 m off.)
+      const into = Math.sign(steer) === -Math.sign(this.wallAvoid) ? steer * Math.max(0, 1 - 2 * a) : steer;
       steer = Math.max(-1, Math.min(1, into + this.wallAvoid));
     }
     const f0 = env.floor(_up);
@@ -300,13 +330,19 @@ export class BirdFlight {
     need = Math.max(need, Math.atan2(f0 + margin - hNow, Math.max(2, this.speed * 0.35)));
 
     // ── Bank and turn.
-    const bankT = steer * BIRD.bankMax * (inp.dive ? 0.55 : 1);
+    // (A dive banks half as hard, except to get off a wall or round a tower ahead: D1f r4, a dive
+    // down the street at 16 m/s turned at 22°/s and passed the clock tower 1.4 m off.)
+    const bankT = steer * BIRD.bankMax * (inp.dive ? Math.max(0.55, Math.min(1, Math.abs(this.wallAvoid) * 1.5 + Math.abs(this.swerve))) : 1);
     springStep(this.bank, this.bankVel, bankT, 5.5, h, _sp);
     this.bank = _sp[0];
     this.bankVel = _sp[1];
     // (At most ~72°/s: a slow bird carving at full bank turned on a 4 m circle, the chase camera
     // spinning round after it.)
-    this.turn = Math.max(-TURN_MAX, Math.min(TURN_MAX, (9.8 * Math.tan(this.bank)) / Math.max(this.speed, 8)));
+    // (D1f r4) A wall it can hardly turn away from: it flares — sheds speed and turns up to 1.5× as
+    // tight — instead of climbing the facade.
+    const flare = Math.max(0, Math.abs(this.wallAvoid) - 0.5) * 2;
+    const tMax = TURN_MAX * (1 + 0.5 * flare);
+    this.turn = Math.max(-tMax, Math.min(tMax, (9.8 * Math.tan(this.bank)) / Math.max(this.speed, 8 - 1.5 * flare)));
     this.fwd.addScaledVector(_right, this.turn * h);
     tangent(this.fwd, _up);
 
@@ -341,6 +377,7 @@ export class BirdFlight {
     let acc = -9.8 * sg * (sg > 0 ? 0.42 : 0.9);
     acc += (BIRD.cruise - this.speed) * (inp.dive ? 0.1 : this.speed > BIRD.cruise ? 0.3 : 0.55);
     if (this.flapT > 0) acc += 10;
+    acc -= 14 * flare;
     if (this.speed < BIRD.min + 1.5) acc += 4; // never stall
     this.speed = Math.max(BIRD.min, Math.min(BIRD.max, this.speed + acc * h));
 
@@ -351,9 +388,37 @@ export class BirdFlight {
     _up.copy(this.pos).normalize();
     tangent(this.fwd, _up);
 
+    // ── (D1f r5) A soft wall WALL_SOFT m out: inside it the bird is eased back out (its speed into
+    // the facade taken away, then out at ~5 m/s per metre in) and its heading turned along the wall
+    // — steered at a facade it slides along 2 m off instead of the facade filling the frame.
+    let h1 = this.pos.length() - R;
+    if (env.wall && env.wall(_up, h1, WALL_SOFT, _w)) {
+      _a.copy(_w).sub(_up);
+      _a.addScaledVector(_w, -_a.dot(_w));
+      const pen = _a.length() * (R + h1);
+      if (pen > 1e-4) {
+        _a.normalize(); // outward, tangent at the bird
+        const vin = Math.max(0, -this.fwd.dot(_a) * this.speed * Math.cos(this.gamma));
+        const out = Math.min(pen, (vin + 5 * pen) * h);
+        _w2.copy(_up).multiplyScalar(R + h1).addScaledVector(_a, out);
+        this.pos.copy(_w2.normalize()).multiplyScalar(R + h1);
+        _up.copy(_w2);
+        tangent(this.fwd, _up);
+        const into = this.fwd.dot(_a);
+        if (into < 0) {
+          // Along the wall, the side it leans to; no faster than WALL_TURN × how far in it is.
+          _w2.copy(this.fwd).addScaledVector(_a, -into);
+          if (_w2.lengthSq() < 1e-8) _w2.crossVectors(_a, _up);
+          _w2.normalize();
+          const ang = Math.acos(Math.max(-1, Math.min(1, this.fwd.dot(_w2))));
+          const t = ang > 1e-6 ? Math.min(1, (WALL_TURN * Math.min(1, pen / 1.2) * h) / ang) : 1;
+          this.fwd.lerp(_w2, t);
+          tangent(this.fwd, _up);
+        }
+      }
+    }
     // ── Walls first (a facade beside a low bird pushes it along the street, so the roof never
     // counts as under it and lifts it with a pop), then the hard floor and the ceiling.
-    let h1 = this.pos.length() - R;
     if (env.wall && env.wall(_up, h1, BIRD.bodyR, _w)) {
       // Slide: the body is pushed out of the wall at once, but the heading turns onto the wall's
       // tangent no faster than WALL_TURN (never reflected, never reversed); a little speed is lost.
@@ -381,6 +446,7 @@ export class BirdFlight {
       tangent(this.fwd, _up);
       this.speed = Math.max(BIRD.min, this.speed * (1 - 0.6 * h));
       this.floorBusy = true;
+      this.wallHits++;
     }
     const f1 = env.hard(_up);
     if (h1 < f1 + BIRD.hard) {

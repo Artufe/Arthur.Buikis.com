@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coverageAt, createCrossing, CROSS_TIMING, CROSS_TIMING_RM, type CrossTiming, frontRange, resetCrossing, Stage, stepCrossing } from './crossing';
+import { coverageAt, createCrossing, CROSS_TIMING, CROSS_TIMING_RM, type CrossTiming, frontRange, isTeleport, resetCrossing, RM_CAP, rmFadeStep, Stage, stepCrossing, stepRmLevel } from './crossing';
 
 const ASPECT = 1.6;
 
@@ -131,11 +131,73 @@ describe('falling through the clouds', () => {
     for (let i = 1; i < f.length; i++) expect(f[i].cover - f[i - 1].cover).toBeLessThanOrEqual(0.15);
   });
 
+  // The scripted dive under reduced motion: the eye punches into a puff at speed, so contact steps
+  // 0 → 1 within one frame (critic r3: the frame went from clear to a 0.85 white sheet in 33 ms). The
+  // fade's level (what sky.cross and the body show) must never step by more than 0.2 a frame, with or
+  // without the look-ahead trigger, and should already be well up as the eye goes in when the
+  // look-ahead fires (it starts ANT_LEAD × tIn ≈ 0.17 s before contact).
+  for (const fps of [30, 60, 144]) {
+    for (const lookAhead of [false, true]) {
+      it(`reduced motion: entering a puff at speed never flashes (${fps} fps${lookAhead ? ', look-ahead' : ''})`, () => {
+        const dt = 1 / fps;
+        const tContact = 0.5;
+        const tTrigger = lookAhead ? tContact - 0.85 * CROSS_TIMING_RM.tIn : tContact;
+        const s = createCrossing();
+        let level = 0;
+        let atContact = 0;
+        let peak = 0;
+        const levels: number[] = [];
+        for (let i = 0; i * dt < 2.5; i++) {
+          const t = i * dt;
+          const contact = t >= tContact && t < tContact + 0.15 ? 1 : 0;
+          const trigger = Math.abs(t - tTrigger) < dt / 2 || (contact > 0 && t - tContact < dt / 2);
+          stepCrossing(s, dt, trigger, contact, CROSS_TIMING_RM);
+          level = stepRmLevel(level, Math.max(s.cover, contact), dt);
+          if (Math.abs(t - tContact) < dt / 2) atContact = level;
+          peak = Math.max(peak, level);
+          levels.push(level);
+        }
+        for (let i = 1; i < levels.length; i++) expect(Math.abs(levels[i] - levels[i - 1])).toBeLessThanOrEqual(0.2 * (30 * dt) + 1e-9);
+        expect(peak).toBeCloseTo(RM_CAP, 5);
+        expect(levels[levels.length - 1]).toBe(0);
+        if (lookAhead) expect(atContact).toBeGreaterThanOrEqual(0.5);
+      });
+    }
+  }
+
+  it('reduced motion: a teleport ramps the fade out instead of cutting it (a jump without a dip)', () => {
+    const dt = 1 / 30;
+    let level = 0.49;
+    const seen = [level];
+    for (let i = 0; i < 20; i++) {
+      // The jump's frame, then ordinary frames; the episode was reset, nothing to cover.
+      const next = rmFadeStep(level, 0, dt, i === 0);
+      expect(level - next).toBeLessThanOrEqual(0.2);
+      level = next;
+      seen.push(level);
+    }
+    expect(level).toBe(0);
+    // ≥ 0.3 s to clear from full: 0.49 takes at least 4 frames at 30 fps.
+    expect(seen.findIndex((x) => x === 0)).toBeGreaterThanOrEqual(4);
+    // A frozen frame (the shot tool's setup) takes the target at once: nothing to see fading.
+    expect(rmFadeStep(0.49, 0, 0, true)).toBe(0);
+  });
+
   it('a teleport ends it at once', () => {
     const s = createCrossing();
     stepCrossing(s, 0.1, true, 0);
     resetCrossing(s);
     expect(s.cover).toBe(0);
     expect(coverageAt(s, 0.5)).toBe(0);
+  });
+
+  // A ride's transition climbing through the layer at 30 fps moves 15–25 m a frame (rooftops → plane:0:
+  // 56.6 → 71.5 m in one frame); taken for a teleport, the overlay popped off a third grown.
+  it('fast motion is never a teleport; a camera placed on a frozen frame is', () => {
+    for (const fps of [20, 30, 60]) for (const speed of [300, 600, 900]) expect(isTeleport((speed / fps) ** 2, 1 / fps)).toBe(false);
+    expect(isTeleport(5 * 5, 0)).toBe(true);
+    // (A frozen frame that barely moves, the shot tool's warm-up: not one.)
+    expect(isTeleport(0.2 * 0.2, 0)).toBe(false);
+    expect(isTeleport(600 * 600, 1 / 30)).toBe(true);
   });
 });

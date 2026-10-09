@@ -49,6 +49,7 @@ export const HUD_CSS = /* css */ `
 .lbh .lbh-tip::after{content:'';position:absolute;top:calc(100% + 2px);left:50%;margin-left:-7px;border:7px solid transparent;border-top-color:${INK}}
 .lbh .lbh-tip kbd{display:inline-block;min-width:18px;margin-left:7px;padding:2px 5px 1px;font:800 11px/1.1 ${FONT_POP};text-align:center;color:${INK};background:${C.accent};border:1.5px solid ${INK};border-bottom-width:3px;border-radius:5px !important}
 .lbh .lbh-dock .lbh-mode:hover .lbh-tip,.lbh .lbh-dock .lbh-mode:focus-visible .lbh-tip{opacity:1;transform:translateX(-50%) translateY(0)}
+.lbh .lbh-dock .lbh-mode[data-quiet] .lbh-tip{opacity:0}
 .lbh[data-compact] .lbh-dock{gap:2px;padding:5px 6px 6px;border-radius:999px !important;box-shadow:4px 4px 0 ${INK}}
 .lbh[data-compact] .lbh-mode{width:46px;padding:0}
 .lbh[data-compact] .lbh-disc{width:42px;height:42px}
@@ -69,20 +70,33 @@ export const HUD_CSS = /* css */ `
 /* Touch at street level: the left thumb owns the bottom-left, so the dock stands up bottom right. */
 .lbh[data-stick] .lbh-dock{left:auto;right:10px;top:auto;bottom:14px;transform:none;flex-direction:column;border-radius:999px !important}
 
+/* ── the top-left column: the card, and the hint under it (slot 'stack'). Below the page's back link
+   (12 + 38 + 12), clear of the rail on the right; the card never needs measuring to stack the hint. ── */
+.lbh .lbh-tl{position:absolute;left:16px;right:16px;top:16px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;pointer-events:none}
+.lbh[data-variant="page"] .lbh-tl{top:62px}
+.lbh[data-rail] .lbh-tl{right:118px}
+.lbh[data-compact] .lbh-tl{left:10px;right:10px;top:10px;gap:10px}
+.lbh[data-compact][data-variant="page"] .lbh-tl{top:62px}
+.lbh[data-compact][data-variant="window"]:not([data-rail]) .lbh-tl{right:64px}
+.lbh[data-compact][data-rail] .lbh-tl{right:84px}
+.lbh[data-narrow] .lbh-tl,.lbh[data-narrow][data-variant] .lbh-tl{top:64px;right:10px}
+
 /* ── follow card ── */
-.lbh .lbh-card{position:absolute;left:16px;top:62px;width:368px;pointer-events:auto;display:grid;grid-template-columns:58px 1fr;column-gap:12px;row-gap:9px;padding:12px 12px 11px;
+.lbh .lbh-card{position:relative;flex:none;width:368px;pointer-events:auto;display:grid;grid-template-columns:58px 1fr;column-gap:12px;row-gap:9px;padding:12px 12px 11px;
   background:linear-gradient(100deg,${C.paper} 64%,rgba(255,248,232,0.2) 96%),radial-gradient(circle,var(--kc) 1.5px,transparent 1.9px) 0 0/7px 7px,${C.paper};border:3px solid ${INK};border-radius:20px !important;box-shadow:6px 6px 0 ${INK};transform-origin:20% 0;animation:lbh-pop .42s ${SPRING} both}
 .lbh .lbh-card[data-out]{animation:lbh-out .22s ease-in both}
 .lbh .lbh-badge{position:relative;width:58px;height:58px;display:grid;place-items:center;color:${INK};--lbf:#fff}
 .lbh .lbh-badge>svg:first-child{position:absolute;inset:-5px;width:68px;height:68px;animation:lbh-burst 18s linear infinite}
 .lbh .lbh-badge>svg+svg{position:relative}
-.lbh .lbh-head{min-width:0;padding-right:30px;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.lbh .lbh-head{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
 .lbh .lbh-kind{align-self:flex-start;font:800 11px/1 ${FONT_POP};letter-spacing:.1em;text-transform:lowercase;padding:3px 7px 4px 8px;background:${INK};color:var(--kc);transform:rotate(-2.5deg);border-radius:4px !important}
-.lbh .lbh-title{font-size:19px;font-weight:900;line-height:1.04;letter-spacing:-.005em;text-wrap:balance;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lbh .lbh-title{padding-right:18px;font-size:19px;font-weight:900;line-height:1.04;letter-spacing:-.005em;text-wrap:balance;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .lbh .lbh-sub{font:700 12.5px/1.22 ${FONT_POP};color:rgba(27,21,48,.74);text-wrap:balance;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .lbh .lbh-row{grid-column:1/-1;display:flex;align-items:stretch;gap:7px}
 .lbh .lbh-live{flex:1;min-width:0;min-height:40px;display:flex;align-items:center;gap:8px;padding:5px 10px;font:700 12px/1.25 ${FONT_MONO};background:var(--kc) ${HALFTONE} 0 0/5px 5px;border:2.5px solid ${INK};border-radius:12px !important;overflow:hidden}
-.lbh .lbh-live span{overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.lbh .lbh-ltext{position:relative;flex:1;min-width:0;overflow:hidden;--lbh-ll:3}
+.lbh .lbh-ll{display:block;white-space:pre}
+.lbh .lbh-probe{position:absolute;left:0;top:0;visibility:hidden;white-space:pre;pointer-events:none}
 .lbh .lbh-live i{flex:none;width:8px;height:8px;background:${C.roofRed};border:1.5px solid ${INK};border-radius:99px !important;animation:lbh-blink 1.2s steps(2,start) infinite}
 .lbh .lbh-btn{flex:none;display:grid;place-items:center;width:40px;height:40px;padding:0;cursor:pointer;background:${C.cream};border:2.5px solid ${INK};border-radius:12px !important;box-shadow:0 3px 0 ${INK};transition:transform .16s ${SPRING},box-shadow .16s ${SPRING}}
 .lbh .lbh-btn:hover:not(:disabled){transform:translateY(-1.5px);box-shadow:0 4.5px 0 ${INK}}
@@ -92,15 +106,27 @@ export const HUD_CSS = /* css */ `
 .lbh .lbh-x{position:absolute;top:-14px;right:-14px;width:40px;height:40px;display:grid;place-items:center;padding:0;cursor:pointer;color:#fff;background:${C.roofRed};border:3px solid ${INK};border-radius:999px !important;box-shadow:3px 3px 0 ${INK};transition:transform .18s ${SPRING}}
 .lbh .lbh-x:hover{transform:rotate(90deg) scale(1.06)}
 .lbh .lbh-x:active{transform:scale(.9)}
-.lbh[data-compact] .lbh-card{left:10px;top:10px;width:316px;grid-template-columns:48px 1fr;column-gap:10px;padding:10px 10px 9px;box-shadow:5px 5px 0 ${INK}}
+.lbh[data-compact] .lbh-card{width:344px;grid-template-columns:48px 1fr;column-gap:10px;padding:10px 10px 9px;box-shadow:5px 5px 0 ${INK}}
 .lbh[data-compact] .lbh-badge{width:48px;height:48px}
 .lbh[data-compact] .lbh-badge>svg:first-child{inset:-4px;width:56px;height:56px}
 .lbh[data-compact] .lbh-title{font-size:16.5px}
 .lbh[data-compact] .lbh-sub{font-size:12px}
-.lbh[data-compact] .lbh-live{font-size:11.5px}
+/* (Compact, narrow and short: 11 px mono, slimmer padding; the card is wide enough for ~28 columns.) */
+.lbh[data-compact] .lbh-live,.lbh[data-narrow] .lbh-live,.lbh[data-short] .lbh-live{font-size:11px;padding:4px 8px;gap:6px}
+.lbh[data-narrow] .lbh-live{padding:4px 6px}
+/* Short (a phone on its side): a slimmer card, two live lines at most (the least important piece goes). */
+.lbh[data-short] .lbh-card{width:328px;grid-template-columns:38px 1fr;column-gap:10px;row-gap:7px;padding:8px 9px 8px;box-shadow:4px 4px 0 ${INK}}
+.lbh[data-short] .lbh-badge{width:38px;height:38px}
+.lbh[data-short] .lbh-badge>svg:first-child{inset:-4px;width:46px;height:46px}
+.lbh[data-short] .lbh-badge>svg+svg{width:22px;height:22px}
+.lbh[data-short] .lbh-kind{display:none}
+.lbh[data-short] .lbh-head{gap:2px}
+.lbh[data-short] .lbh-title{font-size:15px}
+.lbh[data-short] .lbh-sub{font-size:11px}
+.lbh[data-short] .lbh-ltext{--lbh-ll:2}
+.lbh[data-short] .lbh-x{top:-9px;right:-9px}
 .lbh[data-compact] .lbh-x{top:-10px;right:-10px}
-.lbh[data-variant="page"][data-compact] .lbh-card{top:58px}
-.lbh[data-narrow] .lbh-card{left:10px;right:10px;width:auto;max-width:420px;top:64px}
+.lbh[data-narrow] .lbh-card{align-self:stretch;width:auto;max-width:420px}
 .lbh[data-narrow] .lbh-x{top:8px;right:8px;width:40px;height:40px;box-shadow:2px 2px 0 ${INK}}
 .lbh[data-narrow] .lbh-head{padding-right:44px}
 
@@ -117,64 +143,72 @@ export const HUD_CSS = /* css */ `
 .lbh[data-compact] .lbh-tdisc{width:44px;height:44px}
 .lbh[data-compact] .lbh-time{top:10px;right:10px}
 
-/* ── hint row: keycap chips in a paper pill. Top centre (portrait-ish desktop), bottom left beside
-   the planet (landscape rail), above the dock (phones) ── */
-.lbh .lbh-hint{position:absolute;left:50%;top:14px;transform:translateX(-50%);max-width:calc(100% - 24px);display:flex;align-items:center;flex-wrap:nowrap;gap:12px;padding:5px 13px 5px 6px;font:700 12.5px/1 ${FONT_POP};white-space:nowrap;overflow:hidden;
+/* ── hint row: keycap chips in a paper pill. Its slot (hud.tsx hintSlot) never shares space with a
+   panel: 'stack' under the card (or the back link) in the top-left column, 'bl' bottom left beside
+   the planet (landscape), 'top' centred between the back link and the time button (--lbh-ti, the
+   same inset both sides), 'bottom' just above the dock (--lbh-dt). Too wide: segments drop out. ── */
+.lbh .lbh-hint{display:flex;align-items:center;flex-wrap:nowrap;gap:12px;max-width:100%;padding:5px 13px 5px 6px;font:700 12.5px/1 ${FONT_POP};white-space:nowrap;overflow:hidden;
   color:${INK};background:${C.paper};border:2.5px solid ${INK};border-radius:99px !important;box-shadow:3px 3px 0 ${INK};transition:opacity .6s ease,transform .6s ${SPRING}}
-.lbh .lbh-hseg{display:inline-flex;align-items:center;gap:4px}
-.lbh .lbh-hseg+.lbh-hseg::before{content:'';width:5px;height:5px;margin-right:6px;background:${C.accent};border:1.5px solid ${INK};border-radius:99px !important}
+.lbh .lbh-hseg{display:inline-flex;align-items:center;gap:4px;flex:none}
+.lbh .lbh-hseg[hidden]{display:none}
+.lbh .lbh-hseg:not([data-first])::before{content:'';width:5px;height:5px;margin-right:6px;background:${C.accent};border:1.5px solid ${INK};border-radius:99px !important}
 .lbh .lbh-hint kbd{display:inline-block;min-width:20px;padding:3px 6px 2px;font:800 11.5px/1.1 ${FONT_POP};text-align:center;color:${INK};background:#fff;border:1.5px solid ${INK};border-bottom-width:3px;border-radius:6px !important}
-.lbh .lbh-hint[data-off]{opacity:0;transform:translateX(-50%) translateY(-6px)}
 .lbh .lbh-hint[data-snap]{transition:none}
-.lbh[data-compact] .lbh-hint{top:12px;font-size:12px;gap:10px}
-.lbh[data-compact][data-card] .lbh-hint,.lbh[data-narrow] .lbh-hint{top:auto;bottom:74px}
-.lbh[data-compact][data-card] .lbh-hint[data-off],.lbh[data-narrow] .lbh-hint[data-off]{transform:translateX(-50%) translateY(6px)}
+.lbh .lbh-hint[data-slot="stack"]{position:relative;flex:none}
+.lbh .lbh-hint[data-slot="bl"]{position:absolute;left:14px;bottom:14px;max-width:calc(100% - 130px)}
+.lbh .lbh-hint[data-slot="top"]{position:absolute;top:13px;left:var(--lbh-ti,150px);right:var(--lbh-ti,150px);width:max-content;margin:0 auto;max-width:calc(100% - 2 * var(--lbh-ti,150px))}
+.lbh .lbh-hint[data-slot="bottom"]{position:absolute;left:12px;right:12px;bottom:calc(var(--lbh-dt,80px) + 10px);width:max-content;margin:0 auto;max-width:calc(100% - 24px)}
+.lbh .lbh-hint[data-off]{opacity:0;transform:translateY(-6px)}
+.lbh .lbh-hint[data-slot="bl"][data-off],.lbh .lbh-hint[data-slot="bottom"][data-off]{transform:translateY(6px)}
+.lbh[data-compact] .lbh-hint{font-size:12px;gap:10px}
+.lbh[data-compact] .lbh-hint[data-slot="bl"]{left:10px;bottom:10px;max-width:calc(100% - 92px)}
 .lbh[data-narrow] .lbh-hint{gap:7px;padding:4px 9px 4px 5px;font-size:11px}
 .lbh[data-narrow] .lbh-hint kbd{font-size:10.5px;padding:2px 4px 1px;min-width:16px}
-.lbh[data-narrow] .lbh-hseg+.lbh-hseg::before{margin-right:3px;width:4px;height:4px}
-.lbh[data-rail] .lbh-hint,.lbh[data-rail][data-compact][data-card] .lbh-hint{left:14px;right:auto;top:auto;bottom:14px;transform:none;max-width:calc(100% - 130px)}
-.lbh[data-rail] .lbh-hint[data-off],.lbh[data-rail][data-compact][data-card] .lbh-hint[data-off]{transform:translateY(6px)}
-.lbh[data-rail][data-compact] .lbh-hint{left:10px;bottom:10px;max-width:calc(100% - 90px)}
-/* Riding or flying (landscape): under the card, top left — the chased plane / bus / bird owns the middle and the bottom. */
-.lbh[data-rail][data-card] .lbh-hint,.lbh[data-rail][data-compact][data-card] .lbh-hint{top:calc(var(--lbh-cb,200px) + 12px);bottom:auto}
-.lbh[data-rail][data-card] .lbh-hint[data-off],.lbh[data-rail][data-compact][data-card] .lbh-hint[data-off]{transform:translateY(-6px)}
-.lbh[data-rail][data-card][data-hintlow] .lbh-hint{top:auto;bottom:14px}
-.lbh[data-rail][data-compact][data-card][data-hintlow] .lbh-hint{top:auto;bottom:10px}
-.lbh[data-rail][data-card][data-hintlow] .lbh-hint[data-off]{transform:translateY(6px)}
-/* Touch at street level (or steering the bird): the bottom belongs to the thumbs; the hint goes up. */
-.lbh[data-stick][data-variant] .lbh-hint{top:62px;bottom:auto}
-.lbh[data-stick][data-variant][data-card] .lbh-hint{top:200px}
-.lbh[data-stick][data-variant] .lbh-hint[data-off]{transform:translateX(-50%) translateY(-6px)}
+.lbh[data-narrow] .lbh-hseg:not([data-first])::before{margin-right:3px;width:4px;height:4px}
 
-/* ── coach mark ── */
-.lbh .lbh-coach{position:absolute;left:50%;bottom:118px;width:max-content;max-width:min(380px,calc(100% - 40px));transform:translateX(-50%);pointer-events:auto;display:flex;align-items:center;gap:12px;padding:13px 13px 13px 30px;
-  background:#fff;border:3px solid ${INK};border-radius:18px !important;box-shadow:5px 5px 0 ${INK};animation:lbh-pop-c .5s ${SPRING} both}
-.lbh .lbh-coach::after{content:'';position:absolute;left:50%;bottom:-11px;width:18px;height:18px;margin-left:-9px;background:#fff;border-right:3px solid ${INK};border-bottom:3px solid ${INK};transform:rotate(45deg)}
-.lbh .lbh-coach p{margin:0;font-size:14.5px;font-weight:800;line-height:1.22;text-wrap:balance}
-.lbh .lbh-coach p small{display:block;margin-top:5px;font:700 12px/1.3 ${FONT_POP};color:rgba(27,21,48,.66)}
+/* ── coach mark: a comic speech bubble. Its corner (data-cpos, hud.tsx) is the first one clear of the
+   planet's disc: 'bc' above the dock (portrait, its tail on the dock), 'bl' / 'tl' beside the planet
+   (landscape). Compact layouts get a smaller bubble with a round 'got it' sticker on its corner. ── */
+.lbh .lbh-coach{position:absolute;width:max-content;max-width:min(380px,calc(100% - 40px));pointer-events:auto;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m ok" "s ok";align-items:center;column-gap:14px;row-gap:5px;padding:13px 13px 13px 30px;
+  background:#fff;border:3px solid ${INK};border-radius:18px !important;box-shadow:5px 5px 0 ${INK};animation:lbh-pop .5s ${SPRING} both}
+.lbh .lbh-coach p{margin:0}
+.lbh .lbh-c-main{grid-area:m;font-size:14.5px;font-weight:800;line-height:1.22;text-wrap:balance}
+.lbh .lbh-c-sub{grid-area:s;font:700 12px/1.3 ${FONT_POP};color:rgba(27,21,48,.66);text-wrap:balance}
+.lbh .lbh-c-keys{white-space:nowrap}
 .lbh .lbh-c-side,.lbh[data-rail] .lbh-c-below{display:none}
 .lbh[data-rail] .lbh-c-side{display:inline}
 .lbh .lbh-psst{position:absolute;left:-30px;top:-30px;width:60px;height:60px;display:grid;place-items:center;transform:rotate(-14deg)}
 .lbh .lbh-psst svg{position:absolute;inset:0}
 .lbh .lbh-psst b{position:relative;font-size:13px;font-weight:900;color:${INK}}
-.lbh .lbh-ok{flex:none;height:40px;padding:0 14px;font-size:13px;font-weight:900;cursor:pointer;background:${C.accent};border:2.5px solid ${INK};border-radius:99px !important;box-shadow:0 3px 0 ${INK};transition:transform .16s ${SPRING},box-shadow .16s}
+.lbh .lbh-ok{grid-area:ok;flex:none;height:40px;padding:0 14px;font-size:13px;font-weight:900;cursor:pointer;background:${C.accent};border:2.5px solid ${INK};border-radius:99px !important;box-shadow:0 3px 0 ${INK};transition:transform .16s ${SPRING},box-shadow .16s}
 .lbh .lbh-ok:active{transform:translateY(3px);box-shadow:0 0 0 ${INK}}
-.lbh[data-compact] .lbh-coach{bottom:84px;max-width:min(340px,calc(100% - 40px));padding:10px 10px 10px 28px;gap:10px}
-.lbh[data-compact] .lbh-coach p{font-size:13px}
+.lbh .lbh-note{grid-template-columns:auto;grid-template-areas:"m";padding:10px 16px}
+.lbh .lbh-note .lbh-c-main{font-size:13.5px}
+.lbh .lbh-coach[data-cpos="bc"]{left:50%;bottom:calc(var(--lbh-dt,80px) + 16px);transform:translateX(-50%);animation-name:lbh-pop-c}
+.lbh .lbh-coach[data-cpos="bc"]::after{content:'';position:absolute;left:50%;bottom:-11px;width:18px;height:18px;margin-left:-9px;background:#fff;border-right:3px solid ${INK};border-bottom:3px solid ${INK};transform:rotate(45deg)}
+.lbh .lbh-coach[data-cpos="bl"]{left:30px;bottom:16px;max-width:min(380px,calc(100% - 150px));transform-origin:0 100%}
+.lbh .lbh-coach[data-cpos="tl"]{left:16px;top:16px;max-width:min(380px,calc(100% - 150px));padding:13px 26px 13px 15px;transform-origin:0 0}
+.lbh[data-variant="page"] .lbh-coach[data-cpos="tl"]{top:68px}
+.lbh .lbh-coach[data-cpos="tl"] .lbh-psst{left:auto;right:-26px;top:-24px;transform:rotate(12deg)}
+.lbh .lbh-note[data-cpos]{padding:10px 16px}
+/* Compact (the window, phones): a smaller bubble, the 'got it' sticker on its top-right corner. */
+.lbh[data-compact] .lbh-coach{grid-template-columns:minmax(0,1fr);grid-template-areas:"m" "s";row-gap:4px;max-width:min(272px,calc(100% - 40px));padding:11px 30px 11px 27px}
+.lbh[data-compact] .lbh-c-main{font-size:13px}
+.lbh[data-compact] .lbh-c-sub{font-size:11.5px}
+.lbh[data-compact] .lbh-c-keys{display:none}
 .lbh[data-compact] .lbh-psst{left:-24px;top:-26px;width:52px;height:52px}
 .lbh[data-compact] .lbh-psst b{font-size:11.5px}
-.lbh[data-narrow] .lbh-coach{bottom:80px;padding:11px 11px 11px 28px}
-.lbh[data-narrow] .lbh-psst{left:-8px;top:-30px}
-.lbh[data-narrow] .lbh-coach p{font-size:13px}
-/* Rail (landscape): the bubble sits in the bottom-left corner, the emptiest part of the frame
-   (the planet is a disc in the middle; a satellite or the station may be anywhere beside it). */
-.lbh[data-rail] .lbh-coach{left:30px;right:auto;bottom:16px;top:auto;max-width:min(380px,calc(100% - 150px));transform:none;transform-origin:0 100%;animation-name:lbh-pop}
-.lbh[data-rail] .lbh-coach::after{display:none}
-.lbh[data-rail][data-compact] .lbh-coach{left:22px;bottom:10px;max-width:min(244px,calc(100% - 110px));flex-direction:column;align-items:stretch;gap:9px;padding:12px 12px 11px 30px}
-.lbh[data-rail][data-compact] .lbh-coach .lbh-ok{align-self:flex-end}
-.lbh[data-rail][data-compact] .lbh-psst{left:-20px;top:-26px}
-/* Short landscape (a phone on its side): one row, so it stays low. */
-.lbh[data-rail][data-compact][data-short] .lbh-coach{flex-direction:row;align-items:center;max-width:min(380px,calc(100% - 120px))}
+.lbh[data-compact] .lbh-ok{position:absolute;top:-15px;right:-15px;width:44px;height:44px;padding:0;font-size:11px;line-height:1;border-width:2.5px;border-radius:999px !important;box-shadow:2px 3px 0 ${INK};transform:rotate(8deg)}
+.lbh[data-compact] .lbh-ok:active{transform:rotate(8deg) translateY(2px);box-shadow:1px 1px 0 ${INK}}
+.lbh[data-compact] .lbh-coach[data-cpos="bc"]{bottom:calc(var(--lbh-dt,70px) + 16px)}
+.lbh[data-compact] .lbh-coach[data-cpos="bl"]{left:22px;bottom:12px}
+.lbh[data-compact] .lbh-coach[data-cpos="tl"]{left:14px;top:12px;padding:11px 32px 13px 30px}
+.lbh[data-compact][data-variant="page"] .lbh-coach[data-cpos="tl"]{top:70px}
+.lbh[data-compact] .lbh-coach[data-cpos="tl"] .lbh-psst{left:-20px;right:auto;top:auto;bottom:-26px;transform:rotate(-10deg)}
+.lbh[data-compact] .lbh-note{padding:9px 14px}
+.lbh[data-narrow] .lbh-coach{max-width:calc(100% - 52px)}
+/* A phone on its side: the planet fills the height, so the bubble keeps to one thought (the rail is in plain view). */
+.lbh[data-short] .lbh-c-sub{display:none}
 
 /* ── world labels ── */
 .lbh .lbh-labels{position:absolute;inset:0;pointer-events:none}
@@ -206,6 +240,12 @@ export const HUD_CSS = /* css */ `
 .lbh .lbh-tag:disabled{cursor:default}
 .lbh[data-compact] .lbh-tag-name{font-size:11.5px}
 .lbh[data-compact] .lbh-tag[data-kind="capital"] .lbh-tag-name{font-size:13.5px}
+
+/* Touch: every tag is a ≥ 40 px target (box, stem and dot), with a little more slop around it. */
+.lbh[data-touch] .lbh-tag .lbh-tag-box{padding:6px 10px 7px;gap:6px}
+.lbh[data-touch] .lbh-tag .lbh-tag-name{font-size:13px}
+.lbh[data-touch] .lbh-tag[data-kind="capital"] .lbh-tag-name{font-size:14.5px}
+.lbh[data-touch] .lbh-tag::before{inset:-6px -8px -4px}
 
 /* ── hover tip ── */
 .lbh .lbh-hover{position:absolute;left:0;top:0;display:flex;align-items:center;gap:7px;padding:4px 10px 5px 4px;white-space:nowrap;pointer-events:none;opacity:0;

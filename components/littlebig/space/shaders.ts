@@ -10,7 +10,9 @@
 //   [5]    xyz: the flight direction (unit, world: the trail runs back along the orbit from it),
 //          w: the trail's fade (seen from space, gone once the body is big on screen).
 //   [6]    x: the sky haze's weight for this body (1 when tiny, ~0.3 once it is big on screen: a
-//          station passing over the street by day keeps its colours, not a washed-out ghost).
+//          station passing over the street by day keeps its colours, not a washed-out ghost);
+//          y: its beacons' gain (from space a boosted little satellite drops them: specks of colour
+//          round a 10 px body read as a smear).
 // Bodies: custom toon (the shared ramp texture, two-tone fill: earthshine from the planet side,
 // deep indigo from space), rim, a hard toon glint on panels, foil and metal; solar cells, foil
 // crinkle, warm windows (always a little, bright in shadow / at night), a shaded dish bowl, from the
@@ -246,17 +248,28 @@ void main() {
     float r = length(bp);
     float a = -(0.06 + aMeta.y) * uTrailLen / r;
     w = bp * cos(a) + tv.xyz * (r * sin(a));
-  } else w = lbBodyRot(b) * (position * ex.z) + lbBodyPos(b);
+  } else {
+    w = lbBodyRot(b) * (position * ex.z) + lbBodyPos(b);
+    // A beacon is pulled a little toward the eye, so the hull it sits on never buries it.
+    if (k < 2.5) w += normalize(cameraPosition - w) * (1.0 * ex.z);
+  }
   vec4 mv = viewMatrix * vec4(w, 1.0);
   gl_Position = projectionMatrix * mv;
   float t = lbTime + aMeta.y;
   float on;
   vGlint = 0.0;
-  if (k < 0.5) on = 0.55 + 0.45 * sin(t * 2.1);
-  else if (k < 1.5) on = exp(-pow(fract(t / 1.6) / 0.05, 2.0));
-  else if (k < 2.5) {
-    float s = fract(t / 2.3);
-    on = exp(-pow(s / 0.03, 2.0)) + exp(-pow((s - 0.14) / 0.03, 2.0));
+  // Sharp on/off blinks, each well inside a second so any second of footage shows one: nav lights
+  // on 55 % of a 1 s beat (red and green half a beat apart: they alternate), a 0.14 s strobe every
+  // 0.9 s, a double strobe every 1.1 s.
+  if (k < 0.5) {
+    float s = fract(t);
+    on = smoothstep(0.0, 0.03, s) * (1.0 - smoothstep(0.55, 0.58, s));
+  } else if (k < 1.5) {
+    float s = fract(t / 0.9);
+    on = smoothstep(0.0, 0.02, s) * (1.0 - smoothstep(0.13, 0.155, s));
+  } else if (k < 2.5) {
+    float s = fract(t / 1.1);
+    on = smoothstep(0.0, 0.015, s) * (1.0 - smoothstep(0.07, 0.09, s)) + smoothstep(0.2, 0.215, s) * (1.0 - smoothstep(0.27, 0.29, s));
   } else if (k < 3.5) {
     on = ex.x * ex.w * uDark;
     vGlint = 1.0;
@@ -265,11 +278,13 @@ void main() {
     vGlint = 1.0;
   }
   on *= step(0.001, ex.z) * rp;
-  vI = k < 2.5 ? on * mix(0.45, 1.0, uDark) : on;
+  vI = k < 2.5 ? on * mix(0.5, 1.25, uDark) * uBody[b + 6].y : on;
   vC = aCol;
   float px = aMeta.z * projectionMatrix[1][1] * uViewH * 0.5 / max(-mv.z, 0.1);
-  float lo = k < 2.5 ? 2.6 : k < 3.5 ? 2.2 : 2.6;
-  float hi = k < 2.5 ? 14.0 : k < 3.5 ? 5.0 : 4.2;
+  // A beacon is never under ~12 px (a 4–5 px coloured core and its halo): it must read from the
+  // street at night, against a sunlit hull.
+  float lo = k < 2.5 ? 12.0 : k < 3.5 ? 2.2 : 2.6;
+  float hi = k < 2.5 ? 20.0 : k < 3.5 ? 5.0 : 4.2;
   gl_PointSize = vI > 0.004 ? clamp(px, lo, hi) : 0.0;
 }`;
 
@@ -284,7 +299,10 @@ void main() {
   float core = exp(-r2 * 7.0);
   float halo = exp(-r2 * 2.5) * (1.0 - r2);
   float cross = vGlint > 0.5 ? 0.0 : max(exp(-abs(c.x) * 18.0) * exp(-c.y * c.y * 3.0), exp(-abs(c.y) * 18.0) * exp(-c.x * c.x * 3.0)) * 0.5;
-  gl_FragColor = vec4((vC * (core * 2.0 + halo * 0.6 + cross) + core * 0.5) * vI, 1.0);
+  // Beacons: a saturated core (not so hot that the tone map bleaches it white) and a soft halo of
+  // their own, not left to the bloom; glints and trail dots stay white-hot specks.
+  vec3 c3 = vGlint > 0.5 ? vC * (core * 2.0 + halo * 0.6 + cross) + core * 0.5 : vC * (core * 2.3 + halo * 1.6 + cross) + core * 0.24;
+  gl_FragColor = vec4(c3 * vI, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;

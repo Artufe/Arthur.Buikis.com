@@ -219,3 +219,86 @@ planet as an object.
 4. **Cold first frame ≈ the largest toon program's compile.** Terrain and ocean have 65–68 KB of
    GLSL each, ~0.45 s cold on a busy GPU. Going below that needs smaller first-frame shaders.
 5. **Phone GPU.** Re-measure on a real mid-range phone before claiming 30 fps.
+
+## v2: the space layer and the falling-through-clouds overlay (S1f, dev server, 1280×800, high)
+
+Measured on a GPU shared with 10–19 other headless browsers (other agents' review runs): no quiet
+GPU was available, so these are paired A/B medians and best-of-rounds, noise about ±0.5 ms (the
+best-of-rounds differences go negative). Round 2 re-measured after the lateral set, the new puff
+shape and the streaks moved under the puffs (`scratchpad perf.mjs`: base / held / off interleaved
+per round, reloading through other agents' hot reloads).
+
+| | round 1 | round 2 |
+|---|---|---|
+| Overlay held at full cover (`clouds.force=1`) − `crossParts=0`, median Δ, 9–11 rounds × 60 frames (radial set: the focus in frame) | flight +0.8, alongside +0.5, rooftops +0.5 ms | flight +0.3, alongside +0.4, rooftops +0.4 ms |
+| …the lateral set (`clouds.forceLat=1`: the focus off-screen, a climb) | (not built) | flight +1.0, alongside +0.5, rooftops +0.8 ms (re-runs 0.6–1.6: the GPU got busier) |
+| …body alone / puffs alone (`crossParts=1` / `2`) − off | body about +0.2 ms | both within ±0.2 ms (noise) |
+| Overlay draw calls | +3 (body, puffs, streaks) +1 when following something (its mesh re-drawn, scissored) | same (the lateral set and the caps are instances of the puff draw) |
+| The /play dive, 120 frames (`--dive 120 --perf 1`) | median 11.4 ms, p95 15, max 16.5, no hitches, ≤ 80 draw calls | median 11.2 ms, p95 16.2, max 23.5, 1 hitch, ≤ 80 draw calls |
+| Leak check (`--leak 6 --close-at 300,ready`) | clean | clean (0 engines alive, listeners 53 / 149 before and after) |
+| Space layer | 2 draw calls (bodies, lights) | same |
+
+With the focus in frame (dives, zooms in, rides looking ahead) the overlay is within its 0.4 ms
+budget at full cover; with the focus off-screen (climbing out looking down: the lateral set, a denser
+even field) it is about 0.1–0.6 ms over, transiently (about 0.6 s per crossing). The far lateral layer
+is mostly hidden under the near one (a still with and without 45 % of it looks the same), so it is
+the first thing to drop if a quiet-GPU measurement says so. Its cost is blended overdraw: about 1 body layer plus 1–2 puff layers. Apple's ANGLE path
+does no early depth rejection for blended, discarding fragments, so drawing back to front (needed for
+the single far depth that keeps post's ink and night grade flat over it) costs nothing there. The
+puff sprites are quads fitted round each puff's base and bumps (about 30 % fewer fragments than round
+sprites); only one of the radial and lateral sets draws at a time (the other's sprites collapse in the
+vertex shader, ~1.8 k vertices); the body's per-pixel speed lines are gone (the instanced streaks,
+clipped to the body, replace them). Low tier draws the near layer only. The followed thing's scan
+(`clouds/subject.ts`) runs only while nothing is found and an episode may start: ~0.03 ms a scan at rooftops (44 visible meshes, 2.2 k instances).
+
+**Round 3 (S1f r7), on a quiet GPU** (0 other headless browsers during the runs; paired A/B, 13
+rounds × 60 frames, `docs/littlebig/shots/v2-S1f/r7/perfab.mjs`): overlay held at full cover minus
+no episode, radial set / lateral set: flight +0.4 / +0.4 ms, clouds +0.4 / +0.2 ms, rooftops
++0.2 / +0.2 ms (the timer's 0.1 ms step is the resolution). Within the 0.4 ms budget, after thinning
+the lateral set (55 % of far and 22 % of near cells empty, were 45 / 16: the wisps now show in the
+gaps) to pay for the far/near split (+1 draw call: body, far puffs, streaks, near puffs, ring, and
+the followed thing's re-draw = +6 calls during an episode, none otherwise). Space layer:
+`space.show` on minus off, ≤ 0.2 ms (noise) and 2 draw calls on orbit / station / skywatch /
+alongside; those views total 49–70 calls, net frame 2.0–4.4 ms. The /play dive (`--dive 120 --perf
+1`): median 6.3 ms, p95 9.3, max 11, no hitches, ≤ 81 draw calls. Leak check (`--leak 6 --close-at
+300,ready`): clean (0 engines alive, listeners 53 / 149 before and after).
+
+## v2: the region (R2, dev server, 1280×800, high; the machine shared with other agents' runs)
+
+**Build (`getRegion()`, budget ≤ 20 ms cold; refine round 1):** six fresh browser contexts on
+`/planet/?shot=1`, `ctx.world.region.buildMs`: 15.9, 15.4, 16.0, 15.6, 15.8, 15.2 ms (bake misses 0,
+415 carve primitives). Split: sites 2.6–3.2 (the bake's decode included), plans 0.0–0.4 (eight baked
+skeletons), towns 1.1–1.4, roads 4.9–5.2 (finish 1.4–1.9: `routeLift` live, `routeSmooth` baked;
+grade 0.1–0.4, baked), carve build 4.3–4.5 (the CSR grid; 5.9–6.4 with the first samples). R2's first
+build was 18.6–18.9 ms. The streets of the eight towns are planned on the network's first read
+(`townStreets()`), off this path: ~2 ms of planTown in node, and the network build lands in the boot's
+stage 2 (`init region` 8.5 ms in `--boot`). In the boot's `planet` mark: 19.7 ms (was 26), total
+565 ms to stage 2 done. Regenerate the bake after any change that moves a site, a gate, a route or a
+plan: `LB_REGION_BAKE=1 pnpm vitest run components/littlebig/world/region/bake.spec.ts` (the bake spec
+fails when it is stale; a stale skeleton also warns in development).
+
+**Size:** `world/region/baked.ts` is 10.0 KB, 6.4 KB gzip (bake format 2: fixed-point entries as
+difference residuals in text; R2's first bake was 5 KB, and this round's skeletons, finish and grade
+in format 1 were 16.3 KB / 11.3 KB gzip). The region's own code (`world/region/**`, `region/`,
+`planet.ts`), each file minified and gzipped alone: 60.5 KB against 39.9 KB at HEAD (R1). Of the
++20.6 KB, towns.ts is +9.0 (the eight organic plans and their machinery), baked.ts +3.6, build.ts
++3.3. These sums overstate the bundle: spec-only plan metrics (`planFaces`, `planSymmetry`, …) are
+tree-shaken from it. **The engine as a whole is over V2's 260 KB.** A rolldown bundle of
+`core/engine.ts` (three external, the GLSL loader applied; it reads v1 at 174.3 KB against the 164.3
+KB a production build measured, so ~6 % high) is 309.0 KB gzip for the working tree, ≈ 291 KB in
+production, against 260.3 KB (≈ 245 KB) at HEAD. Per directory since HEAD (per-file sums): people
++34.7, world/region +24.2, camera +13.9, clouds +4.8, ui +3.8, core +1.8. A production `--bundle`
+run is still owed; it was not run here because it needs `pnpm build` on the shared tree.
+
+**Frames** (`--perf 60 --reps 3`, no overlay, refine round 1): orbit 3.6 ms net (60 draw calls,
+0.73 M triangles), street 2.8 (72), region-east 3.8 (60, 0.72 M), region-far 3.9 (55, 0.75 M),
+town-far-haven 3.7 (58, 0.95 M), quay-port-pebble 2.2 (54), alpine-street 2.1 (51); no hitches. The
+region adds nothing per frame without `?p.region.debug=1` (its labels are the UI's); the overlay is a
+review tool (one mesh + one line set).
+
+**Queries:** `carve()` off the network is one cell read; on it, a few primitives (the inverse-square
+bank blend adds a handful of segments within the cut-off). `keepOut()` is one cell read of its own
+lazily built buckets plus a few primitives (zero-alloc, margin clamped to 8 m), spec'd ≤ 1 µs a call:
+fine per scatter instance and per camera frame.
+
+**Refine round 2.** Build: six fresh contexts, 17.8, 17.3, 17.6, 17.5, 14.6, 15.7 ms (budget 20; bake misses 0, 399 primitives; machine shared with other agents' runs, refine 1 measured 15.2–16.0 on a quieter machine). Split: sites 2.5–3.7, towns 1.3–1.6, roads 4.7–6.0 (finish 1.4–2.2), carve build 4.1–5.2. In node the same build is 5.1–5.7 ms warm, 14–28 ms in the first runs (JIT). Size: every search, planner pass and the bake writer are compiled out of production (`process.env.NODE_ENV === 'production' ? null : …`, the bake replayed by key). The rolldown engine bundle went 335.4 → 330.0 KB gzip (the whole working tree, every agent's code; HEAD measures 280.8 KB the same way). buildRegion with its world dependencies is 46.9 KB gzip, against 33.3 KB at HEAD; its town generators (towns.ts, kept for the lazy street planning) are 11.0 KB of that. `baked.ts` is 10.6 KB (it now holds the ferries' A* too). Frames (`--perf 60 --reps 3`, no overlay): orbit 3.7 ms net (60 draw calls, 0.76 M triangles), town-port-pebble 3.1 (53), quay-port-pebble 2.3 (54), region-west 3.9 (59), street 2.7 (72); no hitches.

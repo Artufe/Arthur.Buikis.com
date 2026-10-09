@@ -17,6 +17,8 @@ const memoOf = (r: unknown) => (r as { memo: Memo }).memo;
 describe('region bake', () => {
   it('is what a fresh build computes (else regenerate it)', { timeout: 60000 }, () => {
     const fresh = createPlanet(SEED, { regionBake: null }).region;
+    // (the ferries' searches are memoised on their first read: read them before the dump)
+    void fresh.ferries;
     const dump = memoOf(fresh).dump();
     if (process.env.LB_REGION_BAKE === '1') {
       const file = path.join(path.dirname(new URL(import.meta.url).pathname), 'baked.ts');
@@ -33,6 +35,8 @@ describe('region bake', () => {
 
   it('replays every search from it, and builds the same region', { timeout: 60000 }, () => {
     const baked = createPlanet(SEED).region;
+    expect(memoOf(baked).stats.misses).toBe(0);
+    expect(baked.ferries.length).toBeGreaterThanOrEqual(2);
     expect(memoOf(baked).stats.misses).toBe(0);
     const fresh = createPlanet(SEED, { regionBake: null }).region;
     expect(baked.settlements.map((s) => [s.id, s.dir.x, s.dir.y, s.dir.z, s.h])).toEqual(fresh.settlements.map((s) => [s.id, s.dir.x, s.dir.y, s.dir.z, s.h]));

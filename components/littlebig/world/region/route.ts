@@ -5,6 +5,7 @@
 
 import { R } from '../config';
 import { normalize3, v3, type Vec3 } from '../sphere';
+import { fairLine } from './geo';
 
 export interface RouteSpec {
   /** Start and end (unit directions) and the unit tangents to leave a along / arrive at b along. */
@@ -33,6 +34,8 @@ export interface RouteSpec {
   bridges: boolean;
   /** Laplacian relaxation passes on the smoothed curve (default 50; 0 for none). */
   relax?: number;
+  /** v2 (R2 refine): fair the finished curve to at least this radius (m) between its 4 m end leads (geo.ts fairLine). */
+  fair?: number;
   /** Cost multiplier per metre over water when bridges are allowed, and per bridge started. */
   waterCost?: number;
   bridgeStart?: number;
@@ -339,7 +342,7 @@ export function routeSearch(spec: RouteSpec): { ctrl: number[] | null; opened: n
     }
   }
   if (found < 0) {
-    if (process.env.LB_ROUTE_DEBUG) {
+    if (typeof process !== 'undefined' && process.env.LB_ROUTE_DEBUG) {
       const si = start % nu, sj = Math.floor(start / nu);
       const rows: string[] = [];
       for (let j = nv - 1; j >= 0; j--) {
@@ -395,8 +398,35 @@ export function routeSearch(spec: RouteSpec): { ctrl: number[] | null; opened: n
 
 /** The smooth centreline (unit directions, xyz interleaved, ≤ ~0.6 m apart) through a route's control polygon. */
 export function routeFinish(spec: RouteSpec, ctrl: ArrayLike<number>): number[] {
+  return routeLift(spec, routeSmooth(spec, ctrl));
+}
+
+/** v2 (R2 refine): the finished centreline in the route's strip frame ((u, v) interleaved, ≈ 0.5 m apart): routeFinish's costly half, which build.ts bakes. */
+export function routeSmooth(spec: RouteSpec, ctrl: ArrayLike<number>): number[] {
+  const smooth = relax(curve(Array.from(ctrl)), 12, spec.relax ?? 50);
+  // (v2 R2 refine: and faired where the box filter left a kink, at the leads' joints above all; the first
+  // and last 4 m stay pinned, the straight out of each node's patch)
+  if (spec.fair) {
+    const n = smooth.length / 2;
+    const pin = new Uint8Array(n);
+    let acc = 0;
+    for (let i = 0; i < n && acc <= 4; i++) {
+      pin[i] = 1;
+      if (i > 0) acc += Math.hypot(smooth[i * 2] - smooth[i * 2 - 2], smooth[i * 2 + 1] - smooth[i * 2 - 1]);
+    }
+    acc = 0;
+    for (let i = n - 1; i >= 0 && acc <= 4; i--) {
+      pin[i] = 1;
+      if (i < n - 1) acc += Math.hypot(smooth[i * 2] - smooth[i * 2 + 2], smooth[i * 2 + 1] - smooth[i * 2 + 3]);
+    }
+    fairLine(smooth, pin as unknown as ArrayLike<boolean>, spec.fair, 0.5);
+  }
+  return smooth;
+}
+
+/** The strip-frame centreline (routeSmooth) as unit directions (x, y, z interleaved). */
+export function routeLift(spec: RouteSpec, smooth: ArrayLike<number>): number[] {
   const { strip } = frameOf(spec);
-  const smooth = relax(curve(Array.from(ctrl)), 3, spec.relax ?? 50);
   const d = v3();
   const dirs: number[] = [];
   for (let i = 0; i < smooth.length; i += 2) {
@@ -461,6 +491,9 @@ function pull(
   return out;
 }
 
+/** Metres of a route's end edges kept straight by the corner rounding (a junction's arm). */
+const KEEP_STRAIGHT = 7;
+
 /**
  * A C1 curve through a control polygon (u, v interleaved): corners are rounded with circular-ish
  * fillets (quadratic Béziers between edge midpoints, with the ends pinned), sampled ≤ 0.5 m.
@@ -474,11 +507,12 @@ function curve(ctrl: number[]): number[] {
   // with control point P(i), where M are points on the edges a fraction away from each corner.
   const cut = (i: number, j: number, near: number): [number, number] => {
     // point on edge i → j at distance min(near, 0.5 · |ij|) from i; on the first and last edges (the
-    // straight leads out of the end nodes, which no other corner shares) up to all but 1.5 m of it
+    // straight leads out of the end nodes, which no other corner shares) up to all but KEEP_STRAIGHT m
+    // of it (v2 R2: a road leaves its junction straight, so the junction's turns stay clean; was 1.5 m)
     const dx = P(j, 0) - P(i, 0), dz = P(j, 1) - P(i, 1);
     const L = Math.hypot(dx, dz) || 1;
     const end = j === 0 || j === n - 1;
-    const t = Math.min(end ? Math.max(0.5, 1 - 1.5 / L) : 0.5, near / L);
+    const t = Math.min(end ? Math.max(0.5, 1 - KEEP_STRAIGHT / L) : 0.5, near / L);
     return [P(i, 0) + dx * t, P(i, 1) + dz * t];
   };
   out.push(P(0, 0), P(0, 1));

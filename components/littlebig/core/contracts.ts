@@ -299,6 +299,13 @@ export interface CameraService {
    * it visible over their falling-through-clouds overlay and clear of the white-out fog. Zero-alloc.
    */
   subject?(out: Vector3): number;
+  /**
+   * v2 (S1f): the scene objects that draw the subject (above) when it is not a Trackable that
+   * declares its own `objects`: in bird mode, the bird's mesh. The clouds draw them again on top of
+   * their overlay; without it they find the mesh at the subject's pose by a scan (which cannot see
+   * it while it pops in). Empty when there is no such subject. Zero-alloc (a cached array).
+   */
+  subjectObjects?(): readonly Object3D[];
 }
 
 /**
@@ -432,6 +439,21 @@ export interface Trackable {
   detail?(ctx: LBContext): string;
   /** The camera tells the owner while it rides in 'eyes' view, so it can hide the body the eye is in. */
   setRidden?(on: boolean): void;
+  /**
+   * v2 (S1): the scene objects that draw it (an InstancedMesh holding it among other instances is
+   * fine; opaque materials). While it is followed through the falling-through-clouds overlay, the
+   * clouds draw these again on top of the overlay (which writes one depth just short of the far
+   * plane), scissored to its projected bounding circle, so it lands on top, self-occluded, with no
+   * porthole. Without it the clouds look for the mesh or instance at the pose (works for CPU-placed
+   * instances and meshes, once drawn); declare it when the body is placed in a shader.
+   */
+  readonly objects?: readonly Object3D[];
+  /**
+   * v2 (S1f): the radius (m) of what reads as its body on screen, when that is much smaller than
+   * the bounding `radius` (a satellite's box between long thin panels). The clouds give a followed
+   * thing a POP target ring over their overlay while this is only a few pixels. Default `radius`.
+   */
+  readonly bodyRadius?: number;
 }
 
 export interface TrackService {
@@ -444,7 +466,10 @@ export interface TrackService {
    * The trackable under canvas point (px, py) (CSS px from the canvas's top left): the nearest one
    * whose bounding sphere, widened to at least `minPx` px on screen (default 14), the ray hits in
    * front of the planet. Null if none. Calls every pose() once: for clicks and ≤ 10 Hz hover, not
-   * every frame.
+   * every frame. (v2 D1f: an 'eyes' trackable is hit on its whole body — a capsule from the top of
+   * the head to the feet below its eye anchor — and people get ≥ 18 px; "nearest" is by the near
+   * side, so a walker in front of a truck wins. r2: and in front of the first building or hill the
+   * ray enters — nothing is picked through a wall.)
    */
   pick(px: number, py: number, minPx?: number): Trackable | null;
   /** Bumped on every register / unregister. */

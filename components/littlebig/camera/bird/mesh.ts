@@ -234,11 +234,13 @@ vec3 bdRy(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x +
     float sp = abs(aWing);
     vec3 sh = vec3(sd * ${SHOULDER.toFixed(3)}, 0.0, 0.0);
     vec3 q = transformed - sh;
-    q.x *= 1.0 - 0.42 * bdTuck * sp;
-    float sweep = sd * bdTuck * 1.05 * smoothstep(0.0, 0.6, sp);
+    // (The dive is a stoop: the wings swept back half-open into an arrowhead, raised a little —
+    // folded flat and short they read as a blue saucer from the chase camera above.)
+    q.x *= 1.0 - 0.2 * bdTuck * sp;
+    float sweep = sd * bdTuck * 0.78 * smoothstep(0.0, 0.6, sp);
     q = bdRy(q, sweep);
     bdN = bdRy(bdN, sweep);
-    float a1 = bdAmp * (0.62 * sin(bdPh) + 0.1) - 0.18 * bdTuck;
+    float a1 = bdAmp * (0.62 * sin(bdPh) + 0.1) + 0.16 * bdTuck;
     float a2 = bdAmp * 0.55 * sin(bdPh - 1.1) * smoothstep(0.25, 0.75, sp);
     float ang = sd * (a1 + a2);
     q = bdRz(q, ang);

@@ -23,6 +23,8 @@
 //   node scripts/littlebig-shot.mjs --shot orbit --ride plane:1 --live --seq 40 --interval 0.05 --out t/   the transition itself
 //   node scripts/littlebig-shot.mjs --shot rooftops --bird --steer 0.5,0.2 --pre 2 --out b.png   bird flight: hold a steer
 //                                                    (steer,climb[,flap,dive]: −1…1, 0/1) for --pre seconds, then shoot
+//   node scripts/littlebig-shot.mjs --shot street --ride plane:1 --live --reduced --seq 20 --interval 0.05 --out rm/
+//                                                    the same with prefers-reduced-motion (a short direct move, dipped)
 //   node scripts/littlebig-shot.mjs --leak 10 --close-at 300,ready                    window open/close leak check
 //   node scripts/littlebig-shot.mjs --bundle --url http://localhost:3099              production JS a /planet/ visit loads
 //                                                    (pnpm build, then serve out/: cd out && python3 -m http.server 3099)
@@ -92,6 +94,8 @@ const busy = (() => {
 // --dpr: the device pixel ratio (default 1). A retina laptop is 2: high caps it at 1.5 (core/quality.ts),
 // and the live loop's adaptive resolution steps it down further (off in shot mode).
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: Number(flags.dpr ?? 1) });
+// --reduced: prefers-reduced-motion (v2 D1f: rides then take a short direct move with a dip).
+if (flags.reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
 const logs = [];
 page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text()}`);

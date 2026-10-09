@@ -38,8 +38,16 @@ const TRAIL_PX = [36, 80];
  * so it keeps a readable cartoon silhouette from the orbit view instead of a speck (most passes are
  * on the far side of the planet). Never the ridden body; up close (or from the air) nothing changes.
  */
-const BOOST_PX = 21;
-const BOOST_MAX = 3;
+const BOOST_PX = 28;
+/** Per model: the radius of what reads as its body on screen, × its bounding radius (Trackable.bodyRadius). */
+const BODY_K = [0.55, 0.38, 0.38, 0.42, 0.55, 0.8, 0.38, 0.4, 0.38, 0.38, 0.38, 0.38];
+const BOOST_PX_STATION = 34;
+const BOOST_MAX = 5;
+/**
+ * From space, a satellite's beacons fade out under this size (bounding radius, px, boosted: its body
+ * is a third of that): coloured specks round a small body read as a smear, not as lights.
+ */
+const BEACON_PX = [30, 48];
 /** The sky haze (from inside the air by day) fades off a body as it grows on screen (px). */
 const HAZE_PX = [6, 40];
 /** How far the wings turn toward the sun (1 = all the way). */
@@ -283,7 +291,8 @@ export function createSpaceSystem(): System {
       // The glint fades once the body itself is more than a few pixels across.
       const dist = Math.max(0.1, p.distanceTo(eye));
       const rpx0 = (o.radius / dist / tanHalf) * hpx;
-      const boost = o.id === ride ? 1 : 1 + (Math.min(BOOST_MAX, Math.max(1, BOOST_PX / Math.max(rpx0, 0.1))) - 1) * space;
+      const target = o.kind === 'station' ? BOOST_PX_STATION : BOOST_PX;
+      const boost = o.id === ride ? 1 : 1 + (Math.min(BOOST_MAX, Math.max(1, target / Math.max(rpx0, 0.1))) - 1) * space;
       const rpx = rpx0 * boost;
       const o5 = i * 28;
       body[o5] = x.x;
@@ -312,15 +321,25 @@ export function createSpaceSystem(): System {
       body[o5 + 21] = v.y / vl;
       body[o5 + 22] = v.z / vl;
       body[o5 + 23] = 1 - smooth(TRAIL_PX[0], TRAIL_PX[1], rpx);
-      body[o5 + 24] = 1 - 0.7 * smooth(HAZE_PX[0], HAZE_PX[1], rpx);
+      // (The ridden one never hazes: followed up from the street it stays a crisp toy, over the
+      // falling-through-clouds overlay too.)
+      body[o5 + 24] = o.id === ride ? 0 : 1 - 0.7 * smooth(HAZE_PX[0], HAZE_PX[1], rpx);
+      body[o5 + 25] = o.kind === 'station' ? 1 : 1 - space * (1 - smooth(BEACON_PX[0], BEACON_PX[1], rpx));
     }
   }
 
   function trackable(i: number): Trackable {
     const o = ORBITS[i];
     const speed = orbitSpeed(o);
+    // The clouds re-draw it over their falling-through-clouds overlay (every body is in this one
+    // shader-placed mesh; the re-draw is scissored to the followed one).
+    const objects = mesh ? [mesh] : undefined;
     return {
       id: o.id,
+      objects,
+      // What reads as its body: the station's modules; a satellite's box between thin panels (a
+      // third of its reach); the sail's sheet; the cubesat trio's spread.
+      bodyRadius: o.radius * BODY_K[o.model],
       kind: o.kind,
       label: o.label,
       sub: o.sub,

@@ -107,3 +107,75 @@ export function lerpDir(a: Vec3, b: Vec3, f: number, out: Vec3 = v3()): Vec3 {
   out.z = a.z + (b.z - a.z) * f;
   return normalize3(out);
 }
+
+/**
+ * v2 (R2 refine): fair a plan polyline (x, z interleaved, roughly even samples `step` m apart) where it
+ * turns tighter than `rMin` (circumradius of samples ~2 m apart, as the specs measure): local smoothing
+ * passes over the unpinned samples round each tight spot, the window growing while the spot stays
+ * tight (a turn pressed against a pinned straight spreads along the free curve beyond). In place.
+ */
+export function fairLine(line: number[], pinned: ArrayLike<boolean>, rMin: number, step: number): void {
+  const n = line.length / 2;
+  const W = Math.max(2, Math.round(2 / Math.max(0.05, step)));
+  // (tighter than rMin: the circumradius ab·bc·ca / 2·area, compared squared — no roots)
+  const k2 = 4 * rMin * rMin;
+  const tight = (i: number) => {
+    const ax = line[(i - W) * 2], az = line[(i - W) * 2 + 1], bx = line[i * 2], bz = line[i * 2 + 1], cx = line[(i + W) * 2], cz = line[(i + W) * 2 + 1];
+    const ab = (bx - ax) * (bx - ax) + (bz - az) * (bz - az);
+    const bc = (cx - bx) * (cx - bx) + (cz - bz) * (cz - bz);
+    const ca = (ax - cx) * (ax - cx) + (az - cz) * (az - cz);
+    const ar = (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
+    return ab * bc * ca < k2 * ar * ar;
+  };
+  let lo = n;
+  let hi = -1;
+  const touched = new Uint8Array(n);
+  // (after the first sweep only the stretch already touched can have changed: its tight spots are
+  // all that is looked at again)
+  let s0 = W;
+  let s1 = n - W - 1;
+  for (let pass = 0; pass < 480; pass++) {
+    const reach = W * (pass < 120 ? 2 : pass < 240 ? 4 : pass < 360 ? 8 : 14);
+    let any = false;
+    for (let i = s0; i <= s1; i++) {
+      if (!tight(i)) continue;
+      any = true;
+      lo = Math.min(lo, i - reach);
+      hi = Math.max(hi, i + reach);
+      for (let q = Math.max(1, i - reach); q <= Math.min(n - 2, i + reach); q++) {
+        if (pinned[q]) continue;
+        line[q * 2] += 0.5 * ((line[q * 2 - 2] + line[q * 2 + 2]) / 2 - line[q * 2]);
+        line[q * 2 + 1] += 0.5 * ((line[q * 2 - 1] + line[q * 2 + 3]) / 2 - line[q * 2 + 1]);
+        touched[q] = 1;
+      }
+      i += W;
+    }
+    if (!any) break;
+    s0 = Math.max(W, lo - W);
+    s1 = Math.min(n - W - 1, hi + W);
+  }
+  // (the pass above holds pinned samples' positions only, so where it moved a curve next to a pinned
+  // straight, or stopped at the edge of its window, it leaves a kink: fourth-difference passes over
+  // just the stretch it touched, local and high-frequency only, turn those joints tangent-continuous
+  // again without loosening the curve between)
+  if (hi < 0) return;
+  // (the free samples within a window of any the smoothing moved: the joints it can have kinked)
+  const idx: number[] = [];
+  for (let q = 2, near = -1e9; q < n - 2; q++) {
+    if (touched[Math.min(n - 1, q + W)]) near = q + W;
+    if (q - near > 2 * W || pinned[q]) continue;
+    idx.push(q);
+  }
+  const fx = new Float64Array(n);
+  const fz = new Float64Array(n);
+  for (let pass = 0; pass < 240; pass++) {
+    for (const q of idx) {
+      fx[q] = line[q * 2 - 4] - 4 * line[q * 2 - 2] + 6 * line[q * 2] - 4 * line[q * 2 + 2] + line[q * 2 + 4];
+      fz[q] = line[q * 2 - 3] - 4 * line[q * 2 - 1] + 6 * line[q * 2 + 1] - 4 * line[q * 2 + 3] + line[q * 2 + 5];
+    }
+    for (const q of idx) {
+      line[q * 2] -= 0.1 * fx[q];
+      line[q * 2 + 1] -= 0.1 * fz[q];
+    }
+  }
+}

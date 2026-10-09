@@ -367,60 +367,43 @@ void main() {
 // Falling through the clouds (v2, S1). See crossing.ts for the episode it draws.
 //
 // Cartoon puffs live in log-polar cells around the focus of expansion (the screen point the eye
-// flies toward, kept within ~0.3 of the frame): (θ, ln r) is conformal, so a round puff there is
-// round on screen, small near the focus and big toward the edges (capped: never a wall-sized arc),
-// and streaming the cells outward in ln r is exactly how lumps of cloud grow and rush past as the
-// eye falls through them. Two layers (big near puffs over smaller far ones, streaming at different
-// rates) give parallax.
+// flies toward, kept within ~0.3 of the frame): (θ, ln r) is conformal, so a puff there grows with
+// its distance from the focus (capped: never a wall-sized arc), and streaming the cells outward in
+// ln r is exactly how lumps of cloud grow and rush past as the eye falls through them. Two layers
+// (big near puffs over smaller far ones, streaming at different rates) give parallax. With the
+// focus off-screen (climbing out of the city looking down and ahead) every on-screen log-polar cell
+// is huge: a lateral set takes over, a staggered grid of puff-sized cells streaming across the frame
+// from the focus's side, as dense as the dive's (S1f: the climb's hold was 3–4 puffs on a bare sheet).
 //
 // Each puff is ONE instanced screen-space sprite (crossPuffVert): the instance names a cell slot
 // (layer, column, row slot); the vertex shader finds the world cell that slot shows this frame
 // (rows scroll with the phase, so a puff keeps its look as it streams from slot to slot), its
 // growth from the episode's fronts at its centre (the fill front and the opening hole are made of
-// whole puffs growing and shrinking), and its size. The fragment shader draws three toon domes (a
-// base and two lobes, one leaning toward the sky): lit cap, lavender shade, a soft crease, a darker
-// belly edge, and the 3D clouds' ink round the silhouette (so the overlay and the real cumulus it
-// grows out of are one art style). A full-screen body (crossBodyFrag) fills behind them, its edges
-// scalloped into round inked lumps with a shaded rim (so the hole never shows straight arcs or torn
-// slivers), with speed lines streaking outward.
+// whole puffs growing and shrinking), its size, and its smear: each puff is drawn in its own frame
+// (x out from the focus), stretched a little along the motion. Its shape is a cartoon cumulus of one
+// of three kinds (a heap: a wide flat-bellied base with three round bumps on its top and a small lobe
+// low on one side; a long low bank; a tower in tiers; an egg of one dome read as a balloon). The
+// fragment shader draws its five toon domes: lit cap, lavender
+// shade, a soft crease, a darker belly edge, and the 3D clouds' ink round the silhouette only (the
+// overlay and the real cumulus it grows out of are one art style). A full-screen body
+// (crossBodyFrag) fills behind them, its edges scalloped into round inked lumps with a shaded rim,
+// and speed streaks (crossStreak*) rush outward over it and the far puffs, under the near ones.
 //
 // The fronts are measured in ON-SCREEN radius fractions (uRange: nearest screen point → farthest
 // corner), so the fill and the opening always play out on screen; flying backward (uDir < 0) they
 // are measured from the farthest corner instead (the cloud closes in like an iris and shrinks away
 // into the focus of contraction).
 //
-// Depth: both draw INSIDE the scene pass, last, with the depth test on, at the near plane, so they
-// cover everything. Following something, a window round the followed thing (its projected bounding
-// circle and a ramp, uSubj) is drawn by a second pair of programs (LB_WINDOW) with a per-pixel depth
-// (lbCrossDepth, gl_FragDepth) that puts the overlay just behind it, so it stays on top,
-// pixel-exact (a building or a puff nearer than a far subject can only show inside that small
-// window, not across the frame); the first pair skips the window's pixels. The window's edge is a
-// smooth ramp in log depth, wide enough that post's depth ink never finds an edge in it (a step drew
-// a ring round the subject), meeting the first pair's depth exactly at its rim. Only the window pays
-// for gl_FragDepth (it turns off the early depth test). They also WRITE that depth where they are at least half opaque (the
-// antialiased fringe below that is discarded; FXAA smooths the edge), so post's ink, which comes
-// from depth, never draws the hidden city over the clouds.
-// Order and overdraw: front to back, each a hair (uZEps) behind the last: the near puffs, outer rows
-// (the big ones, nearest the eye) first, then the far puffs likewise, then the body, so the depth
-// test rejects whatever is hidden under a nearer puff before it is shaded (with no gl_FragDepth the
-// test runs early): well under half the fragments of drawing them back to front. The steps are
-// ~1e-6 of depth each: post's ink never sees them.
-const CROSS_DEPTH = /* glsl */ `
-uniform vec4 uSubj;   // the subject's window: xy centre (drawing-buffer px), z radius (px; < 0: none), w ramp (px)
-uniform vec2 uLnW;    // ln(1 / view depth): x just behind the subject, y at the near plane
-uniform vec2 uNF;     // camera near, far
-uniform float uZEps;  // the layers' depth step (NDC)
-// Inside the window (the LB_WINDOW programs draw exactly these pixels, the others exactly the rest).
-bool lbInWindow() {
-  return uSubj.z >= 0.0 && distance(gl_FragCoord.xy, uSubj.xy) < uSubj.z + uSubj.w;
-}
-float lbCrossDepth(float layer) {
-  float t = uSubj.z < 0.0 ? 1.0 : smoothstep(uSubj.z, uSubj.z + uSubj.w, distance(gl_FragCoord.xy, uSubj.xy));
-  float vz = -exp(-mix(uLnW.x, uLnW.y, t));
-  return ((uNF.x + vz) * uNF.y) / ((uNF.y - uNF.x) * vz) + layer * uZEps * 0.5;
-}
-`;
-
+// Depth: everything draws INSIDE the scene pass, last, over the scene whatever its depth (depth test
+// 'always'), back to front (the body, the far puffs, the streaks, the near puffs, inner rows first),
+// and writes ONE constant depth just short of the far plane where it is at least half opaque (the
+// antialiased fringe below that is discarded; FXAA smooths the edge). So post, which reads depth for
+// its ink, fog and night grade, sees one flat far plane: no hidden city inked over the clouds, no
+// edge anywhere inside the overlay, the same grade everywhere. The thing the camera follows is then
+// drawn again ON TOP (clouds/index.ts): its owner's scene objects re-drawn after the overlay,
+// scissored to it, depth-tested against that far plane (so it is self-occluded and pixel-exact, and
+// post inks its outline against the far plane like against the sky): no window, no porthole. A far
+// subject also gets a POP target ring (crossMark*).
 const CROSS_COMMON = /* glsl */ `
 uniform float uFill;
 uniform float uOpen;
@@ -452,58 +435,226 @@ float lbFront(float rr, float lagFill, float lagOpen, float soft) {
 }
 `;
 
+// The body's signed distance to its lumpy fronts at screen uv (front fractions, > 0 inside the
+// cloud), shared by the body and the ring (drawn only where the body covers). r, th: polar
+// coordinates round the focus (height units); rr: the front fraction there.
+const CROSS_BODY_EDGE = /* glsl */ `
+float lbBodyEdge(vec2 uv, out float r, out float th, out float rr) {
+  vec2 d = (uv - uFoe) * vec2(uAspect, 1.0);
+  r = max(length(d), 1e-4);
+  rr = lbRR(r);
+  th = 0.0;
+  float hold = 0.08 + 0.4 * (1.0 - smoothstep(0.25, 0.85, uFill));
+  // Well away from both fronts (most of the frame while it is covered) the lumps (≤ 0.14) cannot
+  // reach: skip the angle and the hash, the body being a full-screen pass.
+  float e0 = min(uFill - hold - rr, rr - uOpen - 0.06);
+  if (abs(e0) > 0.16) return e0;
+  th = atan(d.y, d.x);
+  float range = max(uRange.y - uRange.x, 0.05);
+  // Scalloped edges: round lumps of cloud along both fronts (a fixed count per turn, so they grow
+  // with the front like the puffs do), sized per lump. The angle is warped (a smooth, monotonic,
+  // periodic warp), so the lumps run from ~0.65× to ~2.2× the mean width round the turn, each as
+  // tall as it is wide (evenly spaced, the last cloud shrinking into the focus read as a rosette),
+  // with a second, finer octave of little lumps riding on them (with the focus far off the frame a
+  // big lump is a wide flat arc, and arcs meeting in points read as a mountain range).
+  float tw = th + 0.1 * sin(th * 3.0 + 1.3) + 0.05 * sin(th * 5.0 + 4.1);
+  float dw = 1.0 + 0.3 * cos(th * 3.0 + 1.3) + 0.25 * cos(th * 5.0 + 4.1);
+  float sx = tw / TAU * 17.0;
+  float sf = fract(sx) * 2.0 - 1.0;
+  float sh = lbH3(vec2(mod(floor(sx), 17.0), 7.0)).x;
+  float bump = sqrt(max(0.0, 1.0 - sf * sf)) * (0.45 + 0.55 * sh) * min(0.1, 0.5 * TAU * r / 17.0 / range / dw);
+  float sx2 = th / TAU * 53.0 + 0.37;
+  float sf2 = fract(sx2) * 2.0 - 1.0;
+  float sh2 = lbH3(vec2(mod(floor(sx2), 53.0), 11.0)).y;
+  // (Only where the big lumps are wide on screen: round a small hole, 53 little lumps read as a
+  // serrated tear.)
+  bump += sqrt(max(0.0, 1.0 - sf2 * sf2)) * (0.4 + 0.6 * sh2) * min(0.04, 0.4 * TAU * r / 53.0 / range) * smoothstep(0.12, 0.26, TAU * r / 17.0 / dw);
+  // Signed distances to the fill edge and to the hole's edge. (The body holds back while the fill is
+  // young: puffs bloom first, the body fills in behind them; a bare scalloped disc at the focus read
+  // as a sticker.)
+  float eFill = uFill - hold + bump - rr;
+  float eOpen = rr - (uOpen + 0.06 - bump);
+  return min(eFill, eOpen);
+}
+`;
+
 export const crossPuffVert = /* glsl */ `
 ${CROSS_COMMON}
-uniform float uZ;     // NDC depth of the near layer
-uniform float uZEps;
-uniform vec4 uSubj;
-uniform vec2 uRes;    // drawing buffer (px)
-attribute vec3 aCell;
-varying vec2 vQ;
-varying vec4 vLobes;
-varying vec2 vLobeR;
+uniform float uZ;      // NDC depth of the whole overlay (just short of the far plane)
+uniform float uStretch; // the smear along the motion (0 still … ~1 at speed)
+uniform float uLat;    // 0 radial (the focus in frame) … 1 lateral (the focus off-screen)
+uniform vec2 uFlow;    // lateral: the on-screen flow direction (aspect units, unit), away from the focus
+uniform vec2 uPhaseL;  // lateral: the rows' scroll along uFlow (height units; near, far)
+uniform vec2 uRes;     // drawing-buffer size (px)
+attribute vec4 aCell;  // layer (0 far, 1 near), column, row slot, mode (0 radial, 1 lateral, 2 cap)
+varying vec2 vQ;       // dome space: the base dome has radius 1
+varying vec4 vB1;      // bumps 1 and 2: centres
+varying vec4 vB2;      // bumps 3 and 4: centres
+varying vec4 vBR;      // 1 / bump radii
+varying vec2 vBW;      // 1 / the base's half-width (1, or wider for a long bank), its top's height scale
+varying vec3 vL3;      // the light in this puff's dome space
+varying vec2 vL2;      // … and its screen-plane part
+varying vec2 vLH;      // the puff's sky direction (unit; the light's, leaning per puff)
 varying float vHaze;
-varying float vRank;
+varying float vPx;     // the puff's size on screen (px)
 void main() {
   bool nearL = aCell.x > 0.5;
-  float N = nearL ? 6.0 : 11.0;
-  float ph = nearL ? uPhase.x : uPhase.y;
-  float k = N / TAU;
-  float Y = floor((-3.6 - ph) * k) + aCell.z;
-  vec3 h = lbH3(vec2(aCell.y, Y) + (nearL ? 3.0 : 17.0));
-  vec2 ctr = vec2(aCell.y, Y) + 0.25 + 0.5 * h.xy;
-  float th = ctr.x / k;
-  float rc = exp(ctr.y / k + ph);
-  // Growth from the fronts at the puff's centre (a little stagger per puff for a ragged front);
-  // none right at the focus (a dot of popcorn there read as litter on the city).
-  float thin = nearL ? 0.55 : 0.6;
-  float rmin = nearL ? 0.12 : 0.1;
-  // (The hole's front a step outward and tighter than the fill's: puffs leave the hole before the
-  // body's lumpy edge does, so none is left floating in it.)
-  float g = smoothstep(h.z * thin, h.z * thin + 0.35, lbFront(lbRR(rc), 0.0, 0.07, 0.08)) * smoothstep(rmin, rmin * 2.0, rc);
-  // Size: conformal (∝ distance from the focus), floored near it and capped toward the edges (a
-  // far-off focus once made every on-screen puff a frame-sized arc). Each puff grows from nothing
-  // with the front and shrinks to nothing in the hole, never a dot left behind.
-  float rad0 = clamp((0.36 + 0.2 * h.z) * rc / k, nearL ? 0.05 : 0.032, nearL ? 0.24 : 0.15);
-  float rad = rad0 * (0.4 + 0.6 * g) * smoothstep(0.2, 0.55, g);
-  vec2 er = vec2(cos(th), sin(th));
-  float ang = (h.x - 0.5) * 2.4;
-  vec2 dA = normalize(mix(vec2(cos(ang * 2.6), sin(ang * 2.6)), uLight, 0.55));
-  vec2 dB = vec2(dA.x * cos(2.3 + ang) - dA.y * sin(2.3 + ang), dA.x * sin(2.3 + ang) + dA.y * cos(2.3 + ang));
-  vLobes = vec4(dA * (0.58 + 0.12 * h.y), dB * (0.62 + 0.1 * h.z));
-  vLobeR = 1.0 / vec2(0.66 + 0.12 * h.x, 0.52 + 0.14 * h.y);
+  float mode = aCell.w;
+  vec2 F = uFoe * vec2(uAspect, 1.0);
+  // The radial and lateral sets hand over puff by puff (each shrinks or grows at its own threshold:
+  // the count on screen stays even while the focus leaves the frame or comes back).
+  float tl = uLat * 1.3 - 0.15;
+  vec3 h, h2;
+  vec2 d;
+  float rad0, wMode, g;
+  if (mode < 0.5) {
+    // Radial: log-polar cells round the focus (see top).
+    float N = nearL ? 6.0 : 11.0;
+    float ph = nearL ? uPhase.x : uPhase.y;
+    float k = N / TAU;
+    float Y = floor((-3.6 - ph) * k) + aCell.z;
+    h = lbH3(vec2(aCell.y, Y) + (nearL ? 3.0 : 17.0));
+    h2 = lbH3(vec2(Y, aCell.y) + (nearL ? 11.0 : 29.0));
+    vec2 ctr = vec2(aCell.y, Y) + 0.25 + 0.5 * h.xy;
+    float th = ctr.x / k;
+    float rc = exp(ctr.y / k + ph);
+    d = vec2(cos(th), sin(th)) * rc;
+    // Size: conformal (∝ distance from the focus), varied per puff, floored near the focus and capped
+    // toward the edges (a far-off focus once made every on-screen puff a frame-sized arc).
+    rad0 = clamp((0.27 + 0.32 * h.z) * rc / k, nearL ? 0.05 : 0.032, nearL ? 0.13 + 0.1 * h2.y : 0.085 + 0.06 * h2.z);
+    wMode = smoothstep(tl - 0.15, tl + 0.15, h2.x);
+  } else if (mode < 1.5) {
+    // Lateral: with the focus off-screen (climbing out of the city looking down and ahead, a bird
+    // climbing) every on-screen log-polar cell was huge and the hold showed 3–4 puffs on a bare
+    // lavender sheet. Here a staggered grid of puff-sized cells over the frame, in a frame along the
+    // flow, rows scrolling with it: the same puffs, as dense as the dive's, streaming across.
+    float sp = nearL ? 0.36 : 0.26;
+    float ph = nearL ? uPhaseL.x : uPhaseL.y;
+    vec2 fl = uFlow;
+    vec2 gl = vec2(-fl.y, fl.x);
+    vec2 c0 = -F;
+    vec2 c1 = vec2(uAspect, 0.0) - F;
+    vec2 c2 = vec2(0.0, 1.0) - F;
+    vec2 c3 = vec2(uAspect, 1.0) - F;
+    float a0 = min(min(dot(c0, fl), dot(c1, fl)), min(dot(c2, fl), dot(c3, fl))) - sp;
+    float b0 = min(min(dot(c0, gl), dot(c1, gl)), min(dot(c2, gl), dot(c3, gl))) - sp;
+    float Y = floor((a0 - ph) / sp) + aCell.z;
+    float X = floor(b0 / sp) + aCell.y;
+    h = lbH3(vec2(X, Y) + (nearL ? 5.0 : 23.0));
+    h2 = lbH3(vec2(Y, X) + (nearL ? 13.0 : 31.0));
+    float along = (Y + 0.2 + 0.6 * h.y) * sp + ph;
+    float across = (X + 0.5 * mod(Y, 2.0) + 0.15 + 0.7 * h.x) * sp;
+    d = fl * along + gl * across;
+    rad0 = nearL ? 0.1 + 0.11 * h2.y : 0.065 + 0.055 * h2.z;
+    // (Some cells empty, more of the far ones: gaps where the body and its speed streaks show,
+    // wisps, not foam; and the overlay's cost is its overdraw.)
+    wMode = (1.0 - smoothstep(tl - 0.15, tl + 0.15, h2.x)) * step(nearL ? 0.22 : 0.55, fract(h.x * 7.13 + h2.z * 3.71));
+  } else {
+    // Caps: flying backward the cloud closes in from the corners and its last gap (at the screen
+    // point nearest the focus) shrank as a small scalloped porthole onto the city for a frame. Three
+    // near puffs grow over that point as the fill nears its end.
+    vec2 P = clamp(uFoe, vec2(0.0), vec2(1.0)) * vec2(uAspect, 1.0);
+    float ang = aCell.y * 2.0944 + 0.6;
+    d = P + vec2(cos(ang), sin(ang)) * 0.075 - F;
+    h = lbH3(vec2(aCell.y, 3.0) + 41.0);
+    h2 = lbH3(vec2(3.0, aCell.y) + 43.0);
+    rad0 = 0.12 + 0.05 * h2.y;
+    wMode = step(uDir, 0.0);
+  }
+  float rc = max(length(d), 1e-4);
+  vec2 er = d / rc;
+  vec2 et = vec2(-er.y, er.x);
+  if (mode < 1.5) {
+    // Growth from the fronts at the puff's centre (a little stagger per puff for a ragged front);
+    // none right at the focus (a dot of popcorn there read as litter on the city). (The hole's front
+    // a step outward and tighter than the fill's: puffs leave the hole before the body's lumpy edge
+    // does, so none is left floating in it.)
+    float thin = nearL ? 0.55 : 0.6;
+    float rmin = nearL ? 0.12 : 0.1;
+    g = smoothstep(h.z * thin, h.z * thin + 0.35, lbFront(lbRR(rc), 0.0, 0.07, 0.08)) * smoothstep(rmin, rmin * 2.0, rc);
+  } else {
+    float gFill = smoothstep(0.72, 0.95, uFill / 1.18);
+    // (They leave with the puffs round them, not last: a cluster fading alone at the focus read
+    // as a ghost.)
+    float gOpen = smoothstep(uOpen + 0.07 - 0.08, uOpen + 0.07 + 0.08, lbRR(rc));
+    g = max(min(gFill, gOpen), uContact);
+  }
+  // Each puff grows from nothing with the front and shrinks to nothing in the hole, never a dot left
+  // behind.
+  float rad = rad0 * (0.4 + 0.6 * g) * smoothstep(0.2, 0.55, g) * wMode;
+  // Smeared along the motion: stretched out from the focus (more toward the edges, where the cloud
+  // rushes past fastest, and with speed), slimmer across; squashed a little per puff. (Applied below,
+  // once the puff's sky direction is known.)
+  float sm = uStretch * smoothstep(0.1, 0.75, rc) * (0.55 + 0.6 * h.y);
+  // The sky's light (screen space) in the puff's frame (x out from the focus).
+  vec2 L = vec2(dot(uLight, er), dot(uLight, et));
+  vL3 = normalize(vec3(L * 0.85, 0.42));
+  // A cartoon cumulus, laid out in the sky's frame (u across, v toward the sky, leaning a little per
+  // puff): a wide base with a flat belly (half-height 0.62 up, 0.5 down; one dome with a round top
+  // read as an egg), three round bumps on its top (shoulders and a bigger crown, a scalloped
+  // skyline) and a small lobe low on one side; placed and sized per puff, never the same twice.
+  float lean = (h2.y - 0.5) * 0.6;
+  vec2 lh = normalize(L + vec2(1e-4, 0.0));
+  lh = vec2(lh.x * cos(lean) - lh.y * sin(lean), lh.x * sin(lean) + lh.y * cos(lean));
+  // (u along lp = lh turned clockwise: the quad (u, v) keeps the screen's winding, not culled.)
+  vec2 lp = vec2(lh.y, -lh.x);
+  // The smear, a quarter as strong along the puff's own sky axis: above and below the focus the
+  // motion runs up and down the cumulus, and stretched that way its flat belly and bumps turned
+  // into a tall egg.
+  float s = (0.9 + 0.2 * h2.x) * (1.0 + sm * mix(0.25, 1.0, lh.y * lh.y));
+  float sg = h.x > 0.5 ? 1.0 : -1.0;
+  vec2 u1 = vec2(-0.5 - 0.14 * h.z, 0.26 + 0.12 * h.y);
+  vec2 u2 = vec2(0.22 * (h.y - 0.5), 0.4 + 0.14 * h2.z);
+  vec2 u3 = vec2(0.48 + 0.16 * h2.x, 0.22 + 0.14 * h.z);
+  vec2 u4 = vec2(sg * (0.86 + 0.08 * h2.x), 0.0);
+  vec4 br = vec4(0.4 + 0.12 * h2.y, 0.52 + 0.14 * h.x, 0.4 + 0.14 * h2.x, 0.28 + 0.08 * h.z);
+  // Three kinds of cumulus, so neighbours never share a silhouette (one template read as a sheet of
+  // the same sticker): the heap above (~55 %), a long low bank (~30 %) and a tower in tiers (~15 %).
+  float ty = fract(h.x * 7.13 + h2.y * 3.71 + h.z * 1.37);
+  float bw = 1.0;
+  float bh = 1.0;
+  if (ty < 0.3) {
+    // A long low bank: the base 45 % wider and a fifth lower, two small crowns between low shoulders.
+    bw = 1.45;
+    bh = 0.8;
+    u1 = vec2(-0.95 - 0.1 * h.z, 0.12 + 0.08 * h.y);
+    u2 = vec2(-sg * 0.3 + 0.1 * (h.y - 0.5), 0.3 + 0.1 * h2.z);
+    u3 = vec2(0.95 + 0.1 * h2.x, 0.1 + 0.08 * h.z);
+    u4 = vec2(sg * 0.38, 0.26 + 0.08 * h.y);
+    br = vec4(0.32 + 0.08 * h2.y, 0.44 + 0.08 * h.x, 0.32 + 0.08 * h2.x, 0.4 + 0.06 * h.z);
+  } else if (ty > 0.84) {
+    // A tower in tiers: the base a little narrower, broad shoulders on it, a crown high on those (a
+    // big crown straight on the base read as an egg).
+    bw = 0.92;
+    u1 = vec2(-0.52 - 0.08 * h.z, 0.38 + 0.08 * h.y);
+    u2 = vec2(0.12 * (h.y - 0.5), 0.68 + 0.08 * h2.z);
+    u3 = vec2(0.5 + 0.08 * h2.x, 0.36 + 0.08 * h.z);
+    br.xyz = vec3(0.42 + 0.08 * h2.y, 0.5 + 0.06 * h.x, 0.42 + 0.08 * h2.x);
+  }
+  vBW = vec2(1.0 / bw, 1.0 / bh);
+  vB1 = vec4(lp * u1.x + lh * u1.y, lp * u2.x + lh * u2.y);
+  vB2 = vec4(lp * u3.x + lh * u3.y, lp * u4.x + lh * u4.y);
+  vBR = 1.0 / br;
+  vL2 = L;
+  vLH = lh;
   vHaze = nearL ? 0.0 : 1.0;
-  vQ = position.xy * 1.5;
-  vec2 c = uFoe * vec2(uAspect, 1.0) + er * rc + position.xy * 1.75 * rad;
-  // Depth rank: near layer rows 6 … 0 → 0 … 6, far layer rows 10 … 0 → 7 … 17 (the body is 18).
-  vRank = nearL ? 6.0 - aCell.z : 17.0 - aCell.z;
-  bool on = rad > 1e-4;
-  #ifdef LB_WINDOW
-    // Only the puffs that reach into the window.
-    vec2 cc = uFoe * vec2(uAspect, 1.0) + er * rc;
-    on = on && distance(cc * uRes.y, uSubj.xy) < uSubj.z + uSubj.w + 2.5 * rad * uRes.y;
-  #endif
-  gl_Position = on ? vec4(c.x / uAspect * 2.0 - 1.0, c.y * 2.0 - 1.0, uZ + vRank * uZEps, 1.0) : vec4(3.0, 3.0, 3.0, 1.0);
+  vPx = rad * 1.4 * uRes.y;
+  // The sprite: a quad fitted round the base and the four bumps, in the sky's frame: ~30 % fewer
+  // fragments than a round sprite, the overlay's cost being its blended overdraw.
+  vec4 cu = vec4(u1.x, u2.x, u3.x, u4.x);
+  vec4 cv = vec4(u1.y, u2.y, u3.y, u4.y);
+  vec4 lo = min(cu - br, vec4(-bw));
+  vec4 hi = max(cu + br, vec4(bw));
+  vec2 bu = vec2(min(min(lo.x, lo.y), min(lo.z, lo.w)), max(max(hi.x, hi.y), max(hi.z, hi.w)));
+  lo = min(cv - br, vec4(-0.5));
+  hi = max(cv + br, vec4(0.62));
+  vec2 bv = vec2(min(min(lo.x, lo.y), min(lo.z, lo.w)), max(max(hi.x, hi.y), max(hi.z, hi.w)));
+  vec2 t01 = position.xy * 0.5 + 0.5;
+  vQ = lp * (mix(bu.x, bu.y, t01.x) + position.x * 0.05) + lh * (mix(bv.x, bv.y, t01.y) + position.y * 0.05);
+  // (× 1.4: the flat base covers less than the round dome did at the same radius.)
+  vec2 o = vQ * 1.4 * rad;
+  vec2 c = F + er * (rc + o.x * s) + et * (o.y * inversesqrt(s));
+  gl_Position = rad > 1e-4 ? vec4(c.x / uAspect * 2.0 - 1.0, c.y * 2.0 - 1.0, uZ, 1.0) : vec4(3.0, 3.0, 3.0, 1.0);
 }`;
 
 // Shading contrast at dusk and night (uTone, from the CPU): the palette's stops sit close together in
@@ -514,9 +665,6 @@ uniform float uTone;
 `;
 
 export const crossPuffFrag = /* glsl */ `
-${CROSS_DEPTH}
-uniform vec2 uLight;
-uniform vec3 uL3;      // the light in the domes' space (normalize(uLight · 0.8, 0.55))
 uniform float uFade;
 uniform vec3 uLit, uShade, uInk;
 // Per frame on the CPU (uniform-only work kept off the fragments, the overlay's cost being its
@@ -525,101 +673,84 @@ uniform vec3 uLit, uShade, uInk;
 uniform vec3 uBellyT, uRimK, uBodyC;
 uniform vec2 uKBS;     // belly, seam weights
 varying vec2 vQ;
-varying vec4 vLobes;
-varying vec2 vLobeR;   // 1 / lobe radii
+varying vec4 vB1;
+varying vec4 vB2;
+varying vec4 vBR;
+varying vec2 vBW;
+varying vec3 vL3;
+varying vec2 vL2;
+varying vec2 vLH;
 varying float vHaze;
-varying float vRank;
+varying float vPx;
 void main() {
-  #ifdef LB_WINDOW
-    if (!lbInWindow()) discard;
-  #else
-    if (lbInWindow()) discard;
-  #endif
-  // Three domes (1 − |q|²): the base and two lobes; the surface is the highest.
-  float d0 = 1.0 - dot(vQ, vQ);
-  vec2 qa = (vQ - vLobes.xy) * vLobeR.x;
-  vec2 qb = (vQ - vLobes.zw) * vLobeR.y;
-  float da = 1.0 - dot(qa, qa);
-  float db = 1.0 - dot(qb, qb);
-  float best = max(d0, max(da, db));
+  // Five domes (1 − |q|²): the base and four bumps; the surface is the highest, the crease where the
+  // two highest meet. The base is wide and flat: half-height 0.62 toward the sky, 0.5 below (its
+  // flat belly); its normal leans with the squash.
+  vec2 lp = vec2(-vLH.y, vLH.x);
+  float bv = dot(vQ, vLH);
+  float bk = bv > 0.0 ? vBW.y / 0.62 : 2.0;
+  vec2 q0 = lp * (dot(vQ, lp) * vBW.x) + vLH * (bv * bk);
+  vec2 q1 = (vQ - vB1.xy) * vBR.x;
+  vec2 q2 = (vQ - vB1.zw) * vBR.y;
+  vec2 q3 = (vQ - vB2.xy) * vBR.z;
+  vec2 q4 = (vQ - vB2.zw) * vBR.w;
+  float d0 = 1.0 - dot(q0, q0);
+  float d1 = 1.0 - dot(q1, q1);
+  float d2 = 1.0 - dot(q2, q2);
+  float d3 = 1.0 - dot(q3, q3);
+  float d4 = 1.0 - dot(q4, q4);
+  float best = d0;
+  float second = -1.0;
+  vec2 n2 = q0;
+  if (d1 > best) { second = best; best = d1; n2 = q1; } else second = max(second, d1);
+  if (d2 > best) { second = best; best = d2; n2 = q2; } else second = max(second, d2);
+  if (d3 > best) { second = best; best = d3; n2 = q3; } else second = max(second, d3);
+  if (d4 > best) { second = best; best = d4; n2 = q4; } else second = max(second, d4);
   float fw = max(fwidth(best), 1e-4);
   if (best < fw * 0.95) discard;
-  float second = d0 + da + db - best - min(d0, min(da, db));
-  vec2 n2 = d0 >= max(da, db) ? vQ : (da >= db ? qa : qb);
   vec3 n = vec3(n2 * 0.9, sqrt(best));
-  float lam = dot(n, uL3) * inversesqrt(dot(n, n));
-  float side = dot(n2, uLight);
+  float lam = dot(n, vL3) * inversesqrt(dot(n, n));
+  float side = dot(n2, vL2);
   // Two soft toon bands like the 3D puffs' (hard lavender crescents read as another style), a warm
   // rim on the sky side of each dome's edge, a soft crease where a lobe overlaps another on the
   // shaded side, a darker belly edge.
-  vec3 col = mix(uShade, mix(uLit, uShade, 0.1 * clamp((0.8 - lam) * 2.0, 0.0, 1.0)), clamp((lam + 0.28) * 4.5, 0.0, 1.0));
+  vec3 col = mix(uShade, mix(uLit, uShade, 0.14 * clamp((0.85 - lam) * 2.0, 0.0, 1.0)), clamp((lam + 0.12) * 4.5, 0.0, 1.0));
   col = mix(col, uBellyT, clamp((-0.44 - lam) * 3.6, 0.0, 1.0) * uKBS.x);
   col += uRimK * (1.0 - clamp(best * 4.0, 0.0, 1.0)) * clamp((side - 0.3) * 1.67, 0.0, 1.0);
   float seam = (1.0 - clamp((best - second) * 20.0, 0.0, 1.0)) * step(0.0, second) * clamp((0.1 - side) * 2.0, 0.0, 1.0);
-  col = mix(col, uBellyT, seam * uKBS.y);
+  col = mix(col, uBellyT, seam * uKBS.y * 0.7);
   col = mix(col, uBellyT * 0.9, (1.0 - clamp(best * 10.0, 0.0, 1.0)) * clamp((-0.2 - side) * 2.0, 0.0, 1.0) * 0.6);
   // The far layer sits a step back (a touch of the body's colour): depth, not mush.
   col = mix(col, uBodyC, 0.22 * vHaze);
-  // Ink round the puff's silhouette (~1.4 px inside its edge), the weight of post's line on the 3D
-  // cumulus; lighter on the far layer. Each puff's line falls on the puffs behind it: inked lobes.
-  float ink = (1.0 - clamp((best - fw * 1.3) / (fw * 1.4), 0.0, 1.0)) * (0.6 - 0.28 * vHaze);
-  ink = max(ink, seam * clamp((0.3 - side) * 2.0, 0.0, 1.0) * 0.18);
+  // Ink round the puff's silhouette only (~1.6 px inside its edge), the weight of post's line on the
+  // 3D cumulus; lighter on the far layer. (No ink inside a puff: the creases between its lobes are
+  // shade, not line; inked they read as bubbles stacked on bubbles.)
+  // (A puff only a few pixels across, growing in or shrinking away, is not an ink dot.)
+  float ink = (1.0 - clamp((best - fw * 1.5) / (fw * 1.4), 0.0, 1.0)) * (0.72 - 0.34 * vHaze) * smoothstep(4.0, 12.0, vPx);
   col = mix(col, uInk + col * 0.12, ink);
-  gl_FragColor = vec4(col, clamp((best - fw * 0.6) / (fw * 0.7), 0.0, 1.0) * uFade);
-  #ifdef LB_WINDOW
-    gl_FragDepth = lbCrossDepth(vRank);
-  #endif
+  gl_FragColor = vec4(col, clamp((best - fw * 0.6) / (fw * 0.7), 0.0, 1.0) * uFade * smoothstep(1.5, 5.0, vPx));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
 
 export const crossBodyVert = /* glsl */ `
 uniform float uZ;
-uniform float uZEps;
-uniform vec4 uSubj;
-uniform vec2 uRes;
 varying vec2 vUv;
 void main() {
-  vec2 p = position.xy;
-  #ifdef LB_WINDOW
-    // The full-screen triangle shrunk round the window's bounding square.
-    p = (uSubj.xy + p * (uSubj.z + uSubj.w + 2.0)) / uRes * 2.0 - 1.0;
-  #endif
-  vUv = p * 0.5 + 0.5;
-  gl_Position = vec4(p, uZ + 18.0 * uZEps, 1.0);
+  vUv = position.xy * 0.5 + 0.5;
+  gl_Position = vec4(position.xy, uZ, 1.0);
 }`;
 
 export const crossBodyFrag = /* glsl */ `
 ${CROSS_COMMON}
-${CROSS_DEPTH}
+${CROSS_BODY_EDGE}
 ${CROSS_TONE}
-uniform float uStreak;
 uniform vec3 uLit, uShade, uBelly, uInk;
 varying vec2 vUv;
 void main() {
-  #ifdef LB_WINDOW
-    if (!lbInWindow()) discard;
-  #else
-    if (lbInWindow()) discard;
-  #endif
-  vec2 d = (vUv - uFoe) * vec2(uAspect, 1.0);
-  float r = max(length(d), 1e-4);
-  float th = atan(d.y, d.x);
-  float rr = lbRR(r);
-  float range = max(uRange.y - uRange.x, 0.05);
-  // Scalloped edges: round lumps of cloud along both fronts (a fixed count per turn, so they grow
-  // with the front like the puffs do), sized per lump.
-  float sx = th / TAU * 17.0;
-  float sf = fract(sx) * 2.0 - 1.0;
-  float sh = lbH3(vec2(mod(floor(sx), 17.0), 7.0)).x;
-  float bump = sqrt(max(0.0, 1.0 - sf * sf)) * (0.5 + 0.5 * sh) * min(0.1, 0.5 * TAU * r / 17.0 / range);
-  // Signed distances (front fractions) to the fill edge and to the hole's edge: > 0 inside cloud.
-  // (The body holds back while the fill is young: puffs bloom first, the body fills in behind them;
-  // a bare scalloped disc at the focus read as a sticker.)
-  float eFill = uFill - 0.08 - 0.4 * (1.0 - smoothstep(0.25, 0.85, uFill)) + bump - rr;
-  float eOpen = rr - (uOpen + 0.06 - bump);
-  float e = min(eFill, eOpen);
-  float fe = max(fwidth(e), 1e-4);
+  float r, th, rr;
+  float e = lbBodyEdge(vUv, r, th, rr);
+  float fe = clamp(fwidth(e), 1e-4, 0.02); // (clamped: e steps where lbBodyEdge skips the lumps)
   float a = max(smoothstep(-fe, fe * 0.5, e), uContact);
   if (a < 0.5) discard;
   float tb = uTone;
@@ -627,27 +758,105 @@ void main() {
   // A shaded rim inside each lump's edge: the cloud's belly, so the edge reads as a curved mass.
   float rim = (1.0 - smoothstep(0.0, 0.07, e)) * (1.0 - uContact);
   col = mix(col, uBelly * (1.0 - 0.1 * (tb - 1.0)), rim * min(0.9, 0.5 * tb));
-  if (uStreak > 0.002) {
-    float s = log(r);
-    float M = 72.0;
-    float x = th / TAU * M;
-    vec3 h = lbH3(vec2(mod(floor(x), M), 41.0));
-    float fx = abs(fract(x) - 0.5) * 2.0;
-    float w = 0.12 + 0.1 * h.y;
-    float fwx = fwidth(x) * 2.0;
-    float line = 1.0 - smoothstep(w - fwx, w + fwx, fx);
-    float sg = fract((s - uPhase.x * 1.7) * 0.6 + h.x);
-    float seg = smoothstep(0.0, 0.25, sg) * (1.0 - smoothstep(0.3 + 0.25 * h.z, 0.42 + 0.25 * h.z, sg));
-    float st = line * seg * step(0.62, h.z) * smoothstep(0.25, 0.75, r) * uStreak * smoothstep(0.02, 0.12, e);
-    col = mix(col, uLit, st * 0.9);
-  }
   // Ink along the lumpy fronts (where no puff covers them), like the puffs' silhouettes.
   float ink = (1.0 - smoothstep(fe * 1.0, fe * 2.4, e)) * 0.6 * (1.0 - uContact);
   col = mix(col, uInk + col * 0.12, ink);
   gl_FragColor = vec4(col, a * uFade);
-  #ifdef LB_WINDOW
-    gl_FragDepth = lbCrossDepth(18.0);
-  #endif
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+
+// Speed streaks: soft tapered wisps rushing outward from the focus while the eye moves (one
+// instanced quad each). Each lives in ln r like the puffs, born near the focus, gone past the
+// farthest corner, its length growing with its distance (conformal, capped) and with speed. Drawn
+// over the body and the far puffs, UNDER the near ones (mist streaming past between the layers of
+// cloud), and only where the body covers (never across the scene in the hole or past the fill front).
+export const crossStreakVert = /* glsl */ `
+${CROSS_COMMON}
+uniform float uStreak;
+uniform vec2 uRes;
+attribute vec3 aStreak; // angle (rad), phase offset, size (0..1)
+varying vec2 vA;        // x: along (0 inner tip … 1 outer tip), y: across (−1 … 1)
+varying vec2 vUv;
+varying float vAlpha;
+void main() {
+  float life = fract(aStreak.y + uPhase.x * (0.2 + 0.12 * aStreak.z));
+  float r = exp(mix(log(uRange.x + 0.1), log(uRange.y * 1.2), life));
+  vec2 er = vec2(cos(aStreak.x), sin(aStreak.x));
+  vec2 et = vec2(-er.y, er.x);
+  float len = min(r * (0.3 + 0.4 * aStreak.z), 0.36 + 0.22 * aStreak.z) * (0.5 + 0.5 * uStreak);
+  float w = (3.4 + 5.0 * aStreak.z) * (0.6 + 0.4 * smoothstep(0.1, 0.7, r)) / uRes.y;
+  vec2 c = uFoe * vec2(uAspect, 1.0) + er * (r + (position.x - 0.5) * len) + et * (position.y * w);
+  vA = vec2(position.x, position.y);
+  vUv = vec2(c.x / uAspect, c.y);
+  vAlpha = sin(3.14159 * life) * lbFront(lbRR(r), 0.0, 0.0, 0.08) * uFade * smoothstep(0.0, 0.35, uStreak) * smoothstep(0.08, 0.3, r);
+  gl_Position = vAlpha > 0.004 ? vec4(c.x / uAspect * 2.0 - 1.0, c.y * 2.0 - 1.0, 0.0, 1.0) : vec4(3.0, 3.0, 3.0, 1.0);
+}`;
+
+export const crossStreakFrag = /* glsl */ `
+${CROSS_COMMON}
+${CROSS_BODY_EDGE}
+uniform vec3 uLit, uShade;
+varying vec2 vA;
+varying vec2 vUv;
+varying float vAlpha;
+void main() {
+  // A spindle: widest two thirds of the way out, tapering to both tips.
+  float x = clamp(vA.x, 0.0, 1.0);
+  float taper = pow(sin(3.14159 * pow(x, 0.75)), 0.8);
+  float y = abs(vA.y) / max(taper, 1e-3);
+  float fw = max(fwidth(vA.y), 1e-4) / max(taper, 1e-3);
+  // Feathered across (a wisp, not a hairline: drawn hard over the far puffs it read as a scratch).
+  float a = 1.0 - smoothstep(0.3, 1.0 + fw * 0.5, y);
+  if (a <= 0.004) discard;
+  // Only where the body covers, a little inside its lumpy edge.
+  float r, th, rr;
+  float e = lbBodyEdge(vUv, r, th, rr);
+  float inB = max(smoothstep(0.01, 0.06, e), uContact);
+  if (inB <= 0.004) discard;
+  // White mist with a soft lavender underside, so it reads on the lit puffs and the shaded body alike.
+  vec3 col = mix(uLit * 1.07, uShade * 0.9, smoothstep(0.1, 1.0, -vA.y / max(taper, 1e-3)) * 0.65);
+  gl_FragColor = vec4(col, a * vAlpha * (0.35 + 0.6 * x) * inB);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+
+// The POP target ring round a far followed thing (an amber band between two ink lines), only where
+// the body covers (never over the scene in the hole). Its mesh also carries the re-draw of the thing
+// (clouds/index.ts, onAfterRender): with the ring off (uMark.x = 0) the quad collapses to nothing.
+export const crossMarkVert = /* glsl */ `
+uniform vec4 uMark;    // x: the ring's opacity, y: its radius (px), z: its amber band (px), w: unused
+uniform vec2 uMarkC2;  // the ring's centre (drawing-buffer px)
+uniform vec2 uRes;
+varying vec2 vUv;
+void main() {
+  // The full-screen triangle shrunk round the ring's bounding square (or to nothing).
+  float ext = uMark.x > 0.0 ? uMark.y + uMark.z + 4.0 : 0.0;
+  vec2 p = (uMarkC2 + position.xy * ext) / uRes * 2.0 - 1.0;
+  vUv = p * 0.5 + 0.5;
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+export const crossMarkFrag = /* glsl */ `
+${CROSS_COMMON}
+${CROSS_BODY_EDGE}
+uniform vec4 uMark;
+uniform vec2 uMarkC2;
+uniform vec3 uMarkC;
+uniform vec3 uInk;
+varying vec2 vUv;
+void main() {
+  float dp = distance(gl_FragCoord.xy, uMarkC2);
+  float hw = uMark.z * 0.5;
+  float x = abs(dp - uMark.y);
+  float ring = 1.0 - smoothstep(hw + 1.1, hw + 2.1, x);
+  if (ring <= 0.0) discard;
+  float r, th, rr;
+  float e = lbBodyEdge(vUv, r, th, rr);
+  float fe = clamp(fwidth(e), 1e-4, 0.02); // (clamped: e steps where lbBodyEdge skips the lumps)
+  if (max(smoothstep(-fe, fe * 0.5, e), uContact) < 0.5) discard;
+  float band = 1.0 - smoothstep(hw - 0.6, hw + 0.6, x);
+  gl_FragColor = vec4(mix(uInk, uMarkC, band), ring * uMark.x);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;

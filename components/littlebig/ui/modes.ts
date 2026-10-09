@@ -18,14 +18,14 @@ export interface ModeDef {
   color: string;
   /** Kinds this mode rides, best first (explore and bird ride nothing). */
   kinds: readonly TrackKind[];
-  /** The first kind wins outright whenever one is in sight (the station: "watch from the ISS"). */
+  /** The first kind wins outright whenever one is in sight (the station: "watch from the ISS"; a plane, not a balloon, for "follow a plane"). */
   lead?: boolean;
 }
 
 export const MODES: readonly ModeDef[] = [
   { id: 'explore', key: '1', label: 'explore', aria: 'explore the planet', color: C.teal, kinds: [] },
   { id: 'bird', key: '2', label: 'bird', aria: 'fly like a bird', color: C.grass, kinds: [] },
-  { id: 'plane', key: '3', label: 'plane', aria: 'follow a plane', color: C.sky, kinds: ['plane', 'balloon'] },
+  { id: 'plane', key: '3', label: 'plane', aria: 'follow a plane', color: C.sky, kinds: ['plane', 'balloon'], lead: true },
   { id: 'drive', key: '4', label: 'drive', aria: 'ride a car or a bus', color: C.mustard, kinds: ['bus', 'car', 'truck', 'train', 'ferry', 'boat'] },
   { id: 'space', key: '5', label: 'space', aria: 'watch from space', color: C.lilac, kinds: ['station', 'satellite'], lead: true },
   { id: 'people', key: '6', label: 'people', aria: "see through someone's eyes", color: C.coral, kinds: ['person'] },

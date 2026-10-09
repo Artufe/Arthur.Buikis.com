@@ -60,8 +60,10 @@ describe('enter paths', { timeout: 30_000 }, () => {
     expect(p.eQ).toBeLessThan(1);
   });
 
-  it('from a street beside a 20 m block, rises straight up past it before it travels', () => {
+  it('from a street beside a 20 m block, never slides up past it: straight up, or away from it', () => {
     // The block's face 0.8 m east of the start; the target down the street 70 m north, past another.
+    // (D1f r5: a low start — no crane — is taken where it is far cheaper and need not climb near the
+    // start; here it swings away west, rising. Either way, below the roof it never closes on the face.)
     const env = blocks([
       [0.8, -10, 14, 12, 20],
       [-14, 30, -2, 44, 16],
@@ -70,12 +72,20 @@ describe('enter paths', { timeout: 30_000 }, () => {
     const T = at(0, 70, 3.7);
     const Q = at(0, 64, 4.5);
     const p = new EnterPath().plan(S, Q, T, env);
-    expect(p.popUp).toBeGreaterThan(18);
     for (const q of fly(p, 2)) {
       const l = local(q);
-      // Below the block's roof (+ margin) it stays within a hair of the start horizontally.
-      if (l.h < 22 && l.z < 2) expect(Math.hypot(l.x, l.z)).toBeLessThan(0.6);
+      if (l.h > 23.5 || l.z > 12) continue;
+      // Below the block's roof (+ margin) beside it: no closer to its face than it started.
+      expect(0.8 - l.x).toBeGreaterThan(0.75);
+      if (p.popUp > 18 && l.h < 22 && l.z < 2) expect(Math.hypot(l.x, l.z)).toBeLessThan(0.6);
     }
+    // And a start hard up against a facade with nowhere to go but up still pops straight up.
+    const env2 = blocks([
+      [0.8, -40, 14, 60, 20],
+      [-14, -40, -0.8, 60, 20],
+    ]);
+    const p2 = new EnterPath().plan(S, at(30, 64, 4.5), at(30, 70, 3.7), env2);
+    expect(p2.popUp).toBeGreaterThan(18);
   });
 
   it('keeps 4 m from what it passes (roofs + 3.5 m), away from its ends', () => {

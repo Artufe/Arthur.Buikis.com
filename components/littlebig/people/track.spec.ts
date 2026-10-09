@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { getCityIndex, getCityPlan } from '../world/city';
 import { CITY_SURFACE_R, SEED } from '../world/config';
 import { makeIdlers } from './idlers';
-import { LookFlag, makeLooks, makeTraits, PeopleSim } from './sim';
+import { LookFlag, makeLooks, makeTraits, PeopleSim, RIDER_GLANCE_RATE, RIDER_KID_K } from './sim';
 import { createTrafficSim, KINDS } from '../traffic/sim';
 import { FEM, MASC, nameAt } from '../traffic/names';
 import { eyeToWorld, HeightFollower, kerbGlance, kerbWait, walkerCards, walkerEye, walkerNames, walkPlace, YAW_AMAX, YAW_VMAX, YawFollower, type PlanPose } from './track';
@@ -180,8 +180,8 @@ describe('walkers as trackables', () => {
       const kid = (looks[r].flags & LookFlag.Kid) !== 0;
       let t = 30 + r * 7.31;
       sim.placeAt(t, busy, blocked);
-      sim.rider = r;
-      sim.riderK = kid ? 1.3 : 1; // as people/index.ts
+      // (as people/index.ts starts a ride: a settled one, the camera there at once, is a cut)
+      sim.startRide(r, kid ? RIDER_KID_K : 1, true);
       const fol = new YawFollower();
       let still = 0;
       let px = sim.x[r];
@@ -190,7 +190,22 @@ describe('walkers as trackables', () => {
         traffic.step(dt, busy, blocked);
         sim.step(dt, t, busy, blocked, 0, 0, false);
         walkerEye(sim, looks[r], r, 1, false, e);
-        const y = fol.step(Math.atan2(e.fz, e.fx) + 0.6 * kerbWait(sim, r) * kerbGlance(t), dt);
+        if (process.env.LB_IV && n === Number(process.env.LB_IV.split(',')[0])) {
+          if (!sim.dbgIv) sim.dbgIv = 'x';
+          const tt = k / 60;
+          if (tt > Number(process.env.LB_IV.split(',')[1]) && tt < Number(process.env.LB_IV.split(',')[2]) && k % 6 === 0) {
+            console.log(`t+${tt.toFixed(2)} lat ${sim.lat[r].toFixed(2)} plan ${Array.from(sim.dbgPlan).map((x) => x.toFixed(2)).join(',')}${sim.dbgIv}`);
+            for (let j = 0; j < sim.n; j++) {
+              const d = Math.hypot(sim.x[j] - sim.x[r], sim.z[j] - sim.z[r]);
+              if (j === r || d > 2.5) continue;
+              const g = sim.info[sim.edge[j]];
+              console.log(`   j${j} d ${d.toFixed(2)} ${g.e.kind}#${sim.edge[j]}${g.crossing ? (sim.commit[j] ? '/c' : '/w') : ''} dir ${sim.dir[j]} u ${sim.u[j].toFixed(1)} lat ${sim.lat[j].toFixed(2)} sp ${Math.hypot(sim.vx[j], sim.vz[j]).toFixed(2)} y ${sim.yieldT[j].toFixed(1)} h ${sim.hurry[j].toFixed(1)} stuck ${sim.stuck[j].toFixed(1)} why ${sim.turnWhy[j]}`);
+            }
+          }
+        }
+        const y = fol.step(Math.atan2(e.fz, e.fx) + 0.6 * kerbWait(sim, r) * kerbGlance(sim.riderLook * RIDER_GLANCE_RATE), dt);
+        sim.riderVx = Math.cos(y);
+        sim.riderVz = Math.sin(y);
         if (k < 72) continue;
         stats.walked += Math.hypot(sim.x[r] - px, sim.z[r] - pz);
         px = sim.x[r];
@@ -232,7 +247,12 @@ describe('walkers as trackables', () => {
           const qz = e.z - (traffic.fz[v] + traffic.rz[v]) / 2;
           const lo = Math.abs((qx * ax + qz * az) / al) - K.len / 2;
           const la = Math.abs((-qx * az + qz * ax) / al) - K.width / 2;
-          stats.car = Math.min(stats.car, Math.hypot(Math.max(0, lo), Math.max(0, la)));
+          const cd = Math.hypot(Math.max(0, lo), Math.max(0, la));
+          if (process.env.LB_DEBUG && cd < 1.05 && cd < stats.car) {
+            const g = sim.info[sim.edge[r]];
+            console.log(`ride ${n} r${r} t+${(k / 60).toFixed(2)} car ${cd.toFixed(2)} kind ${traffic.kind[v]} | rider ${g.e.kind}#${sim.edge[r]}${g.crossing ? (sim.commit[r] ? '/c' : '/w') : ''} u ${sim.u[r].toFixed(1)}/${g.len.toFixed(1)} lat ${sim.lat[r].toFixed(2)} road ${g.roadSide * sim.dir[r]} sp ${Math.hypot(sim.vx[r], sim.vz[r]).toFixed(2)} plan ${Array.from(sim.dbgPlan).map((x) => x.toFixed(2)).join(',')}`);
+          }
+          stats.car = Math.min(stats.car, cd);
         }
         // waiting at a kerb (settled for a second): 1.25 m back from the kerb line (or at the
         // crossing's start, if its landing is shorter)
@@ -244,8 +264,7 @@ describe('walkers as trackables', () => {
         }
       }
     }
-    sim.rider = -1;
-    sim.riderK = 1;
+    sim.endRide();
     const per = (x: number) => x / stats.frames;
     if (process.env.LB_DEBUG) console.log({ ...stats, close: per(stats.close), faces: per(stats.faces), stand: per(stats.stand), walked: stats.walked / RIDES });
     // (round 2's adults-only berth, measured the same way: someone within 1 m in the lens in ~2 %
@@ -253,6 +272,9 @@ describe('walkers as trackables', () => {
     // Now, over 96 such rides: 94 never closer than 1.0 m, the others ~0.8–0.9 m (a waiter at a
     // corner the view swings past); under 1 m in ~0.02 % of frames, a face looking into the lens
     // within 1.8 m in ~0.6 %, standing ~9 %, a car body ≥ ~1.0 m after the first seconds)
+    // (round 4, started as the game starts a ride, PeopleSim.startRide: nearest 1.15 m, none under
+    // 1 m, a face within 1.8 m in ~0.13 %, standing ~11 %, a car body ≥ 1.17 m; ride.spec.ts
+    // measures what the lens shows)
     expect(stats.worst).toBeGreaterThan(0.8);
     expect(per(stats.close)).toBeLessThan(0.003);
     expect(per(stats.faces)).toBeLessThan(0.025);
