@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ScrollReveal } from '@/components/scroll-reveal';
 import { GameClip } from '@/components/play/game-clip';
+import { GamePrefetch } from '@/components/play/game-prefetch';
 import { games } from '@/content/play';
 
 export function PlayTeaser() {
@@ -17,21 +18,22 @@ export function PlayTeaser() {
               <span className="text-[var(--accent)] mr-2">$</span>ls ~/play
             </div>
             <h2 className="font-display text-[30px] leading-[1.12] tracking-tight" style={{ margin: 0 }}>
-              Two games, <br />built with <br />agents.
+              Three games, <br />built with <br />agents.
             </h2>
             <p className="mt-5 max-w-[30ch] font-mono text-[13px] leading-[1.7] dim">
-              A 40-minute one-shot and a two-evening, eleven-agent build. Both run in your browser.
+              A 40-minute one-shot, a two-evening eleven-agent build and a tiny planet that a harness of agents built overnight. All three run in your browser.
             </p>
             <p className="mt-5 font-mono text-[10px] dim leading-[1.6]">
               Claude Opus 5.5 · code <br />
-              me · prompts, tasks, review
+              me · prompts, focus, review
             </p>
           </div>
 
           <div className="min-w-0">
-            <div className="grid gap-5 sm:grid-cols-2">
+            <div className="grid gap-5 sm:grid-cols-3">
               {games.map((g) => (
                 <div key={g.slug} className="min-w-0">
+                  <GamePrefetch slug={g.slug} />
                   <GameClip media={g.media} lightMedia={g.lightMedia} className="play-tile">
                     <Link href={g.href} className="play-tile-link" aria-label={`Play ${g.title}`}>
                       <span className="play-tile-badge" aria-hidden="true">

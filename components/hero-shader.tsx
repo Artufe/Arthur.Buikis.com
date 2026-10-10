@@ -5,8 +5,11 @@ import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import Script from 'next/script';
 import { getPlasmaMode, onPlasmaModeChange, type PlasmaMode } from '@/lib/plasma-bus';
+import { onPlanetClose, onPlanetOpen } from '@/lib/planet-bus';
+import { onSnakeClose, onSnakeOpen } from '@/lib/snake-bus';
+import { onSurfClose, onSurfOpen } from '@/lib/surf-bus';
 
-const SHADER_EXCLUDED_ROUTES = ['/cv', '/contact', '/snake', '/surf'];
+const SHADER_EXCLUDED_ROUTES = ['/cv', '/contact', '/snake', '/surf', '/planet'];
 
 type Vec3 = [number, number, number];
 type ShaderOpts = Partial<{
@@ -18,7 +21,7 @@ type ShaderOpts = Partial<{
   mid: Vec3;
   accent: Vec3;
 }>;
-type HeroShaderHandle = { set(opts: ShaderOpts): void; stop(): void };
+type HeroShaderHandle = { set(opts: ShaderOpts): void; pause?(on: boolean): void; stop(): void };
 
 declare global {
   interface Window {
@@ -120,6 +123,35 @@ function HeroShaderMount() {
     };
   }, []);
 
+  // A game window (snake, surf, planet) open over the page: hold the plasma so two WebGL loops
+  // don't share the GPU (the game's reveal took ~25 % longer with it running). Expanding a game
+  // navigates to its excluded route, which unmounts this, so only open/close events matter here.
+  const gamesRef = useRef(new Set<string>());
+  useEffect(() => {
+    const games = gamesRef.current;
+    const sync = () => handleRef.current?.pause?.(games.size > 0);
+    const offs = (
+      [
+        ['planet', onPlanetOpen, onPlanetClose],
+        ['snake', onSnakeOpen, onSnakeClose],
+        ['surf', onSurfOpen, onSurfClose],
+      ] as const
+    ).flatMap(([name, onOpen, onClose]) => [
+      onOpen(() => {
+        games.add(name);
+        sync();
+      }),
+      onClose(() => {
+        games.delete(name);
+        sync();
+      }),
+    ]);
+    return () => {
+      offs.forEach((off) => off());
+      games.clear();
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       handleRef.current?.stop();
@@ -141,6 +173,7 @@ function HeroShaderMount() {
             grain: BASE_GRAIN,
           });
           applyState(handleRef.current, resolvedTheme, modeRef.current);
+          if (gamesRef.current.size > 0) handleRef.current.pause?.(true);
         }}
       />
       <canvas

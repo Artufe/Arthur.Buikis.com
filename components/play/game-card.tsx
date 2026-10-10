@@ -1,11 +1,16 @@
 import Link from 'next/link';
 import type { PlayGame } from '@/content/play';
 import { GameClip } from '@/components/play/game-clip';
+import { GamePrefetch } from '@/components/play/game-prefetch';
+import { GameTrailer } from '@/components/play/game-trailer';
 import { cn } from '@/lib/utils';
 
 export function GameCard({ game, index }: { game: PlayGame; index: number }) {
   return (
-    <article className="min-w-0">
+    // An odd last card spans the grid at lg as a landscape card (clip left, copy and receipt right):
+    // see .play-grid in globals.css. The side copy shows only there.
+    <article className="play-game min-w-0">
+      <GamePrefetch slug={game.slug} />
       <div className="play-game-idx">
         <span>
           <b>{String(index + 1).padStart(2, '0')}</b> · {game.slug}
@@ -52,6 +57,13 @@ export function GameCard({ game, index }: { game: PlayGame; index: number }) {
           </span>
         </Link>
       </GameClip>
+
+      <div className="play-game-side" aria-hidden="true">
+        <p className="play-game-side-title">{game.title}</p>
+        <p className="play-game-side-desc">{game.description}</p>
+      </div>
+
+      {game.trailer && <GameTrailer title={game.title} href={game.href} trailer={game.trailer} />}
 
       <dl className="play-receipt">
         {game.receipt.map((row) => (

@@ -20,20 +20,24 @@ There is no lint script (no ESLint config in the repo) and no `start` script (`n
 
 ```
 app/            Routes: / (page.tsx), about/, building/, play/, contact/, cv/, work/[slug]/,
-                subscribe/, snake/, surf/,
+                subscribe/, snake/, surf/, planet/,
                 plus sitemap.ts, robots.ts, llms.txt/, llms-full.txt/, opengraph-image.tsx
 components/     Page sections + global chrome; ui/ (Input, Textarea), mdx/ (MDX overrides),
                 snake/ (three.js 3D snake game), goldenline/ (WebGPU surf demo),
-                play/ (GameClip, GameCard, PlayMethod), floating-window.tsx (shared game window)
+                littlebig/ (three.js WebGL tiny-planet game), play/ (GameClip, GameCard,
+                PlayMethod, GamePrefetch), floating-window.tsx (shared game window)
 content/        site.ts, cv.ts, about.ts, play.ts (typed data) + work/*.mdx, building/*.mdx
 lib/            Pure helpers: commands.ts (palette commands), fuzzy.ts, utils.ts (cn),
-                and window-event buses: palette-bus, plasma-bus, snake-bus, surf-bus, ide-bus
+                and window-event buses: palette-bus, plasma-bus, snake-bus, surf-bus, planet-bus, ide-bus
 public/         Static assets: CNAME, cv.pdf, favicons, site.webmanifest, hero-shader.js,
                 play/ (game clips + posters)
 scripts/        dev.mjs, postbuild.mjs, github-pulse.mjs (header stats), gen-icons.py (favicons),
-                goldenline-shot.mjs (GOLDENLINE review shots / perf / boot timing), play-media/
+                goldenline-shot.mjs (GOLDENLINE review shots / perf / boot timing), littlebig-shot.mjs
+                (LITTLEBIG review shots / dive / perf / boot timing), glsl-minify.cjs (LITTLEBIG shader
+                loader), play-media/
                 (capture helpers for the /play clips), mcp/ (image server for the Claude bot)
-docs/           hero-shader.md, play-media.md, goldenline/ (brief, agent task list, decisions, perf, assets)
+docs/           hero-shader.md, play-media.md, goldenline/ (brief, agent task list, decisions, perf, assets),
+                littlebig/ (brief, agent task list, decisions, perf)
 tests/          vitest (app/, components/, content/, lib/) + playwright (e2e/)
 .github/        workflows/, scripts/grok-imagine.mjs (PR image bot), agents/ (prompt library)
 ```
@@ -52,12 +56,13 @@ Direct `git push origin master` is blocked by the harness ("bypasses pull reques
 
 ## Global chrome (app/layout.tsx)
 
-Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav` (with the GitHub pulse), `Footer`, `SnakeWindowHost`, `GoldenlineWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
+Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserver`, `Nav` (with the GitHub pulse), `Footer`, `SnakeWindowHost`, `GoldenlineWindowHost`, `LittlebigWindowHost`, `CommandPaletteLazy`, `IdeOverlay`. Also emits Person + WebSite JSON-LD.
 
 - **GitHub pulse** (`components/github-pulse.tsx`): the card beside the brand. It shows one bar per month for the last 12 months, with "hot" months (≥ 2× the average) in the accent, plus the headline numbers. The data is `content/github-pulse.json`: a committed snapshot that `deploy.yml` refreshes before every build, including the daily scheduled one, via `scripts/github-pulse.mjs` (GraphQL, falls back to the snapshot). Aggregation helpers live in `lib/github-pulse.ts`, which has no imports so the script can load it with Node's type stripping. The breakpoints in `globals.css` are measured: full card ≥ 1024px, bars only 820–1023, hidden 769–819, short copy on phones.
 - **Command palette** (`components/command-palette*.tsx`, commands in `lib/commands.ts`) — opens on `/` or `Ctrl/⌘+K`. The lazy wrapper listens for the keys and idle-prefetches the real palette.
 - **Snake** (`components/snake/`) — floating window opened via the palette (`snake-bus`), expandable to `/snake`. Engine (`engine/`) is pure and unit-tested; specs sit next to the code they cover.
 - **GOLDENLINE** (`components/goldenline/`): a first-person golden-hour reef-break surf demo on three.js `WebGPURenderer` + TSL. The palette's `go surfing` opens it in a `FloatingWindow` (`surf-bus`), expandable to the full-viewport `/surf` (the nav hides there). WebGPU only: without it the canvas shows one line of text. One directory per system, wired in `systems.ts` against `core/contracts.ts`; the engine chunk loads only when opened. The lagoon, shore break and swash are one GPU shallow-water simulation (`ocean/surfzone/`, CPU reference + tests in `scheme.ts`); the reef breakers are `ocean/breaking/`. Start at `docs/goldenline/TASKS.md` and each system's README. Review with `node scripts/goldenline-shot.mjs` (headless Chromium with real WebGPU; `--shot`, `--seq`, `--perf`, `--boot`) against the dev server. F1 opens the settings/perf overlay. Per-agent evidence shots under `docs/goldenline/shots/` are gitignored except `milestones/`.
+- **LITTLEBIG** (`components/littlebig/`): a tiny cartoon planet on three.js WebGL (not WebGPU, so it runs on phones and Safari). Orbit and spin it, then dive through the clouds to a street-level first-person walk: a seeded city with traffic, people, planes and balloons, and a day/night cycle. Everything is procedural, with zero asset downloads. The palette's `visit planet` opens it in a `FloatingWindow` (`planet-bus`), expandable to the full-viewport `/planet` (the nav hides there). The engine chunk loads only when opened; it is warmed on the palette keys and once a LITTLEBIG card or home tile is in view and its clip has a frame (`components/play/game-prefetch.tsx`). `/planet/` is in the sitemap and llms routes; its metadata (title, canonical) lives in `app/planet/layout.tsx` because the page is a client component. Start at `docs/littlebig/BRIEF.md` and `TASKS.md`. Review with `node scripts/littlebig-shot.mjs` (`--list`, `--shot`, `--dive`, `--perf`, `--boot`) against the dev server. F1 toggles a debug readout (altitude, position, frame time). Budgets and measurements live in `docs/littlebig/PERF.md`. Per-agent evidence shots under `docs/littlebig/shots/` are gitignored.
 - **IDE overlay** (`components/ide-overlay.tsx`) — Zed-style "view source" easter egg built from `content/*` data. Opened by the header "open in zed" button, the footer `$EDITOR` link, or the palette (`ide-bus`).
 - **Reveal** — elements with a bare `reveal` class start at opacity 0. `RevealObserver` adds `vis` on intersection (including nodes added by client navigation); `ScrollReveal` wraps sections on the home page.
 
@@ -65,7 +70,7 @@ Mounted once for every route: `HeroShader`, `ScanLine` (dot grid), `RevealObserv
 
 Full reference: `docs/hero-shader.md`.
 
-- Route-gated in `components/hero-shader.tsx`. The component returns `null` for anything in `SHADER_EXCLUDED_ROUTES` (`/cv`, `/contact`, `/snake`, `/surf`, plus nested children). Add new exclusions there.
+- Route-gated in `components/hero-shader.tsx`. The component returns `null` for anything in `SHADER_EXCLUDED_ROUTES` (`/cv`, `/contact`, `/snake`, `/surf`, `/planet`, plus nested children). Add new exclusions there.
 - Tunables live at the top of that file: `PALETTES` (per-theme colours + intensity), `BASE_SPEED`, `BASE_GRAIN`, `PEAK_OPACITY`, `CALM_FACTOR`. The fragment shader and standalone defaults live in `public/hero-shader.js`.
 - `lib/plasma-bus.ts` is a tiny localStorage + custom-event bus driving a `calm` / `vivid` toggle from the command palette; the shader subscribes via `onPlasmaModeChange`.
 - Opacity ties to scroll: it fades to 0 over the height of `[data-hero-region]` (set on the home hero `<section>`). Without that element the fade falls back to the viewport height.
@@ -87,7 +92,7 @@ All in `app/globals.css`, defined on `:root` (light) and overridden on `.dark`:
 - `content/site.ts` — name, email, URL, nav, socials, bio (`knowsAbout` feeds JSON-LD, OG image, llms.txt), Formspree + newsletter endpoints. Single source of truth for contact details.
 - `content/cv.ts` — typed CV (`CVExperience`, `CVProject`, `CVLanguage`). `app/cv/page.tsx` renders it; `public/cv.pdf` is generated separately and committed.
 - `content/about.ts` — timeline, beliefs, anti-list, `stackGroups` (rendered on /about *and* /cv), `sideThings` (home hero sidebar).
-- `content/play.ts` — the games, receipts and "How these were built" data for `/play`, the home Play strip and `llms.txt`. Media lives in `public/play/` (MP4 + JPG posters, Snake has dark/light variants). Regenerate it with `docs/play-media.md` (scripts in `scripts/play-media/`, run against the dev server). `GameClip` (`components/play/game-clip.tsx`) owns all video behaviour: in-view autoplay, off-screen/hidden-tab pause, a pause toggle outside the card link, poster only under reduced motion.
+- `content/play.ts` — the three games (Snake, GOLDENLINE, LITTLEBIG), receipts and "How these were built" data for `/play`, the home Play strip and `llms.txt`. Every claim is sourced in the Facts table of `docs/superpowers/specs/2026-10-04-play-page-design.md`. A new game is another entry (extend the `slug`/`href` unions); an odd last card spans the `/play` grid as a landscape card. Media lives in `public/play/` (MP4 + JPG posters, Snake has dark/light variants; budgets in `tests/content/play-media.test.ts`). Regenerate it with `docs/play-media.md` (scripts in `scripts/play-media/`, run against the dev server). `GameClip` (`components/play/game-clip.tsx`) owns all video behaviour: in-view autoplay, off-screen/hidden-tab pause, a pause toggle outside the card link, poster only under reduced motion.
 - `content/work/*.mdx` — case studies. Each exports a `meta` object. To add one, register the slug in the `works` map in `app/work/[slug]/page.tsx` **and** in `WORK_SLUGS` in `app/sitemap.ts` and `app/llms-full.txt/route.ts`, and add a line to `app/llms.txt/route.ts`.
 - Notes: the `/notes` section (hidden since #38) was removed along with its only post. `/subscribe` still pitches a future notes newsletter. If you bring notes back, restore `app/notes/` and `lib/notes.ts` from git. Note that `output: 'export'` fails the build if a dynamic route's `generateStaticParams()` returns `[]`, so don't ship the `[slug]` route without at least one post.
 - `content/building/index.mdx` — imported by `/building` (its `meta.updated` drives the header).
@@ -107,6 +112,7 @@ Honored in several places:
 - Global CSS in `app/globals.css` collapses `animation-duration` to ~0, caps `transition-duration` at 200ms, and shows `.reveal` content immediately.
 - The shader's `applyState` (in `components/hero-shader.tsx`) sets `speed: 0` and clamps intensity. The script side (`public/hero-shader.js`) renders a single static frame in this mode.
 - `RevealObserver`, `ScrollReveal`, `AnimatedStats`, `TypewriterBar`, the snake renderer, and the IDE overlay each check the media query too.
+- LITTLEBIG reads it once at boot (`littlebig-canvas.tsx` → `ctx.reducedMotion`): the camera damps inertia harder and flies slower, and the toon kit drops the reveal fade.
 
 ## Gotchas
 
@@ -115,6 +121,8 @@ Honored in several places:
 - **`agentRules: false` in `next.config.mjs` is deliberate.** Next 16.3+ otherwise appends a managed block to this file whenever `next dev` runs under an AI agent. Version-matched Next docs ship in `node_modules/next/dist/docs/`; check them before assuming Next 15 APIs.
 - **`data-scroll-behavior="smooth"` on `<html>`** (in `app/layout.tsx`) keeps route changes jumping to the top instead of smooth-scrolling, since `globals.css` sets `scroll-behavior: smooth`. Next 16 only suppresses smooth scroll during navigation when that attribute is present.
 - **TypeScript 7** (native `tsgo`) is the compiler. `tsc` and Next's build type-check both run on it. The `next` language-service plugin in `tsconfig.json` may not load in editors using TS 7's native language server; if editor-only Next hints go missing, that's why.
+- **LITTLEBIG's shaders are minified by a Turbopack loader.** `turbopack.rules['*.ts']` in `next.config.mjs` runs `scripts/glsl-minify.cjs` over `components/littlebig/**` files containing `/* glsl */` template literals, in dev and in the build. It strips comments and whitespace from the static parts; a literal with backslash escapes is left alone. `components/littlebig/core/glsl-minify.spec.ts` checks the output is token-for-token the same shader. Editing `next.config.mjs` restarts the dev server.
+- **Vitest runs on deterministic Math.** `tests/deterministic-math.ts` (a setup file) replaces `Math.sin`, `cos`, `atan2`, `exp`, `log`, `pow` and the other functions whose last bits differ between x86-64 CI and arm64 Macs. Without it, LITTLEBIG's chaotic sim specs took different paths on CI. A spec that times what the game pays must wrap the timed part in `withNativeMath`.
 - **No request-time data fetching.** Static export means everything resolves at build time (the `llms-full.txt` route reads MDX from disk during build).
 - **MDX `meta` exports are typed `any`** (`mdx.d.ts`). The consumer declares its own shape (`WorkModule` in `app/work/[slug]/page.tsx`), so keep it in sync with the frontmatter-style `meta` objects.
 

@@ -14,7 +14,7 @@ Four wave sources orbit slowly and interfere; the cursor is a fifth emitter; cli
 ## Script API
 
 ```ts
-HeroShader.mount(canvas, options?) → { set(partial), stop() }
+HeroShader.mount(canvas, options?) → { set(partial), pause(on), stop() }
 ```
 
 | option | standalone default | notes |
@@ -28,6 +28,7 @@ HeroShader.mount(canvas, options?) → { set(partial), stop() }
 | `accent` | `[0.95, 0.72, 0.35]` | highlight colour |
 
 - `.set(partial)` merges new values into the live state. When the animation is stopped (reduced motion), it re-renders a single static frame.
+- `.pause(true|false)` holds the loop from outside (the canvas keeps its last frame; the clock skips the held time).
 - `.stop()` cancels the RAF loop and removes every listener.
 - Input listeners live on `window`, so the shader still reacts when the cursor is over hero text.
 - If WebGL is unavailable, `mount` logs a warning and returns no-op `set`/`stop`.
@@ -60,6 +61,7 @@ Behaviour:
 - One `TRIANGLE_STRIP` draw call per frame, no textures, no framebuffers.
 - Device pixel ratio capped at 2.
 - Rendering pauses while the canvas is off-screen (`IntersectionObserver`) or the tab is hidden (`visibilitychange`).
+- `components/hero-shader.tsx` also holds it while a game window (snake, surf, planet) is open, via the buses' open/close events, so two WebGL loops don't share the GPU.
 
 ## Accessibility
 

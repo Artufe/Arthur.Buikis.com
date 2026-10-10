@@ -17,4 +17,10 @@ describe('/play wiring', () => {
     expect(await (await llms()).text()).toContain(`${base}/play/`);
     expect(await (await llmsFull()).text()).toContain(`${base}/play/`);
   });
+
+  it('lists the LITTLEBIG page in the sitemap and both llms routes', async () => {
+    expect((await sitemap()).map((e) => e.url)).toContain(`${base}/planet/`);
+    expect(await (await llms()).text()).toContain(`${base}/planet/`);
+    expect(await (await llmsFull()).text()).toContain(`${base}/planet/`);
+  });
 });

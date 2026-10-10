@@ -24,6 +24,9 @@ export function GoldenlineWindowHost() {
     let done = false;
     const onKey = (e: KeyboardEvent) => {
       if (done) return;
+      // Typing a '/' into a field is not the palette (the palette ignores it too).
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.key !== '/' && !((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
       done = true;
       window.removeEventListener('keydown', onKey);

@@ -15,7 +15,7 @@ afterEach(() => {
 describe('PlayPage', () => {
   it('links every card straight to its game route', () => {
     render(<PlayPage />);
-    expect(screen.getByRole('heading', { level: 1, name: 'Two games, built with agents.' })).toBeDefined();
+    expect(screen.getByRole('heading', { level: 1, name: 'Three games, built with agents.' })).toBeDefined();
     // next/link drops the trailing slash without next.config's trailingSlash; the export keeps it.
     const route = (href: string | null) => href?.replace(/\/$/, '');
     for (const g of games) {
@@ -37,10 +37,21 @@ describe('PlayPage', () => {
   it('opens every repo link in a new tab', () => {
     render(<PlayPage />);
     const repoLinks = screen.getAllByRole('link').filter((a) => a.getAttribute('href')?.startsWith(PLAY_REPO));
-    expect(repoLinks.length).toBe(games.length + method.sources.length);
+    expect(repoLinks.length).toBe(games.length + method.sources.flatMap((s) => s.links).length);
     for (const a of repoLinks) {
       expect(a.getAttribute('target')).toBe('_blank');
       expect(a.getAttribute('rel')).toBe('noreferrer');
+    }
+  });
+
+  it('explains all three builds, and scopes my part to the games it covers', () => {
+    render(<PlayPage />);
+    for (const block of [method.oneShot, method.orchestrated, method.harnessed]) {
+      expect(screen.getByRole('heading', { level: 3, name: block.title })).toBeDefined();
+    }
+    for (const { step, scope } of method.mine) {
+      const item = screen.getByText(step).closest('li')!;
+      expect(within(item).getByText(scope)).toBeDefined();
     }
   });
 });

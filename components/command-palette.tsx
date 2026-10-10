@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
   commandGroups,
@@ -16,6 +16,7 @@ import { onPaletteClose, onPaletteOpen } from '@/lib/palette-bus';
 import { setPlasmaMode } from '@/lib/plasma-bus';
 import { openSnake } from '@/lib/snake-bus';
 import { openSurf } from '@/lib/surf-bus';
+import { openPlanet } from '@/lib/planet-bus';
 import { openIde } from '@/lib/ide-bus';
 
 type Inline =
@@ -70,6 +71,8 @@ export function CommandPalette({ openOnMount = false, initialQuery = '' }: Comma
   const [hintVisible, setHintVisible] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  // Full-viewport game routes draw their own hint row; the palette's hint would sit on the canvas.
+  const onGameRoute = /^\/(planet|surf)(\/|$)/.test(usePathname() ?? '');
   const { setTheme, resolvedTheme } = useTheme();
 
   const results = useMemo(() => scoreCommands(query), [query]);
@@ -142,6 +145,10 @@ export function CommandPalette({ openOnMount = false, initialQuery = '' }: Comma
           openSurf();
           close();
           break;
+        case 'planet':
+          openPlanet();
+          close();
+          break;
         case 'ide':
           openIde();
           close();
@@ -151,7 +158,8 @@ export function CommandPalette({ openOnMount = false, initialQuery = '' }: Comma
     [router, setTheme, close]
   );
 
-  useEffect(() => {
+  // A layout effect, so the input already has focus when it first appears (client-only: ssr: false).
+  useLayoutEffect(() => {
     if (openOnMount) inputRef.current?.focus();
     // Mount only: later opens focus the input from the bus and key handlers.
   }, []);
@@ -253,7 +261,7 @@ export function CommandPalette({ openOnMount = false, initialQuery = '' }: Comma
 
   return (
     <>
-      {hintVisible && !open && (
+      {hintVisible && !open && !onGameRoute && (
         <div className="fixed bottom-5 right-5 hidden md:flex items-center gap-2 font-mono text-[10px] text-[var(--muted)] pointer-events-none z-40">
           <span>press</span>
           <span className="kbd">/</span>

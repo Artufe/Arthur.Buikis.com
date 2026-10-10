@@ -3,7 +3,7 @@ import { site } from '@/content/site';
 
 export const dynamic = 'force-static';
 
-const STATIC_ROUTES = ['/', '/about/', '/building/', '/play/', '/contact/', '/cv/', '/subscribe/'] as const;
+const STATIC_ROUTES = ['/', '/about/', '/building/', '/play/', '/planet/', '/contact/', '/cv/', '/subscribe/'] as const;
 const WORK_SLUGS = ['lethub-scraping-ml'] as const;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
