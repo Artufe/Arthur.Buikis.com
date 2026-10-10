@@ -8,7 +8,8 @@ This site is a portfolio. Prose is the canonical source — JSON-LD on each page
 - [Home](https://arthur.buikis.com/): summary, featured work, current focus
 - [About](https://arthur.buikis.com/about/): background, working style
 - [Building](https://arthur.buikis.com/building/): what I'm currently shipping
-- [Play](https://arthur.buikis.com/play/): two browser games built with coding agents, and how each was built
+- [Play](https://arthur.buikis.com/play/): three browser games built with coding agents, and how each was built
+- [LITTLEBIG](https://arthur.buikis.com/planet/): a tiny cartoon planet you orbit, then dive into for a street-level walk (three.js WebGL, procedural, built by a harness of coding agents)
 - [CV](https://arthur.buikis.com/cv/): full resume
 - [Contact](https://arthur.buikis.com/contact/): how to get in touch
 

@@ -17,7 +17,8 @@ Python, Django, Rust, PyO3, Celery, Kubernetes, Postgres, Backend engineering, P
 - https://arthur.buikis.com/ — summary, featured work
 - https://arthur.buikis.com/about/ — background, working style
 - https://arthur.buikis.com/building/ — current work in flight
-- https://arthur.buikis.com/play/ — two browser games built with coding agents, and how each was built
+- https://arthur.buikis.com/play/ — three browser games built with coding agents, and how each was built
+- https://arthur.buikis.com/planet/ — LITTLEBIG: a tiny cartoon planet you orbit, then dive into for a street-level walk (three.js WebGL, procedural, built by a harness of coding agents)
 - https://arthur.buikis.com/cv/ — full resume
 - https://arthur.buikis.com/contact/ — how to get in touch
 
