@@ -19,4 +19,13 @@ describe('/play media', () => {
     // GOLDENLINE's trailer earned a bigger budget (its spray); LITTLEBIG's descent stays small.
     expect(statSync(file(video)).size).toBeLessThan((slug === 'goldenline' ? 6 : 2) * MB);
   });
+
+  const trailers = games.flatMap((g) => (g.trailer ? [{ slug: g.slug, ...g.trailer }] : []));
+
+  it.each(trailers)('$slug trailer, its poster and chapter thumbnails exist within budget', ({ video, poster, chapters }) => {
+    // Opened on demand (preload="none"), 1080p with sound.
+    expect(statSync(file(video)).size).toBeLessThan(16 * MB);
+    expect(statSync(file(poster)).size).toBeLessThan(350 * 1024);
+    for (const c of chapters) expect(statSync(file(c.thumb)).size).toBeLessThan(60 * 1024);
+  });
 });

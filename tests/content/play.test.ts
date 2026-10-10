@@ -26,11 +26,14 @@ describe('content/play', () => {
     }
   });
 
-  it('draws the LITTLEBIG harness within its stated limit of four agents at once', () => {
+  it('draws the LITTLEBIG harness: v1 within its limit of four agents at once, then v2', () => {
     const { phases, tail } = method.harnessed.pipeline;
-    expect(phases.length).toBe(4);
-    for (const p of phases) expect(p.lanes.length).toBeLessThanOrEqual(4);
-    expect(phases.flatMap((p) => p.lanes).length).toBe(11); // the eleven builder tasks
+    const v1 = phases.filter((p) => !p.label.startsWith('v2'));
+    expect(v1.length).toBe(4);
+    for (const p of v1) expect(p.lanes.length).toBeLessThanOrEqual(4);
+    expect(v1.flatMap((p) => p.lanes).length).toBe(11); // v1's eleven builder tasks
+    const builders = phases.flatMap((p) => p.lanes).length;
+    expect(games.find((g) => g.slug === 'littlebig')!.receipt.find((r) => r.label === 'Mode')!.value).toBe(`1 orchestrator + ${builders} builders`);
     expect(tail.at(-1)).toBe('PR #49');
   });
 });

@@ -11,11 +11,13 @@ the dev server.
 | `goldenline.mp4` | Trailer: crash → ride → ashore, 0.5 s crossfades, seamless loop (1280×800, 30 fps, 15 s) | ~5.9 MB |
 | `littlebig.jpg` | Cover still: the tiny planet from the dive's high swoop, downtown rising on its curve against space (1600×1000) | ~305 KB |
 | `littlebig.mp4` | The scripted dive: orbit → cloud layer → a lively downtown street, a 2 s hold, a 0.5 s dissolve back to the globe, seamless loop (1280×800, 30 fps, 12 s, both themes) | ~1.9 MB |
+| `littlebig-trailer.mp4` | The 30 s trailer with its score, opened from the card (1920×1080, 30 fps, H.264 + AAC) | ~15.2 MB |
+| `littlebig-trailer.jpg` / `littlebig-ch1…4.jpg` | Its poster (the opening title, 1920×1080) and chapter thumbnails (480×300) | ~160 KB / 12–33 KB |
 | `snake-dark.jpg` / `snake-light.jpg` | Posters (1600×1000) | ~285 KB |
 | `snake-dark.mp4` / `snake-light.mp4` | Gameplay loop, same path in both themes (1280×800, 30 fps, 9 s) | ~1.8 MB |
 
 Budgets are enforced by `tests/content/play-media.test.ts`: posters < 350 KB, the GOLDENLINE
-trailer < 6 MB, Snake and LITTLEBIG clips < 2 MB.
+trailer < 6 MB, Snake and LITTLEBIG clips < 2 MB, the LITTLEBIG trailer < 16 MB (chapter thumbnails < 60 KB).
 
 ## Ground rules
 
@@ -140,6 +142,112 @@ python3 scripts/play-media/littlebig-assemble.py $L/clip public/play/littlebig.m
 - **The landing frame is clean on its own.** The people sim makes way for a camera settling onto
   the pavement (`people/sim.ts` `LensWatch`), so nobody walks up to the lens and stands in it.
   Before that, a start time like `t0 = 0` landed a face 1.1 m from the lens.
+
+### Trailer footage (littlebig-cine.mjs)
+
+`scripts/play-media/littlebig-cine.mjs` renders a shot from a JSON job file, frame by frame, like
+the clip helper. The camera is either the game's own (explore, a ride's chase, the bird's chase) or
+a free cinematic camera, `window.__littlebig.cine` in `core/debug.ts`. The cine pose replaces the
+*rendered* camera after the camera system runs each frame, in every mode. The game camera, a ride
+and the bird carry on underneath under their own physics, and get their own pose back before the
+next camera update. `ctx.view`, near/far and the lens follow the cine pose, so LOD, culling, the
+people's lens watch and town life all see the camera you film with. `where(id)` gives any
+Trackable's world pose (`car:3`, `bus:200`, `person:5012`, `ferry:0`, `plane:1`, `station:0`,
+`trackables()` lists them) or the bird's (`'bird'`). `geo(lat, lon, alt)` turns lat/lon into a world
+point `alt` m over the terrain or sea. The script header documents every job field.
+
+```json
+{
+  "t0": 189.2, "seconds": 3, "handles": 6,
+  "camera": { "lag": 0.4, "keys": [
+    { "t": 0, "eyeFrom": { "id": "car:237", "offset": [2.5, 3, 8] }, "lookAt": "car:237", "lookOffset": [0, 0.4, -3], "fov": 40 },
+    { "t": 3, "eyeFrom": { "id": "car:237", "offset": [-2, 1.6, 5] }, "lookAt": "car:237", "lookOffset": [0, 0.4, -3], "fov": 40, "ease": false }
+  ] }
+}
+```
+
+```bash
+node scripts/play-media/littlebig-cine.mjs shot.json --draft --out /tmp/shot-draft/   # 960x600, every 2nd frame, seconds
+node scripts/play-media/littlebig-cine.mjs shot.json --out /tmp/shot/                 # 1920x1200, dpr 2, blur 8
+```
+
+- **Output:** `f_000.jpg…` (JPEG q95, the WebGL canvas only, no HTML overlays; `f_<handles>` is
+  frame 0), `cine.json` (per frame: the sim time, the eye and its clearance), `sheet.jpg` and
+  `preview.mp4`. Renders are deterministic: the same job gives byte-identical frames.
+- **Camera keys:** the eye comes from `eye` / `eyeGeo` / `eyeFrom` (an offset `[right, up, back]` in
+  a moving target's level frame), and the look from `look` / `lookGeo` / `lookAt`. Each runs on a
+  centripetal Catmull-Rom spline timed by a monotone cubic, so speed is continuous through keys. The
+  first and last keys ease to a stop unless `"ease": false`, and the move then carries on through the
+  handles. A moving target's heading is smoothed over `camera.lag` s (default 0.3), so a turning car
+  swings the camera round instead of snapping it.
+- **Defaults and cost** (M-series, 1920x1200, one Chromium): `dpr 2` (supersampled, downscaled with
+  the canvas's high-quality filter) and `blur 8` (8 sub-frames over a 180° shutter, summed exactly)
+  take 0.4–0.7 s per frame. `dpr 2 blur 4` takes ~0.25 s, `dpr 1 blur 1` ~0.03 s.
+- **The cloud layer is 36–48 m.** An eye crossing it, or flying into a puff, plays the game's
+  falling-through-the-clouds overlay (cartoon puffs fill the frame and part). That works as a
+  transition. Otherwise keep the eye out of the band. The overlay moves too fast for motion blur
+  (it steps visibly), so render it with `--blur 1`.
+- **Nothing stops the cine eye going through a roof.** The script prints `WARNING` ranges for frames
+  where the eye is inside geometry, or within 0.5 m of it: terrain, the capital's roofs, lamp heads
+  and crowns, and the towns' roofs. Trees and vehicles aren't checked. Fix the keys and re-draft.
+- The near plane is 3 % of the height over the terrain (0.05–30 m). To film something a few
+  metres off from high up (the bird at 100 m), cap it with `camera.near` (e.g. 0.3).
+- `setup` runs hook calls before frame 0 (`setView`, `fly`, `ride`, `birdInput`, `advance`…). An
+  `advance` there moves frame 0 later than `t0`, and `cine.json` records the real times.
+- A straight-down look needs a key `up`, the direction for the frame's top. The default up is the
+  radial up at the eye.
+- **Lamps coming on:** the setup call `["sunClock", pivot, rate]` runs the sun (light, sky, night
+  factor, lamps, windows) at `rate` × sim time about sim time `pivot`, while traffic and people keep
+  real time. For example, `["sunClock", 76.67, 3.1]` takes dusk from golden light to blue hour in
+  4.5 s. A rate of 0 freezes the sun at `pivot`. A rate of 1 resets it.
+- **Trailer params** (job `params`): `townsfolk.popLift` (m) lets the towns' people show from
+  higher up, and `ocean.glint: 0` hides the toon sun disc on the sea, which reads as a lens smudge
+  when it slides through a descent.
+- **Traffic depends on the warm-up, not on `t0`.** A time jump replays the region's traffic for
+  40 s plus `min(t, 90)` s from a reset, so after `setTime(t ≥ 90)` and a setup `advance` of `w` s,
+  frame 0 holds the traffic of `130 + w + handles / fps` s from the reset. Time a bus or a junction
+  with the warm-up length, and the light with `t0`.
+- **Same light, other extras:** the sun repeats every 480 s and the clouds every 1440 s (0.25°/s),
+  so `t0 + 480 k` keeps the light and moves the clouds 120° per day, and `t0 + 1440` keeps both.
+  The towns' people are placed from the absolute time, and cars wait for them at crossings, so
+  either shift also changes which cars stop or park. It's a cheap way to re-roll a busy street.
+- **`hide`** (job field) hides scene objects by name for the whole shot, e.g.
+  `["air:contrails", "lighthouse beam"]`: long lenses and timelapses turn both into scratches.
+- **Exact curves:** give a key per frame (`t = i / fps`) to drive the camera from your own function
+  (a log-space altitude, an orbit). Sparse keys put a small speed ripple at every key.
+- **Timelapse:** `"fps": 10` with `seconds` ×3 renders frames 0.1 s of sim apart (3× speed when
+  played at 30 fps). Rebuild `preview.mp4` at 30 fps afterwards.
+
+### The trailer (littlebig-trailer.mp4)
+
+One day on the planet in six beats, dawn to night: the planet and the plunge from orbit, the town
+square, bird flight, a golden-hour run through the capital, a car's turn signal at dusk, and the
+night globe under the title. The twelve shots are jobs in `scripts/play-media/littlebig-trailer/jobs/`
+(about 2,900 frames, half an hour of rendering). `cut.py` cuts them into one clip per beat. The titles, the score
+and the export come from a Motion film on claude.ai ("LITTLEBIG trailer", the owner's account), which
+plays the six clips under toy-box captions.
+
+```bash
+T=scripts/play-media/littlebig-trailer; R=/tmp/lb-trailer
+for j in $T/jobs/*.json; do node scripts/play-media/littlebig-cine.mjs $j --out $R/$(basename $j .json)/; done
+node scripts/play-media/littlebig-cine.mjs $T/jobs/a2-descent.json --only 112-138 --blur 64 --out $R/a2-wipe/
+cp $R/a2-wipe/f_1[1-3]*.jpg $R/a2-descent/          # the cloud wipe steps at blur 8; 64 sub-frames smear it
+python3 $T/tiltshift.py $R/a3-square $R/a3-square-tiltshift   # miniature falloff outside y 340–860
+python3 $T/cut.py $R $R/clips                       # planet, town, bird, city, blinker, night (.mp4)
+```
+
+- **The film:** upload the six clips to the film as assets (one `kit.video` per scene), then press
+  Export on its page. Offline, the player's own `index.html#tools` entry does the same export:
+  `window.__animation.exportFilm({ height: 1080, supersample: 2 })` returns a handle that
+  `window.__animation.read(handle, offset, length)` pages out as base64. Use system Chrome for that,
+  because Playwright's Chromium can't decode the H.264 clips. Keep the film's type in the faces the
+  player ships, because the offline entry fetches no fonts.
+- **For the site:** the export is about 24 MB at 6.4 Mbit/s. Encode it twice with x264 at 3900k
+  (`-preset slower -maxrate 7000k -bufsize 8000k`, audio copied) for about 15 MB. The poster is the
+  opening title at 0.6 s. The chapter thumbnails are centre 16:10 crops scaled to 480×300 (`-q:v 4`)
+  at 3.4, 12.9, 17.8 and 23.75 s, past each beat's caption. The chapter times live in `content/play.ts`.
+- **Grades** live in `cut.py`. The dawn is warmed toward amber with the night side kept blue, the dusk
+  shots get a slight warm contrast, and the night's mid-tones are lifted.
 
 ## Snake
 

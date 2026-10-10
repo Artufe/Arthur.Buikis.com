@@ -17,6 +17,15 @@ export type PlayReceiptRow = {
   desktopOnly?: boolean; // hidden below 640px
 };
 
+export type PlayChapter = { at: number; label: string; thumb: string }; // at: seconds; thumb: 480×300 jpg
+
+export type PlayTrailer = {
+  video: string; // public path, 1920×1080 mp4 with sound
+  poster: string; // public path, 1920×1080 jpg
+  seconds: number;
+  chapters: PlayChapter[];
+};
+
 export type PlayGame = {
   slug: 'snake' | 'goldenline' | 'littlebig';
   title: string;
@@ -27,6 +36,7 @@ export type PlayGame = {
   touchCta: string;
   media: PlayMedia; // dark theme, or the only variant
   lightMedia?: PlayMedia; // present → swapped in under the light theme
+  trailer?: PlayTrailer; // present → a trailer button and chapter thumbnails under the card
   caption: string[]; // home-strip caption parts, first one is the name
   receipt: PlayReceiptRow[];
   pr: { number: number; date: string };
@@ -130,7 +140,7 @@ export const games: PlayGame[] = [
     href: '/planet/',
     cmd: './littlebig --about',
     description:
-      'A tiny cartoon planet. Spin it, then dive through the clouds and walk its streets. Everything is procedural: zero asset downloads.',
+      'A tiny cartoon planet with a capital and seven towns. Spin it, dive through the clouds and walk the streets, then ride any car, bus or ferry, see through a passer-by’s eyes, or take off as a bird. Everything is procedural: zero asset downloads.',
     chip: { label: 'touch ok', tone: 'ok' },
     touchCta: 'play',
     // One clip for both themes (the game has no light / dark mode). Recipe: docs/play-media.md.
@@ -139,13 +149,25 @@ export const games: PlayGame[] = [
       video: '/play/littlebig.mp4',
       alt: 'A tiny cartoon planet against deep blue space: a toy-bright downtown of towers and a clock tower rises on its curve, ringed by roads, red-roofed houses and green parkland, with puffy clouds and a striped hot-air balloon drifting past.',
     },
-    caption: ['littlebig', 'three.js · webgl', 'overnight · 11 builders'],
+    // Rendered in the engine frame by frame and cut as a Motion film. Recipe: docs/play-media.md.
+    trailer: {
+      video: '/play/littlebig-trailer.mp4',
+      poster: '/play/littlebig-trailer.jpg',
+      seconds: 30,
+      chapters: [
+        { at: 2.4, label: 'from orbit', thumb: '/play/littlebig-ch1.jpg' },
+        { at: 8.6, label: 'bird flight', thumb: '/play/littlebig-ch2.jpg' },
+        { at: 14.2, label: 'through the city', thumb: '/play/littlebig-ch3.jpg' },
+        { at: 20.2, label: 'turn signals', thumb: '/play/littlebig-ch4.jpg' },
+      ],
+    },
+    caption: ['littlebig', 'three.js · webgl', 'overnight + v2 · 23 builders'],
     receipt: [
       { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
-      { label: 'Mode', value: '1 orchestrator + 11 builders' },
-      { label: 'Time', value: '17 hours' },
-      { label: 'Code', value: '~30k lines ts' },
-      { label: 'Tests', value: '23 spec files', desktopOnly: true },
+      { label: 'Mode', value: '1 orchestrator + 23 builders' },
+      { label: 'Time', value: '17 h, then v2 over 4 days' },
+      { label: 'Code', value: '~71k lines ts' },
+      { label: 'Tests', value: '49 spec files', desktopOnly: true },
       { label: 'Source', value: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
     ],
     pr: { number: 49, date: 'oct 2026' },
@@ -207,7 +229,7 @@ export const method: PlayMethod = {
   harnessed: {
     tag: '03 · harnessed',
     title: 'LITTLEBIG: one prompt, a harness of agents.',
-    body: 'One prompt from me, with the limits: quality first, small and fast, at most four agents at once. The orchestrator wrote the brief and split it into eleven builder tasks, then ran them in four phases.',
+    body: 'One prompt from me, with the limits: quality first, small and fast, at most four agents at once. The orchestrator wrote the brief and split it into eleven builder tasks, then ran them in four phases. For v2 I asked for more life: other towns, roads, rides on anything that moves, bird flight and space. It wrote a second brief and ran twelve more builds.',
     pipeline: {
       head: [
         { label: 'prompt', note: 'mine' },
@@ -247,6 +269,30 @@ export const method: PlayMethod = {
           lanes: [
             { id: 'C1', name: 'site integration' },
             { id: 'C2', name: 'load · size · perf' },
+          ],
+        },
+        {
+          label: 'v2 · phase 1 · rides and region',
+          note: '≤ 5 at once',
+          lanes: [
+            { id: 'R1', name: 'region network' },
+            { id: 'D1', name: 'camera rides · bird' },
+            { id: 'S1', name: 'space · cloud fall' },
+            { id: 'U1', name: 'pop ui' },
+            { id: 'L1', name: 'followable life' },
+          ],
+        },
+        {
+          label: 'v2 · phase 2 · towns and life',
+          note: '≤ 2 at once',
+          lanes: [
+            { id: 'R2', name: 'region rework' },
+            { id: 'T1', name: 'towns' },
+            { id: 'H1', name: 'roads' },
+            { id: 'BF', name: 'bird flight' },
+            { id: 'BA', name: 'bird animation' },
+            { id: 'V1', name: 'traffic · ferries' },
+            { id: 'T2', name: 'townsfolk' },
           ],
         },
       ],

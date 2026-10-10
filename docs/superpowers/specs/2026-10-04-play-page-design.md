@@ -38,6 +38,11 @@ The palette easter eggs stay as they are.
 | LITTLEBIG review | a fresh critic per build scored screenshots at each altitude; under 8.5 / 10 → refine round (all 8 world/life builds did); gate reviews between phases through three lenses (art & wow, life & flow, perf & size), owners fixed what they found | orchestrator |
 | LITTLEBIG time | 17 hours wall clock, overnight (Oct 4 15:02 → Oct 5 ~08:30 EEST), including two usage-limit pauses | orchestrator |
 | LITTLEBIG code | ~30k lines TS, 23 spec files | repo (`components/littlebig/`) |
+| LITTLEBIG v2 (added 2026-10-10) | a capital and seven towns (Millbrook, Clover, Driftwood, Port Pebble, Far Haven, Coral Cove, Snowberry) joined by roads; region traffic, a Far Haven bus loop and three ferries; townsfolk; rides on any car, bus, truck, ferry, plane or the sky station, a passer-by's eyes, and bird flight (lift and drag, landing, crashes) | `docs/littlebig/V2.md`, `world/region/towns.ts`, commits fe955dc…9d5cd7e |
+| LITTLEBIG v2 mode | Arthur's second prompt ("more life"); the orchestrator wrote `docs/littlebig/V2.md` and ran 12 more builds: phase 1 R1 D1 S1 U1 L1 (≤ 5 at once), phase 2 R2 T1 H1 BF BA V1 T2 (≤ 2 at once), each with a critic → refine loop. With v1's 11: 23 builders | `docs/littlebig/DECISIONS.md` tags `[v2-…]` |
+| LITTLEBIG v2 time | Oct 5 13:05 (fe955dc) → Oct 9 21:35 (9d5cd7e) EEST, with long idle gaps: "over 4 days" | git log |
+| LITTLEBIG code (v2) | ~71k lines TS (70,638 excluding specs), 49 spec files, on 9d5cd7e | repo (`components/littlebig/`) |
+| LITTLEBIG trailer | 30 s, every shot rendered in the engine frame by frame (`scripts/play-media/littlebig-cine.mjs`), cut as a Motion film; chapter times from the cut | `docs/play-media.md` |
 | Arthur's part (LITTLEBIG) | wrote the prompt, set the constraints (≤ 4 agents at once, quality first, small and fast), reviewed. He did **not** write the brief or define the agent tasks for LITTLEBIG. | Arthur, via the orchestrator |
 
 **Off-limits:** cost, token counts, restarts. **Cut by choice:** the "what went wrong" (failed M3

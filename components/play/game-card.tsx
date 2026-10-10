@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { PlayGame } from '@/content/play';
 import { GameClip } from '@/components/play/game-clip';
 import { GamePrefetch } from '@/components/play/game-prefetch';
+import { GameTrailer } from '@/components/play/game-trailer';
 import { cn } from '@/lib/utils';
 
 export function GameCard({ game, index }: { game: PlayGame; index: number }) {
@@ -61,6 +62,8 @@ export function GameCard({ game, index }: { game: PlayGame; index: number }) {
         <p className="play-game-side-title">{game.title}</p>
         <p className="play-game-side-desc">{game.description}</p>
       </div>
+
+      {game.trailer && <GameTrailer title={game.title} href={game.href} trailer={game.trailer} />}
 
       <dl className="play-receipt">
         {game.receipt.map((row) => (
