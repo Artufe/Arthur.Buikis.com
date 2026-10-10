@@ -3,7 +3,7 @@ import { games, method, PLAY_REPO } from '@/content/play';
 
 describe('content/play', () => {
   it('points every game at an existing game route', () => {
-    expect(games.map((g) => g.href)).toEqual(['/snake/', '/surf/', '/planet/']);
+    expect(games.map((g) => g.href)).toEqual(['/planet/', '/surf/', '/snake/']);
   });
 
   it('links each receipt Source row to that game’s PR', () => {
