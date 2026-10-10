@@ -42,6 +42,8 @@ const HUB = [hex('#eceaf3'), hex('#a7acc4')];
 const HEAD = hex('#fff4cc');
 const TAIL = hex('#e8384a');
 const AMBER = hex('#ffa53d');
+/** Unlit indicator glass: dark, so the blinking glow (index.ts) is what reads as amber. */
+const INDICATOR = hex('#9a4a14');
 const CREAM = PALETTE.walls[0];
 const WHITE = hex('#f6f3ec');
 const PAINT = hex('#ffffff');
@@ -280,8 +282,8 @@ export class VehicleBuilder {
     for (const sx of [1, -1]) {
       this.box(sx * hx, hy, zf, hw, hh, 0.12, 0.05, HEAD, { lamp: [1, 0, 0] });
       this.box(sx * tx, ty, zb, hw * 0.9, hh * 0.85, 0.12, 0.05, TAIL, { lamp: [0, 1, 0] });
-      this.box(sx * ix, iy, zf - 0.02, 0.14, 0.1, 0.1, 0, AMBER, { lamp: [0, 0, sx] });
-      this.box(sx * ix, iy, zb + 0.02, 0.14, 0.1, 0.1, 0, AMBER, { lamp: [0, 0, sx] });
+      this.box(sx * ix, iy, zf - 0.02, 0.14, 0.1, 0.1, 0, INDICATOR, { lamp: [0, 0, sx] });
+      this.box(sx * ix, iy, zb + 0.02, 0.14, 0.1, 0.1, 0, INDICATOR, { lamp: [0, 0, sx] });
     }
     return this;
   }

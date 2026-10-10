@@ -114,7 +114,8 @@ return uLodM<1.5?v<b:v>=b;
 `;
 // Box-truck liveries on the cargo box sides (and the flower on its back), by aVar: 1 a flower in a
 // disc over a base band, 2 a diagonal band with an amber pinstripe, 3 a wave with a darker crest line. The albedo
-// change is applied to the lit colour as a ratio (lighting is linear in albedo).
+// change is applied to the lit colour as a ratio (lighting is linear in albedo). Brake and indicator glows stay
+// small and saturated: Neutral tone mapping turns brighter ones pastel (braking read salmon, a lit indicator peach).
 const PATCH_FRAG = /* glsl */ `
 if(lbTrafficCull())discard;
 {
@@ -151,8 +152,8 @@ outgoingLight*=tgt/max(vColor.rgb,vec3(0.02));
 }
 outgoingLight+=vGlow.x*vec3(1.0,0.86,0.58)*(0.1+2.4*lbNt)
 +vGlow.y*vec3(1.0,0.1,0.07)*(1.5*lbNt)
-+vGlow.z*vec3(1.0,0.12,0.08)*1.6
-+vGlow.w*vec3(1.0,0.5,0.08)*2.4
++vGlow.z*vec3(1.0,0.04,0.03)*0.8
++vGlow.w*vec3(1.0,0.3,0.0)
 +max(vPol,0.0)*vec3(1.0,0.12,0.1)*2.6
 +max(-vPol,0.0)*vec3(0.2,0.4,1.0)*2.6;
 }
@@ -200,6 +201,9 @@ export function basis(m: Float32Array, o: number, l: Vec3, u: Vec3, f: Vec3, p: 
   m[o + 15] = 1; // the 0 entries stay 0 (instance buffers start zeroed)
 }
 
+/** The indicator a vehicle shows: a cancelled one finishes its flash (the shader's blink: lit while fract(t·1.5) ≥ 0.45). */
+export const heldSignal = (sig: number, held: number, t: number) => sig || (held && (t * 1.5) % 1 >= 0.45 ? held : 0);
+
 /** One drawn pack: a kind's near or far mesh and its per-frame instance buffers. */
 interface Pack {
   mesh: InstancedMesh;
@@ -225,6 +229,8 @@ export function createTrafficSystem(): System {
   let colour = new Float32Array(0);
   let vari = new Float32Array(0);
   let reveal = new Float32Array(0);
+  let held = new Int8Array(0);
+  let tNow = 0;
   /** Drawn body boxes in plan space (centre, unit forward), for the player's collision. */
   let bx = new Float64Array(0);
   let bz = new Float64Array(0);
@@ -256,6 +262,7 @@ export function createTrafficSystem(): System {
     if (!sim) return;
     sim.setObstacle(false, 0, 0);
     sim.reset();
+    held.fill(0);
     const n = replaySteps(ctx);
     for (let k = 0; k < n; k++) replayStep(ctx, k === n - 1);
   };
@@ -277,7 +284,7 @@ export function createTrafficSystem(): System {
     p.mo[j * 4 + 2] = mo[1];
     p.mo[j * 4 + 3] = roll[i];
     p.st[j * 3] = sim!.brake[i];
-    p.st[j * 3 + 1] = sim!.signal[i];
+    p.st[j * 3 + 1] = held[i] = heldSignal(sim!.signal[i], held[i], tNow);
     p.st[j * 3 + 2] = pitch[i];
     p.rv[j] = reveal[i];
     p.va[j] = vari[i];
@@ -297,6 +304,7 @@ export function createTrafficSystem(): System {
     lodR.value.set(rn - BAND, rn + BAND);
     const farR = v.horizon + 34;
     const cam = ctx.camera;
+    tNow = ctx.time.render;
     frustum.setFromProjectionMatrix(pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
     const E = v.eye;
     for (let k = 0; k < packs.length; k++) packs[k].n = 0;
@@ -449,6 +457,7 @@ export function createTrafficSystem(): System {
       colour = new Float32Array(n * 3);
       vari = new Float32Array(n);
       reveal = new Float32Array(n).fill(1e6);
+      held = new Int8Array(n);
       bx = new Float64Array(n);
       bz = new Float64Array(n);
       bux = new Float64Array(n);

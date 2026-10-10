@@ -272,6 +272,8 @@ export function buildBirdGeometry(): BufferGeometry {
       const th = 0.04 - 0.028 * smooth(0, 0.6, sp);
       secs.push([s * (SPAN0 + sp * (WING_TIP - SPAN0)), i === M ? 0 : ((le - te) / 2) * end, i === M ? 0 : th * Math.max(0.3, end), (le + te) / 2, WING_Y]);
     }
+    // A root ring fixed deep in the body: the wing's own root turns with the shoulder, so no slit opens where it meets the body.
+    secs.unshift([s * (SPAN0 - 0.04), secs[0][1], secs[0][2], secs[0][3], secs[0][4]]);
     if (s < 0) secs.reverse();
     // (x-axis loft: u = z, v = y.)
     B.loft([0, 0, 0], Z, Y, X, secs, 12, (_t, x, _y, z, up, edge) => {
@@ -285,7 +287,7 @@ export function buildBirdGeometry(): BufferGeometry {
       }
       if (bar) return C.bar;
       return mix(tmp, C.back, C.navy, Math.max(smooth(0.5, 0.66, sp), smooth(0.55, 0.85, f)));
-    }, (x): V3 => [s * span(x), 0, 0], undefined, 0.7, 0.16);
+    }, (x): V3 => [Math.abs(x) < SPAN0 - 1e-4 ? 0 : s * Math.max(1e-3, span(x)), 0, 0], undefined, 0.7, 0.16);
     // Primaries: outermost (slot −1, nearly straight out) to innermost (slot 1, swept back),
     // stacked a little in height so overlapping vanes never z-fight.
     for (let i = 0; i < 5; i++) {

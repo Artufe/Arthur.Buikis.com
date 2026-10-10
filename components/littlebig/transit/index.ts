@@ -19,7 +19,7 @@ import { PALETTE } from '../render/palette';
 import { ASPH, groundOf } from '../roads/ground';
 import { meshHeight } from '../roads/mesh';
 import { terrainData } from '../terrain/data';
-import { basis, vehiclePatch } from '../traffic';
+import { basis, heldSignal, vehiclePatch } from '../traffic';
 import { createFleetLights, type FleetLights } from '../traffic/lights';
 import { bodyColours, buildVehicle, VARIANT_COLOURS, VehicleBuilder } from '../traffic/mesh';
 import { KINDS } from '../traffic/sim';
@@ -114,6 +114,8 @@ export function createTransitSystem(): System {
   let colour = new Float32Array(0);
   let vari = new Float32Array(0);
   let reveal = new Float32Array(0);
+  let held = new Int8Array(0);
+  let tNow = 0;
   let ferryReveal = new Float32Array(0);
   let revealStart = 0;
   let revealDone = false;
@@ -142,6 +144,7 @@ export function createTransitSystem(): System {
     if (!sim) return;
     sim.setObstacle(false, null);
     sim.reset();
+    held.fill(0);
     const n = replaySteps(ctx);
     for (let k = 0; k < n; k++) sim.step(ctx.time.fixedDt, null, k === n - 1 ? service!.blocked : null);
   };
@@ -194,7 +197,7 @@ export function createTransitSystem(): System {
     p.mo[j * 4 + 2] = mo[1];
     p.mo[j * 4 + 3] = roll[i];
     p.st[j * 3] = sim!.brake[i];
-    p.st[j * 3 + 1] = sim!.signal[i];
+    p.st[j * 3 + 1] = held[i] = heldSignal(sim!.signal[i], held[i], tNow);
     p.st[j * 3 + 2] = pitch[i];
     p.rv[j] = reveal[i];
     p.va[j] = sim!.door[i] ? DOORS : vari[i];
@@ -213,6 +216,7 @@ export function createTransitSystem(): System {
   function draw(ctx: LBContext) {
     if (!sim || !lights || !ferryPack) return;
     const a = ctx.time.alpha;
+    tNow = ctx.time.render;
     const dt = ctx.time.dt;
     const kS = dt > 0 ? 1 - Math.exp(-dt * 7) : 1;
     const rm = ctx.reducedMotion;
@@ -446,6 +450,7 @@ export function createTransitSystem(): System {
       colour = new Float32Array(n * 3);
       vari = new Float32Array(n);
       reveal = new Float32Array(n).fill(1e6);
+      held = new Int8Array(n);
       lastStop = new Int16Array(n).fill(-1);
       sim.reset();
       const steps = replaySteps(ctx);
