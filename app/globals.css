@@ -1175,21 +1175,21 @@ html:not(.dark) .only-dark,
 .play-receipt dd { margin: 0; }
 .play-receipt a { color: var(--accent); text-underline-offset: 4px; }
 
-/* An odd last card (LITTLEBIG, the third) spans the two-column grid as a landscape card: the clip
-   at the same size as the cards above, its copy and receipt beside it. The side copy is hidden
+/* An odd first card (LITTLEBIG, the biggest build) spans the two-column grid as a landscape card:
+   the clip at the same size as the cards below, its copy and receipt beside it. The side copy is hidden
    everywhere else, and the hover overlay drops the title and description it repeats. */
 .play-game-side { display: none; }
 @media (min-width: 1024px) {
-  .play-grid > .play-game:last-child:nth-child(odd) {
+  .play-grid > .play-game:first-child:nth-last-child(odd) {
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: auto 1fr auto auto;
     column-gap: 2.5rem; /* the grid's gap-10 */
   }
-  .play-grid > .play-game:last-child:nth-child(odd) > .play-card { grid-column: 1; grid-row: 1 / -1; }
-  .play-grid > .play-game:last-child:nth-child(odd) > .play-game-idx { grid-column: 2; grid-row: 1; }
-  .play-grid > .play-game:last-child:nth-child(odd) > .play-game-side {
+  .play-grid > .play-game:first-child:nth-last-child(odd) > .play-card { grid-column: 1; grid-row: 1 / -1; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) > .play-game-idx { grid-column: 2; grid-row: 1; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) > .play-game-side {
     grid-column: 2;
     grid-row: 2;
     display: flex;
@@ -1198,11 +1198,11 @@ html:not(.dark) .only-dark,
     padding: 18px 0;
     border-top: 2px solid var(--border);
   }
-  .play-grid > .play-game:last-child:nth-child(odd) > .play-trailer { grid-column: 2; grid-row: 3; margin: 0 0 18px; }
-  .play-grid > .play-game:last-child:nth-child(odd) > .play-receipt { grid-column: 2; grid-row: 4; }
-  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-title,
-  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-desc { display: none; }
-  .play-grid > .play-game:last-child:nth-child(odd) .play-ov-cmd { margin-bottom: 12px; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) > .play-trailer { grid-column: 2; grid-row: 3; margin: 0 0 18px; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) > .play-receipt { grid-column: 2; grid-row: 4; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) .play-ov-title,
+  .play-grid > .play-game:first-child:nth-last-child(odd) .play-ov-desc { display: none; }
+  .play-grid > .play-game:first-child:nth-last-child(odd) .play-ov-cmd { margin-bottom: 12px; }
 }
 .play-game-side-title {
   margin: 0;

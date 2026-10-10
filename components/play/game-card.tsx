@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 export function GameCard({ game, index }: { game: PlayGame; index: number }) {
   return (
-    // An odd last card spans the grid at lg as a landscape card (clip left, copy and receipt right):
+    // An odd first card spans the grid at lg as a landscape card (clip left, copy and receipt right):
     // see .play-grid in globals.css. The side copy shows only there.
     <article className="play-game min-w-0">
       <GamePrefetch slug={game.slug} />

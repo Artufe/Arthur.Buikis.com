@@ -21,7 +21,7 @@ export function PlayTeaser() {
               Three games, <br />built with <br />agents.
             </h2>
             <p className="mt-5 max-w-[30ch] font-mono text-[13px] leading-[1.7] dim">
-              A 40-minute one-shot, a two-evening eleven-agent build and a tiny planet that a harness of agents built overnight. All three run in your browser.
+              A tiny planet that a harness of agents built overnight, a two-evening eleven-agent build and a 40-minute one-shot. All three run in your browser.
             </p>
             <p className="mt-5 font-mono text-[10px] dim leading-[1.6]">
               Claude Opus 5.5 · code <br />
