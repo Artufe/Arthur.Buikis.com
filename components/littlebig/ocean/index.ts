@@ -49,13 +49,17 @@ export function createOceanSystem(): System {
     const fill = ctx.params.number('ocean.fill', { label: 'ocean share of the sky fill', min: 0, max: 1.5, value: 0.5 });
     const fres = ctx.params.number('ocean.fresnel', { label: 'ocean sky reflection (near)', min: 0, max: 1.5, value: 0.75 });
     const foam = ctx.params.number('ocean.foam', { label: 'ocean foam amount', min: 0, max: 2, value: 1 });
+    // Trailer shots set 0: the toon sun disc read as a lens smudge sliding over the sea mid-descent.
+    const glintP = ctx.params.number('ocean.glint', { label: 'ocean sun glint', min: 0, max: 1, value: 1 });
     const uSwell = { value: swell.value };
     const uFoam = { value: foam.value };
     const uFres = { value: fres.value };
+    const uGlint = { value: glintP.value };
     ctx.params.onChange((p) => {
       if (p === swell) uSwell.value = swell.value;
       if (p === foam) uFoam.value = foam.value;
       if (p === fres) uFres.value = fres.value;
+      if (p === glintP) uGlint.value = glintP.value;
       if (p === fill) mat.userData.lbUniforms.lbFill.value = fill.value;
     });
 
@@ -69,7 +73,7 @@ export function createOceanSystem(): System {
       fill: fill.value,
       patch: {
         key: 'ocean',
-        uniforms: { uSwell, uFoam, uFres },
+        uniforms: { uSwell, uFoam, uFres, uGlint },
         vertexPars: /* glsl */ `
 attribute float aDepth;
 attribute float aGrad;
@@ -102,6 +106,7 @@ ${SWELL_GLSL}`,
         fragmentPars: /* glsl */ `
 uniform float uFoam;
 uniform float uFres;
+uniform float uGlint;
 varying float vDepth;
 varying float vShore;
 varying float vSwell;
@@ -205,7 +210,7 @@ float lbVNoise(vec3 p) {
     float pt = step(0.8, gl) * (1.0 - smoothstep(0.1, 0.1 + aaF * 1.5, gd));
     glintFar = max(core, pt * (1.0 - smoothstep(0.02, 0.075, lbGa)));
     }
-    float glint = mix(glintNear, glintFar, vFar);
+    float glint = mix(glintNear, glintFar, vFar) * uGlint;
     // Sparkles: tiny star points on a 0.33 m lattice that re-roll a few times a second.
     vec3 sp = vLbWorld * 3.0;
     vec3 sc = floor(sp);

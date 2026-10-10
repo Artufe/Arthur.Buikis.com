@@ -1505,6 +1505,7 @@ export function createCameraSystem(): System {
       setView(ctx, { lat: 20, lon: 10, alt: 380, heading: 0 });
     },
     update(ctx) {
+      ctx.debug.cine?.(false);
       const dt = ctx.time.realDt;
       const locked = ctx.debug.cameraLocked;
       if (input) {
@@ -1530,6 +1531,7 @@ export function createCameraSystem(): System {
         stickView.touch = input.touchSeen;
         input.endFrame();
       }
+      ctx.debug.cine?.(true);
     },
     dispose(ctx) {
       director.dispose(ctx);

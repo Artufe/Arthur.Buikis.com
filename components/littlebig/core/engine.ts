@@ -133,7 +133,8 @@ export async function createEngine(opts: EngineOptions): Promise<Engine> {
   const query = new URLSearchParams(opts.search);
   const shotMode = query.has('shot');
   const quality: Quality = detectQuality(opts.search);
-  const q = qualitySettings(quality);
+  // ?shot=1&dpr=2: supersampled trailer frames past the tier's cap (scripts/play-media/littlebig-cine.mjs).
+  const q = { ...qualitySettings(quality), ...(shotMode && query.has('dpr') ? { maxDpr: Number(query.get('dpr')) || 1 } : null) };
 
   // WebGL2 or nothing (three r163+ needs it).
   let renderer: WebGLRenderer;

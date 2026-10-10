@@ -124,6 +124,8 @@ export function createTownsfolkSystem(): System {
   let restore: (() => void) | null = null;
   /** Param townsfolk.show (A/B: --p townsfolk.show=false). */
   let shown = true;
+  // townsfolk.popLift: raises the pop-in band (trailer descents: scripts/play-media/littlebig-cine.mjs)
+  let popLift = { value: 0 };
   let unsub: (() => void) | null = null;
   const uRide = { value: -1 };
   const kk = new Int32Array(4);
@@ -394,6 +396,7 @@ export function createTownsfolkSystem(): System {
       const region = ctx.world.region, planet = ctx.world.planet, seed = region.seed;
       const showP = ctx.params.toggle('townsfolk.show', { label: "townsfolk: the towns' people", value: true });
       shown = showP.value;
+      popLift = ctx.params.number('townsfolk.popLift', { label: 'townsfolk: lift the pop-in band (m, trailer descents)', min: 0, max: 300, value: 0 });
       unsub = ctx.params.onChange((p) => {
         if (p === showP) shown = showP.value;
       });
@@ -589,19 +592,20 @@ export function createTownsfolkSystem(): System {
       uRide.value = -1;
       let any = false;
       for (const T of towns) any ||= T.active;
-      const show = shown && any && (alt < POP_HI || rg >= 0);
+      const pa = alt - popLift.value;
+      const show = shown && any && (pa < POP_HI || rg >= 0);
       for (const m of meshes) m.visible = show;
-      leash.visible = show && (alt < POP_LO + 0.5 || rg >= 0);
+      leash.visible = show && (pa < POP_LO + 0.5 || rg >= 0);
       if (!show) {
         for (const T of towns) T.slot.fill(-1);
         for (const m of meshes) m.count = 0;
         return;
       }
-      meshes[2].castShadow = meshes[3].castShadow = alt < SHADOW_ALT;
+      meshes[2].castShadow = meshes[3].castShadow = pa < SHADOW_ALT;
       const a = ctx.time.alpha;
       const visR = Math.sqrt(2 * 162 * (Math.max(0, alt) + 0.3)) + 30;
       fCtx = ctx;
-      fAlt = alt;
+      fAlt = pa;
       fVisR = visR;
       fNight = ctx.uniforms.lbNight.value;
       fStreet = alt < 2.6;

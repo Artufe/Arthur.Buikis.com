@@ -288,7 +288,7 @@ export function createSkySystem(): System {
     update(ctx: LBContext) {
       const v = ctx.view;
       const u = ctx.uniforms;
-      sunDirection(ctx.time.render, sunDir);
+      sunDirection(ctx.debug.sunT?.(ctx.time.render) ?? ctx.time.render, sunDir);
       u.lbSunDir.value.copy(sunDir);
       const night = nightFactor(v.focus, sunDir);
       u.lbNight.value = night;

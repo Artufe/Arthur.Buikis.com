@@ -4,6 +4,9 @@
 
 import type { BootEntry, CameraMode, LBContext, RideView, TrackKind, ViewSpec } from './contracts';
 import type { BirdHold } from '../camera/bird';
+import type { Director } from '../camera/director';
+import { R } from '../world/config';
+import { dirFromLatLon } from '../world/sphere';
 import { DIVE_SECONDS } from '../camera/dive';
 import { DIVE_T0, diveAt, SHOTS } from './shots';
 
@@ -101,6 +104,37 @@ export interface LittlebigHook {
    * system is up.
    */
   birdPose(p: BirdPoseSpec | null): boolean;
+  // ── The trailer camera (scripts/play-media/littlebig-cine.mjs) ──
+  /**
+   * Film with a free camera: replaces the RENDERED pose in every mode after the camera system runs,
+   * each frame (explore, a ride or the bird carry on underneath under their own physics, and get
+   * their own pose back before the next camera update), with ctx.view, near/far and the lens to match
+   * (LOD, culling, the people's lens watch, town life). A function is called at that point every
+   * frame, so where() reads that frame's poses. null hands back. Runs one frame (no sim time).
+   */
+  cine(spec: CineSpec | (() => CineSpec | null) | null): void;
+  /** World pose of a Trackable ('car:3', 'bus:200', 'person:5012', 'ferry:0', 'plane:1', 'station:0') or 'bird' (heading, body up); null if unknown or no bird out. */
+  where(id: string): { pos: V3; forward: V3; up: V3; shown: boolean } | null;
+  /** World point (m) at lat/lon (deg), alt m over the terrain or the sea there. */
+  geo(lat: number, lon: number, alt?: number): V3;
+  /** Run the sun (light, sky, lamps) at `rate` × sim time about sim time `pivot`, the rest at 1× (lamps coming on in seconds); rate 1 resets. */
+  sunClock(pivot: number, rate: number): void;
+}
+
+type V3 = [number, number, number];
+
+/** A trailer camera pose (world metres). */
+export interface CineSpec {
+  eye: V3;
+  look: V3;
+  /** The frame's up (default the local radial up at the eye; give one for a straight-down look). */
+  up?: V3;
+  /** Degrees about the view axis, + banks right. */
+  roll?: number;
+  /** Vertical FOV (deg, default 40). */
+  fov?: number;
+  /** Cap on the near plane (m; default 3 % of the height over the terrain, 0.05–30): film something close from high up. */
+  near?: number;
 }
 
 /** A bird review pose (core/debug.ts birdPose; scripts/littlebig-shot.mjs --bird-pose). */
@@ -137,13 +171,7 @@ export interface BirdPoseSpec {
 
 /** The camera system's dev-only extras (camera/index.ts), not part of the contract. */
 interface CameraDev {
-  director?: {
-    ride(ctx: LBContext, id: string, instant?: boolean): boolean;
-    fly(ctx: LBContext, instant?: boolean): void;
-    exitMode(ctx: LBContext, instant?: boolean): void;
-    settle(ctx: LBContext): void;
-    override: { steer: number; climb: number; flap: boolean; dive: boolean } | null;
-  };
+  director?: Director;
 }
 
 declare global {
@@ -169,6 +197,7 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
   const birdPose = birdPoseHook(ctx, deps);
   const hook: LittlebigHook = {
     birdPose,
+    ...cineHook(ctx, deps),
     get ready() {
       return deps.isReady();
     },
@@ -367,6 +396,8 @@ export function installDebugHook(ctx: LBContext, deps: DebugDeps): () => void {
   testWindow.render_game_to_text = textState;
   testWindow.advanceTime = advance;
   return () => {
+    delete ctx.debug.cine;
+    delete ctx.debug.sunT;
     if (window.__littlebig === hook) delete window.__littlebig;
     if (testWindow.render_game_to_text === textState) testWindow.render_game_to_text = previousText;
     if (testWindow.advanceTime === advance) testWindow.advanceTime = previousAdvance;
@@ -465,5 +496,85 @@ function birdPoseHook(ctx: LBContext, deps: DebugDeps): LittlebigHook['birdPose'
     bird.userData.hold = hold;
     deps.frameNow(0);
     return true;
+  };
+}
+
+/**
+ * The trailer camera (cine, where, geo). Its pose goes on at the end of the camera system's update
+ * (ctx.debug.cine(true), through the director's present: camera, lens, near/far and ctx.view as a mode
+ * would set them) and the game's own is put back at the start of the next (false), unless something
+ * (setView) has placed the camera since.
+ */
+function cineHook(ctx: LBContext, deps: DebugDeps): Pick<LittlebigHook, 'cine' | 'where' | 'geo' | 'sunClock'> {
+  const cam = ctx.camera;
+  const dir = () => (ctx.services.camera as CameraDev).director;
+  let spec: Parameters<LittlebigHook['cine']>[0] = null;
+  const fp = { pos: cam.position.clone(), quat: cam.quaternion.clone(), look: cam.position.clone(), fov: 40, shift: 0 };
+  const game = { pos: cam.position.clone(), quat: cam.quaternion.clone(), near: 0, far: 0, fov: 0, shift: 0, held: false };
+  const up = cam.position.clone();
+  const z = cam.position.clone().set(0, 0, 1);
+  const roll = cam.quaternion.clone();
+  const m = cam.matrix.clone();
+  const tp = { pos: cam.position.clone(), fwd: cam.position.clone(), up: cam.position.clone(), speed: 0 };
+  ctx.debug.cine = (after) => {
+    const d = dir();
+    if (!after) {
+      if (game.held && cam.position.equals(fp.pos) && cam.quaternion.equals(fp.quat)) {
+        cam.position.copy(game.pos);
+        cam.quaternion.copy(game.quat);
+        cam.near = game.near;
+        cam.far = game.far;
+        cam.fov = game.fov;
+        if (cam.view) {
+          cam.view.enabled = game.shift > 0;
+          cam.view.offsetY = game.shift;
+        }
+        cam.updateProjectionMatrix();
+        cam.updateMatrixWorld();
+      }
+      game.held = false;
+      return;
+    }
+    const s = typeof spec === 'function' ? spec() : spec;
+    if (!s || !d) return;
+    game.pos.copy(cam.position);
+    game.quat.copy(cam.quaternion);
+    game.near = cam.near;
+    game.far = cam.far;
+    game.fov = cam.fov;
+    game.shift = cam.view?.enabled ? cam.view.offsetY : 0;
+    game.held = true;
+    fp.pos.fromArray(s.eye);
+    fp.look.fromArray(s.look);
+    if (s.up) up.fromArray(s.up);
+    else up.copy(fp.pos).normalize();
+    fp.quat.setFromRotationMatrix(m.lookAt(fp.pos, fp.look, up));
+    if (s.roll) fp.quat.multiply(roll.setFromAxisAngle(z, (-s.roll * Math.PI) / 180));
+    fp.fov = s.fov ?? 40;
+    d.present(ctx, fp, s.near ?? Infinity, false);
+  };
+  return {
+    cine(s) {
+      spec = s;
+      deps.frameNow(0);
+    },
+    sunClock(pivot, rate) {
+      if (rate === 1) delete ctx.debug.sunT;
+      else ctx.debug.sunT = (t) => pivot + (t - pivot) * rate;
+      deps.frameNow(0);
+    },
+    where(id) {
+      const d = dir();
+      if (id === 'bird') return d?.birdOn ? { pos: d.bird.pos.toArray(), forward: d.bird.fwd.toArray(), up: d.bird.up.toArray(), shown: true } : null;
+      const t = ctx.services.track.get(id);
+      if (!t) return null;
+      const shown = t.pose(ctx, tp);
+      return { pos: tp.pos.toArray(), forward: tp.fwd.toArray(), up: tp.up.toArray(), shown };
+    },
+    geo(lat, lon, alt = 0) {
+      const d = dirFromLatLon(lat, lon);
+      const r = R + ctx.world.planet.surfaceAt(d) + alt;
+      return [d.x * r, d.y * r, d.z * r];
+    },
   };
 }

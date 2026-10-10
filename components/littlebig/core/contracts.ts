@@ -602,6 +602,10 @@ export interface LabelService {
 export interface LBDebug {
   /** When true, the camera system ignores user input (the debug hook owns the view). */
   cameraLocked: boolean;
+  /** The trailer camera (core/debug.ts cine): the camera system calls it first (false) and last (true) each update. */
+  cine?: (after: boolean) => void;
+  /** The sun's clock (core/debug.ts sunClock): sky/ reads the sun at sunT(render time) instead. */
+  sunT?: (t: number) => number;
 }
 
 export interface LBContext {

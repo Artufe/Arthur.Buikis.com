@@ -3056,6 +3056,8 @@ export function createDirector(host: DirectorHost) {
     cycle,
     frameStart,
     frameEnd,
+    /** The trailer camera (core/debug.ts cine) presents its pose the way a mode does. */
+    present,
     /** setView: snap back to explore, no transition, nothing ridden. */
     reset(ctx: LBContext) {
       if (mode === 'bird' || birdOn) {
