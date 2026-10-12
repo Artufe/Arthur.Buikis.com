@@ -14,6 +14,7 @@ test('a card clip loads once on screen and the toggle pauses it', async ({ page 
   await page.goto('/play/');
   const card = page.locator('.play-card').nth(1); // GOLDENLINE: a single variant
   const video = card.locator('video');
+  await card.scrollIntoViewIfNeeded(); // second row, below the fold
   await expect(video).toHaveAttribute('src', '/play/goldenline.mp4');
   await card.getByRole('button', { name: 'Pause video' }).click();
   await expect(card.getByRole('button', { name: 'Play video' })).toBeVisible();

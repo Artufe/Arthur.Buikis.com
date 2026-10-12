@@ -80,61 +80,6 @@ export type PlayMethod = {
 
 export const games: PlayGame[] = [
   {
-    slug: 'snake',
-    title: 'Snake',
-    href: '/snake/',
-    cmd: './snake --about',
-    description:
-      'Free-steering 3D snake on desert sand. Your trail carves a groove that fades in ten seconds. Keys, mouse or touch.',
-    chip: { label: 'touch ok', tone: 'ok' },
-    touchCta: 'play',
-    media: {
-      poster: '/play/snake-dark.jpg',
-      video: '/play/snake-dark.mp4',
-      alt: 'A green banded snake curls across moonlit sand ripples, its groove fading behind it, beside a glowing golden gem.',
-    },
-    lightMedia: {
-      poster: '/play/snake-light.jpg',
-      video: '/play/snake-light.mp4',
-      alt: 'A green banded snake curls across sunlit desert sand, its groove fading behind it, beside a glowing golden gem.',
-    },
-    caption: ['snake', 'three.js · 3d', '40 min · one-shot'],
-    receipt: [
-      { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
-      { label: 'Mode', value: 'one-shot · 1 agent' },
-      { label: 'Time', value: '40 min' },
-      { label: 'Code', value: '~4.5k lines ts' },
-      { label: 'Tests', value: '11 spec files', desktopOnly: true },
-      { label: 'Source', value: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
-    ],
-    pr: { number: 43, date: 'sep 2026' },
-  },
-  {
-    slug: 'goldenline',
-    title: 'GOLDENLINE',
-    href: '/surf/',
-    cmd: './goldenline --about',
-    description:
-      'A first-person reef break at golden hour. Walk the sand, run off the pier, paddle out and ride an overhead wave.',
-    chip: { label: 'desktop · webgpu · keyboard', short: 'desktop · webgpu', tone: 'warn' },
-    touchCta: 'open',
-    media: {
-      poster: '/play/goldenline.jpg',
-      video: '/play/goldenline.mp4',
-      alt: 'A turquoise wave pitches into a barrel on a reef, spray streaming off the lip, with a wooden pier on the golden-hour horizon.',
-    },
-    caption: ['goldenline', 'webgpu · tsl', '2 evenings · 11 agents'],
-    receipt: [
-      { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
-      { label: 'Mode', value: '1 orchestrator + 10 agents' },
-      { label: 'Time', value: '2 evenings' },
-      { label: 'Code', value: '~31k lines ts' },
-      { label: 'Engine', value: 'three.js webgpu · tsl', desktopOnly: true },
-      { label: 'Source', value: 'PR #44 ↗', href: `${PLAY_REPO}/pull/44` },
-    ],
-    pr: { number: 44, date: 'sep 2026' },
-  },
-  {
     slug: 'littlebig',
     title: 'LITTLEBIG',
     href: '/planet/',
@@ -171,6 +116,61 @@ export const games: PlayGame[] = [
       { label: 'Source', value: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
     ],
     pr: { number: 49, date: 'oct 2026' },
+  },
+  {
+    slug: 'goldenline',
+    title: 'GOLDENLINE',
+    href: '/surf/',
+    cmd: './goldenline --about',
+    description:
+      'A first-person reef break at golden hour. Walk the sand, run off the pier, paddle out and ride an overhead wave.',
+    chip: { label: 'desktop · webgpu · keyboard', short: 'desktop · webgpu', tone: 'warn' },
+    touchCta: 'open',
+    media: {
+      poster: '/play/goldenline.jpg',
+      video: '/play/goldenline.mp4',
+      alt: 'A turquoise wave pitches into a barrel on a reef, spray streaming off the lip, with a wooden pier on the golden-hour horizon.',
+    },
+    caption: ['goldenline', 'webgpu · tsl', '2 evenings · 11 agents'],
+    receipt: [
+      { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
+      { label: 'Mode', value: '1 orchestrator + 10 agents' },
+      { label: 'Time', value: '2 evenings' },
+      { label: 'Code', value: '~31k lines ts' },
+      { label: 'Engine', value: 'three.js webgpu · tsl', desktopOnly: true },
+      { label: 'Source', value: 'PR #44 ↗', href: `${PLAY_REPO}/pull/44` },
+    ],
+    pr: { number: 44, date: 'sep 2026' },
+  },
+  {
+    slug: 'snake',
+    title: 'Snake',
+    href: '/snake/',
+    cmd: './snake --about',
+    description:
+      'Free-steering 3D snake on desert sand. Your trail carves a groove that fades in ten seconds. Keys, mouse or touch.',
+    chip: { label: 'touch ok', tone: 'ok' },
+    touchCta: 'play',
+    media: {
+      poster: '/play/snake-dark.jpg',
+      video: '/play/snake-dark.mp4',
+      alt: 'A green banded snake curls across moonlit sand ripples, its groove fading behind it, beside a glowing golden gem.',
+    },
+    lightMedia: {
+      poster: '/play/snake-light.jpg',
+      video: '/play/snake-light.mp4',
+      alt: 'A green banded snake curls across sunlit desert sand, its groove fading behind it, beside a glowing golden gem.',
+    },
+    caption: ['snake', 'three.js · 3d', '40 min · one-shot'],
+    receipt: [
+      { label: 'Model', value: 'Claude Opus 5.5', desktopOnly: true },
+      { label: 'Mode', value: 'one-shot · 1 agent' },
+      { label: 'Time', value: '40 min' },
+      { label: 'Code', value: '~4.5k lines ts' },
+      { label: 'Tests', value: '11 spec files', desktopOnly: true },
+      { label: 'Source', value: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
+    ],
+    pr: { number: 43, date: 'sep 2026' },
   },
 ];
 
@@ -312,10 +312,12 @@ export const method: PlayMethod = {
   ],
   sources: [
     {
-      game: 'snake',
+      game: 'littlebig',
       links: [
-        { label: 'spec ↗', href: `${PLAY_REPO}/blob/master/docs/superpowers/specs/2026-09-25-snake-3d-design.md` },
-        { label: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
+        { label: 'BRIEF.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/BRIEF.md` },
+        { label: 'TASKS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/TASKS.md` },
+        { label: 'DECISIONS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/DECISIONS.md` },
+        { label: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
       ],
     },
     {
@@ -328,12 +330,10 @@ export const method: PlayMethod = {
       ],
     },
     {
-      game: 'littlebig',
+      game: 'snake',
       links: [
-        { label: 'BRIEF.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/BRIEF.md` },
-        { label: 'TASKS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/TASKS.md` },
-        { label: 'DECISIONS.md ↗', href: `${PLAY_REPO}/blob/master/docs/littlebig/DECISIONS.md` },
-        { label: 'PR #49 ↗', href: `${PLAY_REPO}/pull/49` },
+        { label: 'spec ↗', href: `${PLAY_REPO}/blob/master/docs/superpowers/specs/2026-09-25-snake-3d-design.md` },
+        { label: 'PR #43 ↗', href: `${PLAY_REPO}/pull/43` },
       ],
     },
   ],

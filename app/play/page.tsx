@@ -6,7 +6,7 @@ import { PlayMethod } from '@/components/play/play-method';
 
 const title = 'Play';
 const description =
-  'Three browser games built with coding agents: a one-shot 3D snake, an orchestrated WebGPU surf demo and a tiny planet built by a harness of agents, and how each was built.';
+  'Three browser games built with coding agents: a tiny planet built by a harness of agents, an orchestrated WebGPU surf demo and a one-shot 3D snake, and how each was built.';
 const path = '/play/';
 
 export const metadata: Metadata = {
